@@ -1,0 +1,7 @@
+langgraph>=0.2
+langchain>=0.3
+langchain-ollama>=0.2
+pydantic>=2.0
+
+# Geliştirme
+pytest>=7.0
