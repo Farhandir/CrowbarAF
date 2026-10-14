@@ -14,6 +14,7 @@ import re
 import subprocess
 from typing import Any
 
+from ghidra_runner import run_ghidra
 from state import AgentState, RouteFlag
 
 logger = logging.getLogger(__name__)
@@ -73,14 +74,14 @@ def unpack_python_node(state: AgentState) -> dict[str, Any]:
     """pyinstxtractor + pycdc."""
     logger.info("[unpack_python_node]")
     # TODO: pyinstxtractor ile .pyc çıkar, pycdc ile decompile et
-    return {"source_code": dict(state.source_code)}
+    return {"source_code": list(state.source_code)}
 
 
 def unpack_dotnet_node(state: AgentState) -> dict[str, Any]:
     """de4dot (deobfuscation) + ILSpy (decompile)."""
     logger.info("[unpack_dotnet_node]")
     # TODO: de4dot ile temizle, ILSpy (ilspycmd) ile C# kodu üret
-    return {"source_code": dict(state.source_code)}
+    return {"source_code": list(state.source_code)}
 
 
 def unpack_native_node(state: AgentState) -> dict[str, Any]:
@@ -98,12 +99,14 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
     logger.info("[static_feature_node]")
 
     floss_iocs = run_floss(state.file_path)  # hata durumunda []
-    capabilities = run_capa(state.file_path)  # hata durumunda {"error": ...}
+    # Hata/timeout durumunda: ({"error": ...}, [])
+    capabilities, ghidra_hints = run_capa(state.file_path)
 
     return {
         # Mevcut değerlere ekle, tekilleştir
         "extracted_strings": _unique([*state.extracted_strings, *floss_iocs]),
         "capabilities": capabilities,
+        "ghidra_hints": ghidra_hints,
     }
 
 
@@ -277,12 +280,115 @@ def summarize_capa(report: dict[str, Any]) -> dict[str, list[str]]:
     }
 
 
-def run_capa(file_path: str) -> dict[str, Any]:
-    """``capa -j <file_path>`` çalıştırır ve çıktıyı özetlenmiş dict olarak döndürür.
+def _parse_capa_address(raw: Any) -> int | None:
+    """capa adres temsillerini (farklı sürümler) tek bir int sanal adrese çevirir.
 
-    Başarıda: ``{"matched_rules": [...], "mitre_attack": [...], "malware_behavior": [...]}``
+    Desteklenen biçimler:
+      * ``{"type": "absolute", "value": 4198400}`` (capa >= 5/7)
+      * ``["absolute", 4198400]`` (ara sürümler)
+      * ``4198400`` / ``"4198400"`` / ``"0x401000"`` (eski sürümler)
+
+    Spesifik bir bellek adresi olmayanlar (``file``, ``no address``, ``relative``,
+    ``token`` vb. tipler) için ``None`` döner.
+    """
+    value: Any = raw
+    if isinstance(raw, dict):
+        if raw.get("type") != "absolute":
+            return None
+        value = raw.get("value")
+    elif isinstance(raw, (list, tuple)):
+        if len(raw) != 2 or raw[0] != "absolute":
+            return None
+        value = raw[1]
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        try:
+            return int(text, 16) if text.startswith("0x") else int(text, 10)
+        except ValueError:
+            return None
+    return None
+
+
+def _rule_match_addresses(rule: dict[str, Any]) -> list[int]:
+    """Bir capa kuralının ``matches`` / ``locations`` yapısındaki adresleri toplar."""
+    addresses: list[int] = []
+
+    def add(raw: Any) -> None:
+        addr = _parse_capa_address(raw)
+        if addr is not None:
+            addresses.append(addr)
+
+    matches = rule.get("matches")
+    if isinstance(matches, dict):
+        # Eski sürümler: {"<adres>": {...eşleşme ağacı...}}
+        for key in matches:
+            add(key)
+    elif isinstance(matches, list):
+        # Yeni sürümler: [[<adres>, {...eşleşme ağacı...}], ...]
+        for item in matches:
+            if isinstance(item, (list, tuple)) and item:
+                add(item[0])
+
+    locations = rule.get("locations")
+    if isinstance(locations, list):
+        for loc in locations:
+            add(loc)
+
+    return addresses
+
+
+def _is_file_scope(meta: dict[str, Any]) -> bool:
+    """Kural dosya seviyesinde (global) mi eşleşiyor?"""
+    scope = meta.get("scope")
+    if scope is None:
+        scopes = meta.get("scopes")
+        scope = scopes.get("static") if isinstance(scopes, dict) else None
+    return isinstance(scope, str) and scope.strip().lower() == "file"
+
+
+def extract_ghidra_hints(report: dict[str, Any]) -> list[dict[str, str]]:
+    """Ham capa JSON'undan Ghidra'ya iletilecek hedef adresleri çıkarır.
+
+    Dönüş: ``[{"offset": "0x401000", "rule": "encrypt data using AES"}, ...]``
+    ``(offset, rule)`` çiftleri tekilleştirilir. Dosya seviyesinde (global)
+    eşleşen veya spesifik bir bellek adresi olmayan kurallar atlanır.
+    Beklenmeyen yapılarda hata fırlatmaz, ilgili kısmı atlar.
+    """
+    rules = report.get("rules")
+    if not isinstance(rules, dict):
+        return []
+
+    hints: dict[tuple[str, str], dict[str, str]] = {}
+    for rule_key, rule in rules.items():
+        if not isinstance(rule, dict):
+            continue
+        meta = rule.get("meta")
+        if isinstance(meta, dict) and _is_file_scope(meta):
+            continue
+
+        rule_name = str(rule_key)
+        for addr in _rule_match_addresses(rule):
+            offset = hex(addr)
+            hints.setdefault(
+                (offset, rule_name), {"offset": offset, "rule": rule_name}
+            )
+
+    return sorted(hints.values(), key=lambda h: (int(h["offset"], 16), h["rule"]))
+
+
+def run_capa(file_path: str) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """``capa -j <file_path>`` çalıştırır; ``(özet, ghidra_hints)`` ikilisi döndürür.
+
+    Başarıda:
+      * özet: ``{"matched_rules": [...], "mitre_attack": [...], "malware_behavior": [...]}``
+      * ghidra_hints: ``[{"offset": "0x401000", "rule": "..."}, ...]``
     Hata durumunda (zaman aşımı, capa/dosya bulunamadı, sıfır olmayan çıkış kodu,
-    geçersiz JSON) uygulama çökmez; ``{"error": "<mesaj>"}`` döndürülür.
+    geçersiz JSON) uygulama çökmez; ``({"error": "<mesaj>"}, [])`` döndürülür.
     """
     try:
         proc = subprocess.run(
@@ -296,12 +402,12 @@ def run_capa(file_path: str) -> dict[str, Any]:
         )
         if proc.returncode != 0:
             stderr = proc.stderr.strip() or "stderr boş"
-            return {"error": f"capa {proc.returncode} koduyla çıktı: {stderr}"}
+            return {"error": f"capa {proc.returncode} koduyla çıktı: {stderr}"}, []
 
         result = json.loads(proc.stdout)
         if not isinstance(result, dict):
-            return {"error": "capa beklenmeyen JSON yapısı döndürdü (dict değil)"}
-        return summarize_capa(result)
+            return {"error": "capa beklenmeyen JSON yapısı döndürdü (dict değil)"}, []
+        return summarize_capa(result), extract_ghidra_hints(result)
 
     except subprocess.TimeoutExpired:
         msg = f"capa {CAPA_TIMEOUT_SECONDS} saniye içinde tamamlanamadı (timeout)"
@@ -313,14 +419,14 @@ def run_capa(file_path: str) -> dict[str, Any]:
         msg = f"capa çalıştırılırken beklenmeyen hata: {type(exc).__name__}: {exc}"
 
     logger.error("[static_feature_node] %s", msg)
-    return {"error": msg}
+    return {"error": msg}, []
 
 
 def deep_inspection_node(state: AgentState) -> dict[str, Any]:
     """Ghidra (headless) ile derin inceleme / decompile."""
     logger.info("[deep_inspection_node]")
-    # TODO: analyzeHeadless ile capa'nın işaret ettiği fonksiyon offset'lerini decompile et
-    return {"source_code": dict(state.source_code)}
+    result = run_ghidra(state.file_path, state.ghidra_hints)  # hata durumunda []
+    return {"source_code": result}
 
 
 # --------------------------------------------------------------------------- #
