@@ -435,19 +435,21 @@ def deep_inspection_node(state: AgentState) -> dict[str, Any]:
 def ai_extractor_agent(state: AgentState) -> dict[str, Any]:
     """FLOSS stringlerini temizler, IoC (IP, URL, domain, ...) çıkarır."""
     logger.info("[ai_extractor_agent]")
-    # TODO: llm = get_llm(); stringleri süz ve yapılandırılmış IoC çıktısı al
-    return {"iocs": dict(state.iocs)}
+    # IoC cikarimi deterministik yapilir (filter_iocs); LLM'e birakilmaz.
+    iocs = dict(state.iocs)
+    iocs.setdefault("ioc", _unique([s for s in state.extracted_strings if filter_iocs([s])]))
+    return {"iocs": iocs}
 
 
 def ai_reverser_agent(state: AgentState) -> dict[str, Any]:
-    """Decompile edilmiş kodu okuyup niyet tespiti yapar."""
+    """Decompile edilmiş kodu okuyup niyet tespiti yapar (LLM katmanı)."""
     logger.info("[ai_reverser_agent]")
-    # TODO: llm = get_llm(); source_code + capabilities üzerinden niyet analizi
-    return {"intent_analysis": state.intent_analysis}
+    from llm_layer.nodes import run_reverser
+    return run_reverser(state)
 
 
 def ai_supervisor_agent(state: AgentState) -> dict[str, Any]:
     """Tüm verileri birleştirip nihai JSON/Markdown raporunu üretir."""
     logger.info("[ai_supervisor_agent]")
-    # TODO: llm = get_llm(); tüm state'i sentezle
-    return {"analysis_report": state.analysis_report}
+    from llm_layer.nodes import run_supervisor
+    return run_supervisor(state)
