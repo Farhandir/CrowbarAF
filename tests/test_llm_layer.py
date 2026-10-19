@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from llm_layer.client import LLMResult
-from llm_layer.context import build_function_context, select_functions
-from llm_layer.pipeline import analyze
+from llm_layer.context import build_function_context, select_functions, select_with_reasons
+from llm_layer.pipeline import AnalysisResult, analyze
 from llm_layer.tokens import estimate_tokens, truncate_to_tokens
+from llm_layer.trace import Tracer
 from llm_layer.traverse import scc_order
-from llm_layer.types import Claim, Finding, FunctionInfo
+from llm_layer.types import Claim, Finding, FunctionInfo, FunctionSummary
 from llm_layer.verify import verify_claim
 
 
@@ -144,4 +145,41 @@ def test_run_supervisor_flags_missing_evidence():
     report = run_supervisor(AgentState(file_path="x"))["analysis_report"]
     assert "kanit bulunamadi" in report
     assert "belirsiz" in report
+
+
+# --- iz (trace) ---
+def test_select_with_reasons_reports_library_and_budget():
+    lib = _fn("0x1", "a" * 10, is_library=True)
+    big = _fn("0x2", "b" * 4000)          # ~1000 token, butceye sigmaz
+    small = _fn("0x3", "c" * 10)
+    selected, skipped = select_with_reasons([lib, big, small], budget_tokens=50)
+    reasons = {f.offset: r for f, r in skipped}
+    assert reasons.get("0x1") == "library"
+    assert reasons.get("0x2") == "budget"
+    assert "0x3" in [f.offset for f in selected]
+
+
+def test_tracer_records_totals_and_saves(tmp_path):
+    tr = Tracer(model="m", provider="p", budget_tokens=100)
+    tr.skipped(_fn("0x2", "", is_library=True), "library")
+    summary = FunctionSummary(
+        offset="0x1", summary="x", suspicious=True, confidence="orta",
+        claims=[Claim(text="t", evidence="e", status="unverified")],
+    )
+    tr.analyzed(_fn("0x1", "code"), {"estimated_tokens": 10, "code_truncated": False, "json_ok": True},
+                LLMResult(content="", prompt_tokens=5, completion_tokens=2),
+                summary, 0.1, [], 0)
+    tr.finalize(AnalysisResult(calls=1, total_prompt_tokens=5, total_completion_tokens=2))
+
+    d = tr.to_dict()
+    assert d["totals"]["functions_total"] == 2
+    assert d["totals"]["functions_analyzed"] == 1
+    assert d["totals"]["functions_skipped"] == 1
+    assert d["totals"]["skipped_library"] == 1
+    assert d["totals"]["unverified_claims"] == 1
+
+    p = tmp_path / "trace.json"
+    tr.save(str(p))
+    assert p.exists()
+
 

@@ -18,6 +18,22 @@ her iddiayı koda/bulgulara bağlar.
 | `nodes.py` | `nodes.py`'deki `ai_*` düğümlerinin karşılıkları |
 | `factory.py` | ortam değişkenlerinden istemci |
 
+## İz (trace) — ne incelendi?
+Her koşu bir **JSON iz** üretir: hangi fonksiyon seçildi/atlandı (ve neden),
+kaç context token'ı, hangi kanıtlar, hangi iddialar doğrulandı.
+
+```bash
+# iz dizini (varsayılan ./runs)
+CROWBAR_LLM_TRACE_DIR=runs
+
+# üretilen izi okunur rapora çevir
+python experiments/trace_report.py runs/llm_trace_XXXX.json
+```
+
+İzde: `run` (model/butce), `totals` (kapsama, token, doğrulanan/doğrulanamayan),
+`functions[]` (durum, skip_reason, context_tokens, code_truncated, claims) ve
+`events[]` (zaman çizgisi).
+
 ## Kanıt sınıfları
 - `verified_claim` — iddia deterministik bir bulguyla örtüşüyor
 - `verified_observation` — kanıt koddan birebir alıntı

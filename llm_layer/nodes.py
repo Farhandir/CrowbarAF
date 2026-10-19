@@ -47,6 +47,9 @@ def _to_findings(state) -> list[Finding]:
 
 def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     """ai_reverser_agent: bottom-up fonksiyon ozetleme."""
+    import os
+    import time
+
     functions = _to_function_infos(state)
     findings = _to_findings(state)
     if not functions:
@@ -61,6 +64,16 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         s = result.summaries.get(d.offset)
         updated.append(d.model_copy(update={"llm_summary": s.summary if s else ""}))
 
+    # iz (trace) kaydet
+    trace_path = None
+    if result.trace is not None:
+        try:
+            outdir = os.getenv("CROWBAR_LLM_TRACE_DIR", "runs")
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            trace_path = result.trace.save(os.path.join(outdir, f"llm_trace_{ts}.json"))
+        except Exception:  # noqa: BLE001 - iz kaydi akisi cokertmesin
+            trace_path = None
+
     # niyet analizi: supheli fonksiyonlar + dogrulanmis iddialar
     lines = []
     for off, s in result.summaries.items():
@@ -74,7 +87,9 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         f"{result.calls} fonksiyon ozetlendi; "
         f"supheli={sum(1 for s in result.summaries.values() if s.suspicious)}; "
         f"dogrulanmis iddia={verified}, dogrulanamayan={unverified}; "
-        f"token={result.token_total()}.\n"
+        f"token={result.token_total()}."
+        + (f" Iz: {trace_path}" if trace_path else "")
+        + "\n"
         + ("\n".join(lines) if lines else "Supheli fonksiyon bulunamadi.")
     )
     return {"source_code": updated, "intent_analysis": intent}

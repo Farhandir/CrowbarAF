@@ -10,17 +10,32 @@ from .tokens import estimate_tokens, truncate_to_tokens
 from .types import Finding, FunctionInfo, FunctionSummary
 
 
-def select_functions(functions: list[FunctionInfo], budget_tokens: int) -> list[FunctionInfo]:
-    """Butceye gore fonksiyon secer: yuksek oncelik once, esitlikte kucuk once."""
+def select_with_reasons(
+    functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True
+) -> tuple[list[FunctionInfo], list[tuple[FunctionInfo, str]]]:
+    """Butceye gore secer; atlananlari **gerekcesiyle** dondurur."""
     remaining = budget_tokens
     selected: list[FunctionInfo] = []
+    skipped: list[tuple[FunctionInfo, str]] = []
     ranked = sorted(functions, key=lambda f: (-f.priority, estimate_tokens(f.c_code)))
     for fn in ranked:
+        if skip_library and fn.is_library:
+            skipped.append((fn, "library"))
+            continue
         cost = estimate_tokens(fn.c_code) + 32  # baslik/overhead
-        if cost <= remaining:
-            selected.append(fn)
-            remaining -= cost
-    return selected
+        if cost > remaining:
+            skipped.append((fn, "budget"))
+            continue
+        selected.append(fn)
+        remaining -= cost
+    return selected, skipped
+
+
+def select_functions(
+    functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True
+) -> list[FunctionInfo]:
+    """Butceye gore fonksiyon secer (yuksek oncelik once, esitlikte kucuk once)."""
+    return select_with_reasons(functions, budget_tokens, skip_library)[0]
 
 
 def findings_for(fn: FunctionInfo, findings: list[Finding]) -> list[Finding]:
