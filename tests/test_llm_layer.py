@@ -183,3 +183,60 @@ def test_tracer_records_totals_and_saves(tmp_path):
     assert p.exists()
 
 
+
+
+# --- findings: pipeline -> LLM katmanı ---
+def test_to_findings_reads_state_findings():
+    from llm_layer.nodes import _to_findings
+    from state import AgentState, Finding as StateFinding
+
+    st = AgentState(
+        file_path="x",
+        findings=[
+            StateFinding(source="capa", kind="rule", value="inject code", address="0x401000"),
+            StateFinding(source="yara", kind="rule", value="Emotet", confidence=0.8),
+        ],
+        # eski alanlar artık kanıt kaynağı değil
+        capabilities={"matched_rules": ["ignored"]},
+        iocs={"ioc": ["1.2.3.4"]},
+    )
+    out = _to_findings(st)
+    assert [(f.source, f.value, f.address, f.confidence) for f in out] == [
+        ("capa", "inject code", "0x401000", 1.0),
+        ("yara", "Emotet", None, 0.8),
+    ]
+
+
+def test_run_supervisor_uses_state_findings():
+    from llm_layer.nodes import run_supervisor
+    from state import AgentState, Finding as StateFinding
+
+    st = AgentState(
+        file_path="x",
+        findings=[StateFinding(source="yara", kind="rule", value="Emotet")],
+        capabilities={"matched_rules": ["ignored"]},
+    )
+    report = run_supervisor(st)["analysis_report"]
+    assert "yara/rule: Emotet" in report
+    assert "ignored" not in report
+    assert "kanit bulunamadi" not in report
+
+
+def test_to_function_infos_passes_size():
+    from llm_layer.nodes import _to_function_infos
+    from state import AgentState, DecompiledFunction
+
+    st = AgentState(file_path="x", source_code=[DecompiledFunction(offset="0x1", size=128, c_code="int f(){}")])
+    assert _to_function_infos(st)[0].size == 128
+
+
+def test_to_function_infos_skips_functions_without_code():
+    from llm_layer.nodes import _to_function_infos
+    from state import AgentState, DecompiledFunction
+
+    st = AgentState(file_path="x", source_code=[
+        DecompiledFunction(offset="0x1", c_code="int f(){}"),
+        DecompiledFunction(offset="0x2", c_code=""),
+        DecompiledFunction(offset="0x3", c_code="   "),
+    ])
+    assert [f.offset for f in _to_function_infos(st)] == ["0x1"]

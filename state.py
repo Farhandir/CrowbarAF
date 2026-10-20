@@ -14,7 +14,27 @@ class DecompiledFunction(BaseModel):
 
     offset: str = Field(
         ...,
-        description='Fonksiyonun bellek/dosya adresi, örn: "0x1000".',
+        description='Fonksiyonun Entry Point adresi (hint adresi değil), örn: "0x1000".',
+    )
+    size: int = Field(
+        default=0,
+        description="Fonksiyonun bayt cinsinden boyutu.",
+    )
+    is_library: bool = Field(
+        default=False,
+        description="Ghidra thunk/kütüphane fonksiyonu bayrağı.",
+    )
+    callees: list[str] = Field(
+        default_factory=list,
+        description='Bu fonksiyonun çağırdığı fonksiyonların Entry Point adresleri, örn: ["0x1000"].',
+    )
+    xrefs: list[str] = Field(
+        default_factory=list,
+        description="Bu fonksiyona referans veren adresler (çağrı yerleri).",
+    )
+    decompile_warnings: list[str] = Field(
+        default_factory=list,
+        description="Decompile güvenini düşüren uyarılar.",
     )
     name: str = Field(
         default="FUN_1000",
@@ -38,6 +58,46 @@ class DecompiledFunction(BaseModel):
     )
 
 
+class SampleInfo(BaseModel):
+    """Analiz edilen örneğin kimliği ve ön tarama (entry_node) özeti."""
+
+    sha256: str = Field(default="", description="Dosyanın SHA-256 özeti (hex).")
+    file_type: str = Field(default="unknown", description="PE | ELF | Mach-O | ...")
+    route: str = Field(
+        default="native",
+        description="python | dotnet | native | fast_track (route_flag ile aynı değer).",
+    )
+    packer: str = Field(default="unknown", description='UPX | none | ... ("unknown": tespit yapılamadı).')
+    arch: str = Field(default="unknown", description="x86 | x86-64 | arm64 | ...")
+
+
+class Finding(BaseModel):
+    """Deterministik bir araç bulgusu (LLM katmanının kanıt kaynağı)."""
+
+    source: str = Field(
+        ...,
+        description='Bulguyu üreten kaynak: "yara", "floss", "capa", "pefile_entropy", "import_combo"...',
+    )
+    kind: str = Field(
+        ...,
+        description='Bulgu türü: "rule", "ip", "url", "high_entropy", "behavior"...',
+    )
+    value: str = Field(
+        ...,
+        description="Eşleşen kural adı, IP adresi, API kombosu vb.",
+    )
+    address: str = Field(
+        default="",
+        description='Varsa bellek adresi (örn. "0x401000"); yoksa boş.',
+    )
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="0-1 arası güven; deterministik araçlar için 1.0.",
+    )
+
+
 class AgentState(BaseModel):
     """Tüm analiz hattı boyunca akan durum nesnesi.
 
@@ -48,8 +108,8 @@ class AgentState(BaseModel):
     # Girdi
     file_path: str
 
-    # DIE çıktısı: dil, derleyici, mimari, paketleyici...
-    file_metadata: dict[str, Any] = Field(default_factory=dict)
+    # entry_node çıktısı: sha256, dosya türü, mimari, paketleyici, rota
+    sample: SampleInfo = Field(default_factory=SampleInfo)
 
     # YARA kural eşleşmeleri, ör. {"rule": "...", "tags": [...], "meta": {...}}
     yara_results: list[dict[str, Any]] = Field(default_factory=list)
@@ -59,6 +119,10 @@ class AgentState(BaseModel):
 
     # capa çıktıları: MITRE ATT&CK taktikleri ve fonksiyon offset'leri
     capabilities: dict[str, Any] = Field(default_factory=dict)
+
+    # Tüm deterministik bulgular (yara, capa, floss, entropy, import combo).
+    # LLM katmanı kanıtı doğrudan buradan okur.
+    findings: list[Finding] = Field(default_factory=list)
 
     # Capa -> Ghidra hedef adresleri,
     # ör. [{"offset": "0x1000", "rule": "encrypt data using AES"}]

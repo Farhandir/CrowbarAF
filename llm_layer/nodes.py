@@ -13,11 +13,15 @@ from .types import Finding, FunctionInfo
 def _to_function_infos(state) -> list[FunctionInfo]:
     out = []
     for d in getattr(state, "source_code", []) or []:
+        # Ghidra decompile etmediği (c_code "") çağrı grafiği kayıtları LLM'e gönderilmez
+        if not (getattr(d, "c_code", "") or "").strip():
+            continue
         out.append(FunctionInfo(
             offset=getattr(d, "offset", ""),
             name=getattr(d, "name", ""),
             c_code=getattr(d, "c_code", ""),
             priority=getattr(d, "priority", 0),
+            size=getattr(d, "size", 0),
             is_library=getattr(d, "is_library", False),
             callees=list(getattr(d, "callees", []) or []),
             xrefs=list(getattr(d, "xrefs", []) or []),
@@ -27,22 +31,17 @@ def _to_function_infos(state) -> list[FunctionInfo]:
 
 
 def _to_findings(state) -> list[Finding]:
-    findings: list[Finding] = []
-    caps = getattr(state, "capabilities", {}) or {}
-    for rule in caps.get("matched_rules", []) or []:
-        findings.append(Finding(source="capa", kind="capability", value=str(rule)))
-    for tech in caps.get("mitre_attack", []) or []:
-        findings.append(Finding(source="capa", kind="attack", value=str(tech)))
-    for behavior in caps.get("malware_behavior", []) or []:
-        findings.append(Finding(source="capa", kind="mbc", value=str(behavior)))
-    for ioc_list in (getattr(state, "iocs", {}) or {}).values():
-        for ioc in ioc_list or []:
-            findings.append(Finding(source="floss", kind="ioc", value=str(ioc)))
-    for hint in getattr(state, "ghidra_hints", []) or []:
-        if isinstance(hint, dict) and hint.get("rule"):
-            findings.append(Finding(source="capa", kind="capability",
-                                    value=str(hint["rule"]), address=hint.get("offset")))
-    return findings
+    """state.findings'i LLM katmanı tipine çevirir (birleştirme pipeline'da yapıldı)."""
+    return [
+        Finding(
+            source=f.source,
+            kind=f.kind,
+            value=f.value,
+            address=f.address or None,  # boş adres = genel (tüm fonksiyonlar için) bulgu
+            confidence=f.confidence,
+        )
+        for f in getattr(state, "findings", []) or []
+    ]
 
 
 def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
@@ -97,18 +96,12 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
 
 def run_supervisor(state) -> dict:
     """ai_supervisor_agent: deterministik sentez (kanit/kanitsiz ayrimi ile)."""
-    caps = getattr(state, "capabilities", {}) or {}
-    iocs = getattr(state, "iocs", {}) or {}
     summaries = list(getattr(state, "source_code", []) or [])
 
-    evidence = []
-    for rule in caps.get("matched_rules", []) or []:
-        evidence.append(f"capa: {rule}")
-    for tech in caps.get("mitre_attack", []) or []:
-        evidence.append(f"ATT&CK: {tech}")
-    for k, vals in iocs.items():
-        for v in vals or []:
-            evidence.append(f"IoC ({k}): {v}")
+    evidence = [
+        f"{f.source}/{f.kind}: {f.value}" + (f" @ {f.address}" if f.address else "")
+        for f in getattr(state, "findings", []) or []
+    ]
 
     suspicious = [d for d in summaries if getattr(d, "llm_summary", "")]
     confidence = "yuksek" if evidence else ("orta" if suspicious else "dusuk")

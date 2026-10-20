@@ -9,6 +9,7 @@ from nodes import (
     ai_extractor_agent,
     ai_reverser_agent,
     ai_supervisor_agent,
+    db_writer_node,
     deep_inspection_node,
     entry_node,
     static_feature_node,
@@ -45,6 +46,7 @@ def build_graph() -> CompiledStateGraph:
     graph.add_node("ai_extractor_agent", ai_extractor_agent)
     graph.add_node("ai_reverser_agent", ai_reverser_agent)
     graph.add_node("ai_supervisor_agent", ai_supervisor_agent)
+    graph.add_node("db_writer_node", db_writer_node)
 
     # Kenarlar
     graph.add_edge(START, "entry_node")
@@ -57,6 +59,8 @@ def build_graph() -> CompiledStateGraph:
     graph.add_edge("deep_inspection_node", "ai_extractor_agent")
     graph.add_edge("ai_extractor_agent", "ai_reverser_agent")
     graph.add_edge("ai_reverser_agent", "ai_supervisor_agent")
-    graph.add_edge("ai_supervisor_agent", END)
+    # fast_track da ai_supervisor_agent'a gittiği için aynı yoldan db_writer_node'a ulaşır
+    graph.add_edge("ai_supervisor_agent", "db_writer_node")
+    graph.add_edge("db_writer_node", END)
 
     return graph.compile()
