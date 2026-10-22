@@ -64,9 +64,24 @@ def test_verify_observation_when_quote_in_code():
 
 
 def test_verify_claim_when_matches_finding():
-    c = Claim(text="injection", evidence="WriteProcessMemory")
+    c = Claim(text="injection", evidence="uses WriteProcessMemory to inject")
     f = [Finding(source="import", kind="import_combo", value="WriteProcessMemory")]
-    assert verify_claim(c, "no code", f) == "verified_claim"
+    # bulgu fonksiyona YEREL ise (deger koddA geciyor) dogrulanir
+    assert verify_claim(c, "h = OpenProcess(); WriteProcessMemory(h, ...);", f,
+                        function_offset="0x1") == "verified_claim"
+
+
+def test_verify_claim_by_address_match():
+    c = Claim(text="injection", evidence="inject code")
+    f = [Finding(source="capa", kind="capability", value="inject code", address="0x401000")]
+    assert verify_claim(c, "int f(){}", f, function_offset="0x401000") == "verified_claim"
+
+
+def test_verify_global_finding_is_file_level_not_verified():
+    """Dosya-seviyesi (adressiz) bulgu, fonksiyonla eslesmiyorsa 'verified' SAYILMAZ; 'file_level' olur."""
+    c = Claim(text="matches yara", evidence="Crowbar_Test_Connecting")
+    f = [Finding(source="yara", kind="rule", value="Crowbar_Test_Connecting")]
+    assert verify_claim(c, "int f(){return 0;}", f, function_offset="0x999") == "file_level"
 
 
 def test_verify_unverified_when_nothing_matches():

@@ -71,7 +71,7 @@ def summarize_function(
     for c in (obj.get("iddialar") or [])[:8]:
         if isinstance(c, dict):
             claims.append(Claim(text=str(c.get("iddia", "")), evidence=str(c.get("kanit", ""))))
-    claims = verify_claims(claims, fn.c_code, findings)
+    claims = verify_claims(claims, fn.c_code, findings, function_offset=fn.offset)
 
     summary = FunctionSummary(
         offset=fn.offset,
