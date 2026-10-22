@@ -68,6 +68,16 @@ python main.py --serve            # Web arayüzü/API: http://127.0.0.1:8000
 python main.py --diagram          # Mermaid grafiği
 ```
 
+## 8. Rapor (araç-öncelikli)
+```bash
+python report.py <state.json> --format md   --out reports/   # main.py çıktısından
+python report.py --db <sha256> --format html --out reports/  # DB kaydından
+python report.py <state.json> --format json                  # stdout
+```
+- **Araç çıktısı** ana içerik: DIE, YARA, capa, FLOSS, import, entropy, Ghidra envanteri.
+- **AI yorumu** ayrı bölüm ve işaretli (✅ doğrulanmış / 🟡 gözlem / ⚠️ doğrulanamadı).
+- Kanıt yoksa karar **`belirsiz`** (asla "temiz" değil).
+
 ## Kademeli bozulma (araç yoksa)
 | Araç yok | Etki |
 |---|---|
