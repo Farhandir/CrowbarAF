@@ -40,6 +40,7 @@ DOTNET_TOOL_TIMEOUT_SECONDS = 60  # de4dot
 DOTNET_DECOMPILE_TIMEOUT_SECONDS = 120  # ilspycmd (büyük assembly'ler daha uzun sürer)
 SHA256_CHUNK_SIZE = 1024 * 1024  # 1 MiB
 YARA_RULES_ENV = "CROWBAR_YARA_RULES"  # run_yara'da rules_dir verilmezse kullanılır
+CAPA_RULES_ENV = "CAPA_RULES"  # capa -r için kural dizini; boşsa capa'nın gömülü kuralları denenir
 
 # YARA kuralının "kesin bilinen zararlı" sayılması için meta alanı (ör. meta: confidence = "known_malware")
 KNOWN_MALWARE_META_KEY = "classification"
@@ -974,8 +975,14 @@ def run_capa(file_path: str) -> tuple[dict[str, Any], list[dict[str, str]]]:
     geçersiz JSON) uygulama çökmez; ``({"error": "<mesaj>"}, [])`` döndürülür.
     """
     try:
+        # capa 10 gömülü kural içermez; kural dizini env'den verilir (yoksa capa kendi hatasını döndürür)
+        rules = os.environ.get(CAPA_RULES_ENV, "")
+        cmd = ["capa", "-j"]
+        if rules:
+            cmd += ["-r", rules]
+        cmd.append(file_path)
         proc = subprocess.run(
-            ["capa", "-j", file_path],
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",
