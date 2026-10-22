@@ -1,0 +1,17 @@
+# Opsiyonel analiz araçları (pip ile kurulur).
+# Bunlar kurulmazsa ilgili düğümler çökmez; boş sonuç + log ile devam eder.
+#
+#   pip install -r requirements-tools.txt
+#
+# NOT: pyghidra burada DEĞİL — Ghidra kurulumunun içindeki wheel'den kurulur
+# (bkz. docs/SETUP.md).
+
+flare-capa>=10
+flare-floss>=3
+yara-python>=4
+pyinstxtractor-ng>=2026.7
+decompyle3>=3.9
+
+# NOT: pyinstxtractor-ng (xdis>=6.3) ile decompyle3 (xdis<6.3) çakışabilir.
+# pycdc birincil .pyc decompiler olduğu için pratikte sorun değil; gerekirse
+# decompyle3'ü atlayıp yalnızca pycdc kullanın.
