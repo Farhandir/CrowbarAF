@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from typing import Any
 
@@ -46,6 +47,29 @@ def _find_analyze_headless() -> str | None:
 
 def _finding_to_dict(finding: BaseModel | dict[str, Any]) -> dict[str, Any]:
     return finding.model_dump() if isinstance(finding, BaseModel) else dict(finding)
+
+
+def _install_dir_from(analyze_headless: str) -> str | None:
+    """analyzeHeadless yolundan (veya env'den) Ghidra kurulum dizinini bulur."""
+    env = os.environ.get("GHIDRA_INSTALL_DIR")
+    if env:
+        return env
+    support = os.path.dirname(os.path.abspath(analyze_headless))
+    cand = os.path.dirname(support)
+    return cand if os.path.isdir(os.path.join(cand, "Ghidra")) else None
+
+
+def _pyghidra_launcher(install_dir: str | None) -> str | None:
+    """PyGhidra headless launcher'ini dondurur (varsa).
+
+    export_functions.py PyGhidra (Python 3) oldugu icin duz analyzeHeadless
+    ile calismaz; launcher -H ile AnalyzeHeadless'i PyGhidra ile baslatir.
+    """
+    if not install_dir:
+        return None
+    path = os.path.join(install_dir, "Ghidra", "Features", "PyGhidra",
+                        "support", "pyghidra_launcher.py")
+    return path if os.path.isfile(path) else None
 
 
 def run_ghidra(
@@ -87,8 +111,7 @@ def run_ghidra(
         with open(input_json_path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=True)
 
-        cmd = [
-            analyze_headless,
+        analyze_args = [
             temp_dir,
             GHIDRA_PROJECT_NAME,
             "-import",
@@ -102,6 +125,17 @@ def run_ghidra(
             out_json_path,
             "-deleteProject",
         ]
+        install_dir = _install_dir_from(analyze_headless)
+        launcher = _pyghidra_launcher(install_dir)
+        if launcher:
+            # export_functions.py PyGhidra (Python 3): AnalyzeHeadless'i PyGhidra ile baslat
+            cmd = [sys.executable, launcher, str(install_dir), "-H", "--console", *analyze_args]
+        else:
+            logger.warning(
+                "[run_ghidra] PyGhidra launcher bulunamadi; duz analyzeHeadless denenecek "
+                "(PyGhidra script'i calismayabilir)"
+            )
+            cmd = [analyze_headless, *analyze_args]
 
         proc = subprocess.run(
             cmd,

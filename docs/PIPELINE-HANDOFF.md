@@ -123,10 +123,16 @@ Pipeline'ın ürettiği ve LLM katmanının tükettiği yapı:
 
 ## 5. Bilinen tuzaklar
 
-1. **PyGhidra:** `export_functions.py` artık Python 3 / PyGhidra için yazıldı
-   (Jython değil). Ghidra 12'de `analyzeHeadless -postScript` ile `.py` betiğinin
-   PyGhidra modunda çalıştığı bir kurulumda **doğrulanmalı**; `ghidra_runner.py`
-   komutu standart `analyzeHeadless` biçiminde bırakıldı.
+1. **PyGhidra (doğrulandı + çözüldü):** `export_functions.py` Python 3 / PyGhidra
+   için yazıldı. Düz `analyzeHeadless -postScript export_functions.py` ile
+   **çalışmaz**: `ERROR: Ghidra was not started with PyGhidra. Python is not
+   available` → 0 fonksiyon. `ghidra_runner.py` artık AnalyzeHeadless'i
+   `pyghidra_launcher.py <ghidra> -H --console ...` ile başlatıyor (Ghidra
+   12.1.4'te doğrulandı: 16 fonksiyon, `c_code`/`callees`/`size` dolu).
+   **Gereksinim:** `pyghidra` Python ortamında kurulu olmalı; Ghidra içindeki
+   wheel'den:
+   `pip install --no-index -f <ghidra>/Ghidra/Features/PyGhidra/pypkg/dist pyghidra`.
+   Kurulu değilse launcher etkileşimli "install?" sorar ve etkileşimsiz çalışmada patlar.
 2. **JDK:** `analyzeHeadless` için gerçek JDK 21+ şart (`JAVA_HOME`).
 3. **Araç yokluğu:** `capa`/`floss`/`diec`/`yara` kurulu değilse düğümler
    **çökmemeli**; boş sonuç + log ile devam etmeli (mevcut kod bunu yapıyor).
