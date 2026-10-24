@@ -1,12 +1,14 @@
 """LLM katmani saf mantik testleri (LLM cagrisi gerektirmez)."""
 from __future__ import annotations
 
+from llm_layer.cache import SummaryCache
 from llm_layer.client import LLMResult
 from llm_layer.context import build_function_context, select_functions, select_with_reasons
 from llm_layer.pipeline import AnalysisResult, analyze
-from llm_layer.tokens import estimate_tokens, truncate_to_tokens
+from llm_layer.summarize import summarize_function
+from llm_layer.tokens import TokenCounter, estimate_tokens, truncate_to_tokens
 from llm_layer.trace import Tracer
-from llm_layer.traverse import scc_order
+from llm_layer.traverse import scc_levels, scc_order
 from llm_layer.types import Claim, Finding, FunctionInfo, FunctionSummary
 from llm_layer.verify import verify_claim
 
@@ -196,6 +198,105 @@ def test_tracer_records_totals_and_saves(tmp_path):
     p = tmp_path / "trace.json"
     tr.save(str(p))
     assert p.exists()
+
+
+# --- token sayaci ---
+def test_token_counter_estimate_and_calibrate():
+    tc = TokenCounter(chars_per_token=4.0)
+    assert tc.estimate("a" * 40) == 10
+    tc.calibrate("a" * 40, 20)          # gercek oran 2 karakter/token
+    assert abs(tc.chars_per_token - 2.0) < 0.01
+    assert tc.estimate("a" * 40) == 20
+    assert tc.samples == 1
+
+
+# --- JSON retry ---
+class FlakyClient:
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, json_mode=True, temperature=0.0):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResult(content="bu JSON degil", prompt_tokens=5, completion_tokens=2)
+        return LLMResult(
+            content='{"ozet":"ok","supheli":false,"guven":"orta","davranis":[],"iddialar":[],"onerilen_isim":"x"}',
+            prompt_tokens=5, completion_tokens=2)
+
+
+def test_summarize_retries_on_invalid_json():
+    client = FlakyClient()
+    summary, res, stats = summarize_function(client, _fn("0x1", "int f(){return 1;}"), [], [], 1000)
+    assert client.calls == 2
+    assert stats["json_ok"] is True
+    assert stats["attempts"] == 2
+    assert summary.summary == "ok"
+
+
+# --- seviyeler (paralellik) ---
+def test_scc_levels_chain():
+    f1 = _fn("0x1", callees=["0x2"])
+    f2 = _fn("0x2", callees=["0x3"])
+    f3 = _fn("0x3")
+    levels = scc_levels([f1, f2, f3])
+    assert len(levels) == 3
+    assert [o for scc in levels[0] for o in scc] == ["0x3"]
+    assert [o for scc in levels[2] for o in scc] == ["0x1"]
+
+
+def test_scc_levels_cycle_same_level():
+    a = _fn("a", callees=["b"])
+    b = _fn("b", callees=["a"])
+    c = _fn("c", callees=["a"])
+    levels = scc_levels([a, b, c])
+    pos = {o: i for i, lvl in enumerate(levels) for scc in lvl for o in scc}
+    assert pos["a"] == pos["b"] < pos["c"]
+
+
+# --- paralel + onbellek ---
+def test_analyze_parallel_matches_serial():
+    fns = [_fn(f"0x{i}", f"int f{i}(){{return {i};}}") for i in range(6)]
+    res = analyze(fns, [], FakeClient(), budget_tokens=1000, max_workers=3)
+    assert len(res.summaries) == 6
+    assert res.calls == 6
+    assert res.total_prompt_tokens == 60
+
+
+class CountingClient:
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, json_mode=True, temperature=0.0):
+        self.calls += 1
+        return LLMResult(
+            content='{"ozet":"ok","supheli":false,"guven":"orta","davranis":[],"iddialar":[],"onerilen_isim":"x"}',
+            prompt_tokens=5, completion_tokens=2)
+
+
+def test_cache_avoids_second_call(tmp_path):
+    client = CountingClient()
+    fns = [_fn("0x1", "int f(){return 1;}")]
+    cache = SummaryCache(str(tmp_path / "cache.json"))
+    r1 = analyze(fns, [], client, budget_tokens=1000, cache=cache)
+    assert client.calls == 1 and r1.calls == 1
+    r2 = analyze(fns, [], client, budget_tokens=1000, cache=cache)
+    assert client.calls == 1          # ikinci kosuda LLM cagrilmadi
+    assert r2.cache_hits == 1 and r2.calls == 0
+
+
+# --- fidelity harness matematigi ---
+def test_fidelity_math():
+    import importlib.util
+    import pathlib
+
+    path = pathlib.Path(__file__).resolve().parents[1] / "experiments" / "fidelity.py"
+    spec = importlib.util.spec_from_file_location("fidelity_harness", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    assert mod.fidelity({"a": True, "b": False}, {"a": True, "b": True}) == (0.5, 2)
+    assert mod.fidelity({}, {"a": True}) == (None, 0)
+    assert mod.fidelity({"a": True}, {"a": True, "b": False}) == (1.0, 1)
 
 
 

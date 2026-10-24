@@ -37,18 +37,21 @@ class Tracer:
         self.event("skip", offset=fn.offset, reason=reason)
 
     def analyzed(self, fn, ctx_stats: dict, res, summary, duration_s: float,
-                 children: list[str], n_findings: int) -> None:
+                 children: list[str], n_findings: int, cached: bool = False) -> None:
         claims = [{"text": c.text, "evidence": c.evidence, "status": c.status}
                   for c in summary.claims]
+        prompt = getattr(res, "prompt_tokens", None)
+        completion = getattr(res, "completion_tokens", None)
         self.functions.append({
             "offset": fn.offset, "name": fn.name, "priority": fn.priority,
             "status": "analyzed",
+            "cached": cached,
             "context_tokens": ctx_stats.get("estimated_tokens"),
             "code_truncated": ctx_stats.get("code_truncated"),
             "children_included": children,
             "findings_included": n_findings,
-            "prompt_tokens": res.prompt_tokens,
-            "completion_tokens": res.completion_tokens,
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
             "duration_s": round(duration_s, 2),
             "json_ok": ctx_stats.get("json_ok"),
             "summary": summary.summary,
@@ -56,7 +59,7 @@ class Tracer:
             "confidence": summary.confidence,
             "claims": claims,
         })
-        self.event("analyze", offset=fn.offset, tokens=res.prompt_tokens)
+        self.event("analyze", offset=fn.offset, tokens=prompt, cached=cached)
 
     def finalize(self, result) -> None:
         self.finished = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -77,6 +80,7 @@ class Tracer:
             "skipped_budget": sum(1 for f in skipped if f["skip_reason"] == "budget"),
             "coverage": round(len(analyzed) / total, 3) if total else 0.0,
             "calls": result.calls,
+            "cache_hits": getattr(result, "cache_hits", 0),
             "prompt_tokens": result.total_prompt_tokens,
             "completion_tokens": result.total_completion_tokens,
             "tokens_total": result.token_total(),

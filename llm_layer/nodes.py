@@ -55,7 +55,16 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         return {"intent_analysis": "Analiz edilecek fonksiyon yok (Ghidra cikisi bos)."}
 
     client = client or from_env()
-    result = analyze(functions, findings, client, budget_tokens=budget_tokens)
+    max_workers = int(os.getenv("CROWBAR_LLM_MAX_WORKERS", "1"))
+    cache_path = os.getenv("CROWBAR_LLM_CACHE", "")
+    cache = None
+    if cache_path:
+        from .cache import SummaryCache
+        cache = SummaryCache(cache_path)
+    low_budget = int(os.getenv("CROWBAR_LLM_LOW_PRIORITY_BUDGET", "0")) or None
+    result = analyze(functions, findings, client, budget_tokens=budget_tokens,
+                     max_workers=max_workers, cache=cache,
+                     low_priority_budget=low_budget)
 
     # llm_summary'leri state'e geri yaz
     updated = []

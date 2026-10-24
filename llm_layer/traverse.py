@@ -1,5 +1,6 @@
-"""Bottom-up gezinme: call graph -> SCC'ler -> callee-once sira.
+"""Bottom-up gezinme: call graph -> SCC'ler -> callee-once seviyeler.
 
+`scc_levels`: ayni seviyedeki SCC'ler birbirinden bagimsizdir (paralel islenebilir).
 Donguler (recursion) icin SCC'ler sozlesir; her SCC tek birim gibi islenir.
 """
 from __future__ import annotations
@@ -14,15 +15,10 @@ def build_graph(functions: list[FunctionInfo]) -> dict[str, list[str]]:
     return {f.offset: [c for c in f.callees if c in known] for f in functions}
 
 
-def scc_order(functions: list[FunctionInfo]) -> list[list[str]]:
-    """SCC'leri **callee-once** (bottom-up) sirada dondurur.
-
-    Ayni SCC icindeki fonksiyonlar birlikte islenmeli (dongu).
-    """
-    adj = build_graph(functions)
+def _kosaraju(adj: dict[str, list[str]]) -> tuple[list[list[str]], dict[str, int]]:
     nodes = list(adj.keys())
     if not nodes:
-        return []
+        return [], {}
 
     # 1) bitis sirasi (iteratif DFS)
     visited: set[str] = set()
@@ -50,7 +46,7 @@ def scc_order(functions: list[FunctionInfo]) -> list[list[str]]:
         for w in adj[v]:
             radj[w].append(v)
 
-    # 3) Ters bitis sirasina gore SCC'ler (Kosaraju)
+    # 3) SCC'ler
     comp: dict[str, int] = {}
     comps: list[list[str]] = []
     for s in reversed(order):
@@ -68,29 +64,54 @@ def scc_order(functions: list[FunctionInfo]) -> list[list[str]]:
                     comp[w] = cid
                     stack.append(w)
         comps.append(members)
+    return comps, comp
 
-    # 4) condensation DAG: caller -> callee
-    dag: dict[int, set[int]] = {i: set() for i in range(len(comps))}
-    indeg = [0] * len(comps)
-    for v in nodes:
-        for w in adj[v]:
+
+def _condensation(adj: dict[str, list[str]], comp: dict[str, int], n: int) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
+    """(caller->callee, callee->caller) condensation DAG."""
+    dag: dict[int, set[int]] = {i: set() for i in range(n)}
+    rev: dict[int, set[int]] = {i: set() for i in range(n)}
+    for v, callees in adj.items():
+        for w in callees:
             a, b = comp[v], comp[w]
             if a != b and b not in dag[a]:
                 dag[a].add(b)
-                indeg[b] += 1
+                rev[b].add(a)
+    return dag, rev
 
-    # 5) caller-once topolojik sira, sonra ters cevir -> callee-once
-    q = deque([i for i in range(len(comps)) if indeg[i] == 0])
-    topo: list[int] = []
+
+def scc_levels(functions: list[FunctionInfo]) -> list[list[list[str]]]:
+    """SCC'leri **seviye seviye** dondurur (seviye 0 = yapraklar).
+
+    Ayni seviyedeki SCC'ler arasinda bagimlilik yoktur -> paralel islenebilir.
+    """
+    adj = build_graph(functions)
+    comps, comp = _kosaraju(adj)
+    if not comps:
+        return []
+    n = len(comps)
+    dag, rev = _condensation(adj, comp, n)
+
+    # yapraktan yukari: outdeg (callee sayisi) 0 olanlar seviye 0
+    remaining = {i: len(dag[i]) for i in range(n)}
+    depth: dict[int, int] = {}
+    q = deque([i for i in range(n) if remaining[i] == 0])
+    for i in q:
+        depth[i] = 0
     while q:
-        i = q.popleft()
-        topo.append(i)
-        for j in dag[i]:
-            indeg[j] -= 1
-            if indeg[j] == 0:
-                q.append(j)
+        leaf = q.popleft()
+        for caller in rev[leaf]:
+            depth[caller] = max(depth.get(caller, -1), depth[leaf] + 1)
+            remaining[caller] -= 1
+            if remaining[caller] == 0:
+                q.append(caller)
 
-    if len(topo) < len(comps):  # beklenmez (SCC DAG dongusuzdur) - guvenlik
-        topo += [i for i in range(len(comps)) if i not in set(topo)]
+    levels: dict[int, list[list[str]]] = {}
+    for i, members in enumerate(comps):
+        levels.setdefault(depth.get(i, 0), []).append(members)
+    return [levels[d] for d in sorted(levels)]
 
-    return [comps[i] for i in reversed(topo)]
+
+def scc_order(functions: list[FunctionInfo]) -> list[list[str]]:
+    """SCC'leri duz **callee-once** sirada dondurur (seviyelerin duzlestirilmesi)."""
+    return [scc for level in scc_levels(functions) for scc in level]

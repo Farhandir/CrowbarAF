@@ -1,4 +1,4 @@
-"""Tek fonksiyon ozeti: prompt + katı JSON + kanit dogrulama."""
+"""Tek fonksiyon ozeti: prompt + katı JSON + (gerekirse) retry + kanit dogrulama."""
 from __future__ import annotations
 
 import json
@@ -30,18 +30,21 @@ Yanitini TAM olarak su JSON semasiyla ver (kisa tut):
   "onerilen_isim": "..."
 }}"""
 
+RETRY = "Yanıt geçerli/eksiksiz JSON değildi. SADECE istenen şemaya uygun, geçerli JSON ver."
+
 
 def _parse(raw: str) -> dict:
     cleaned = (raw or "").strip()
     m = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
     if m:
         cleaned = m.group(1).strip()
-    try:
-        obj = json.loads(cleaned)
-        if isinstance(obj, dict):
-            return obj
-    except Exception:
-        pass
+    for candidate in (cleaned, raw):
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
     m2 = re.search(r"\{.*\}", cleaned, re.DOTALL)
     if m2:
         try:
@@ -53,34 +56,64 @@ def _parse(raw: str) -> dict:
     return {}
 
 
+def _valid(obj: dict) -> bool:
+    return (isinstance(obj, dict)
+            and isinstance(obj.get("ozet"), str)
+            and isinstance(obj.get("supheli"), bool))
+
+
+def _coerce_confidence(value: object) -> str:
+    v = str(value or "").strip().lower()
+    return v if v in ("dusuk", "orta", "yuksek") else "dusuk"
+
+
 def summarize_function(
     client: LLMClient,
     fn: FunctionInfo,
     callee_summaries: list[FunctionSummary],
     findings: list[Finding],
     budget_tokens: int = 6000,
+    max_retries: int = 2,
 ) -> tuple[FunctionSummary, LLMResult, dict]:
     context, stats = build_function_context(fn, callee_summaries, findings, budget_tokens)
-    res = client.chat([
+    base = [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": USER.format(context=context)},
-    ])
-    obj = _parse(res.content)
+    ]
+    messages = list(base)
+    obj: dict = {}
+    res: LLMResult | None = None
+    attempts = 0
+
+    for attempt in range(max_retries + 1):
+        attempts = attempt + 1
+        res = client.chat(messages)
+        obj = _parse(res.content)
+        if _valid(obj):
+            break
+        if attempt < max_retries:
+            messages = base + [
+                {"role": "assistant", "content": (res.content or "")[:400]},
+                {"role": "user", "content": RETRY},
+            ]
 
     claims = []
-    for c in (obj.get("iddialar") or [])[:8]:
-        if isinstance(c, dict):
-            claims.append(Claim(text=str(c.get("iddia", "")), evidence=str(c.get("kanit", ""))))
+    raw_claims = obj.get("iddialar") or []
+    if isinstance(raw_claims, list):
+        for c in raw_claims[:8]:
+            if isinstance(c, dict):
+                claims.append(Claim(text=str(c.get("iddia", "")), evidence=str(c.get("kanit", ""))))
     claims = verify_claims(claims, fn.c_code, findings, function_offset=fn.offset)
 
     summary = FunctionSummary(
         offset=fn.offset,
         summary=str(obj.get("ozet", ""))[:400],
         suspicious=obj.get("supheli") if isinstance(obj.get("supheli"), bool) else None,
-        confidence=str(obj.get("guven", "dusuk")),
-        behaviors=[str(x)[:80] for x in (obj.get("davranis") or [])][:4],
+        confidence=_coerce_confidence(obj.get("guven")),
+        behaviors=[str(x)[:80] for x in (obj.get("davranis") or [])][:4] if isinstance(obj.get("davranis"), list) else [],
         claims=claims,
         suggested_name=str(obj.get("onerilen_isim", ""))[:60],
     )
-    stats["json_ok"] = bool(obj)
+    stats["json_ok"] = _valid(obj)
+    stats["attempts"] = attempts
     return summary, res, stats
