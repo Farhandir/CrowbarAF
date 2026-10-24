@@ -1,8 +1,8 @@
-"""Butce-farkinda baglam insasi.
+"""Budget-aware context construction.
 
-Amac (decision-preserving compression): fonksiyon kodunu + cocuk ozetlerini +
-kanitlari, **karari degistiren bilgiyi koruyarak** sabit bir token butcesine
-sigdiranak LLM'e vermek.
+Goal (decision-preserving compression): fit the function code + callee summaries +
+findings into a fixed token budget while **preserving the information that changes
+the decision**.
 """
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ def select_with_reasons(
     functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True,
     min_priority: int = 0,
 ) -> tuple[list[FunctionInfo], list[tuple[FunctionInfo, str]]]:
-    """Butceye gore secer; atlananlari **gerekcesiyle** dondurur.
+    """Select by budget; return skipped functions **with their reason**.
 
-    min_priority: bu esigin altindaki fonksiyonlar hic analiz edilmez ("priority").
+    min_priority: functions below this threshold are never analyzed ("priority").
     """
     remaining = budget_tokens
     selected: list[FunctionInfo] = []
@@ -29,7 +29,7 @@ def select_with_reasons(
         if (fn.priority or 0) < min_priority:
             skipped.append((fn, "priority"))
             continue
-        cost = estimate_tokens(fn.c_code) + 32  # baslik/overhead
+        cost = estimate_tokens(fn.c_code) + 32  # header/overhead
         if cost > remaining:
             skipped.append((fn, "budget"))
             continue
@@ -42,12 +42,12 @@ def select_functions(
     functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True,
     min_priority: int = 0,
 ) -> list[FunctionInfo]:
-    """Butceye gore fonksiyon secer (yuksek oncelik once, esitlikte kucuk once)."""
+    """Select functions by budget (highest priority first, then smallest)."""
     return select_with_reasons(functions, budget_tokens, skip_library, min_priority)[0]
 
 
 def findings_for(fn: FunctionInfo, findings: list[Finding]) -> list[Finding]:
-    """Bu fonksiyonun adresiyle eslesen (veya adressiz/genel) bulgular."""
+    """Findings that match this function's address (or are address-less/global)."""
     out = []
     for f in findings:
         if f.address is None or f.address == fn.offset:
@@ -61,25 +61,25 @@ def build_function_context(
     findings: list[Finding],
     budget_tokens: int,
 ) -> tuple[str, dict]:
-    """LLM'e verilecek fonksiyon baglamini butceye sigdirir.
+    """Fit the context for one function into the token budget.
 
-    Donus: (context_text, olcum_dict)
+    Returns: (context_text, stats)
     """
     header = [
-        f"Fonksiyon: {fn.name or '?'} @ {fn.offset}",
-        f"Oncelik: {fn.priority}  Boyut: {fn.size or len(fn.c_code)}",
+        f"Function: {fn.name or '?'} @ {fn.offset}",
+        f"Priority: {fn.priority}  Size: {fn.size or len(fn.c_code)}",
     ]
     if fn.is_library:
-        header.append("Not: kutuphane/thunk fonksiyonu (dusuk oncelik).")
+        header.append("Note: library/thunk function (low priority).")
     if fn.decompile_warnings:
-        header.append("Decompile uyarilari: " + "; ".join(fn.decompile_warnings[:5]))
+        header.append("Decompile warnings: " + "; ".join(fn.decompile_warnings[:5]))
 
-    # 1) kanitlar (kisa)
+    # 1) findings (short)
     ev_lines = [f"- [{f.source}/{f.kind}] {f.value}" + (f" @ {f.address}" if f.address else "")
                 for f in findings[:20]]
     ev_block = "\n".join(ev_lines)
 
-    # 2) cocuk ozetleri (kod degil, not)
+    # 2) callee summaries (notes, not code)
     child_lines = [f"- {s.note()}" for s in callee_summaries[:40]]
     child_block = "\n".join(child_lines)
 
@@ -87,17 +87,17 @@ def build_function_context(
         estimate_tokens("\n".join(header))
         + estimate_tokens(ev_block)
         + estimate_tokens(child_block)
-        + 120  # sablon/prompt payi
+        + 120  # template/prompt allowance
     )
     code_budget = max(64, budget_tokens - fixed_overhead)
     code = truncate_to_tokens(fn.c_code, code_budget)
 
     text = "\n".join(header)
     if ev_block:
-        text += "\n\nKANITLAR (deterministik araclar):\n" + ev_block
+        text += "\n\nFINDINGS (deterministic tools):\n" + ev_block
     if child_block:
-        text += "\n\nCAGIRDIGI FONKSIYONLARIN OZETLERI:\n" + child_block
-    text += "\n\nKOD:\n```c\n" + code + "\n```"
+        text += "\n\nCALLEE SUMMARIES:\n" + child_block
+    text += "\n\nCODE:\n```c\n" + code + "\n```"
 
     stats = {
         "estimated_tokens": estimate_tokens(text),
