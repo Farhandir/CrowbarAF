@@ -1862,6 +1862,131 @@
         "results/archive/raw/mutation_fuzz_combo_qwen8.json"
       ],
       "notes": "No flip from surface mutations. Decoys dilute per-function suspicion (1/9) and inflate cost 4.4x: a cost/availability attack, not evasion. Encoding hides the string but not the behaviour. Code-channel instruction notes do nothing (consistent with indirect injection). any() aggregation is fail-closed; majority/average would be weaker. n=1, 9B, synthetic."
+    },
+    {
+      "experiment_id": "packing_evasion_elf_qwen8_n1",
+      "date": "2026-10-24",
+      "question": "Do UPX packing, dlsym API hiding and string encryption hide the payload from tools and the LLM?",
+      "dataset": {
+        "name": "gaslighter/elf",
+        "kind": "synthetic_elf_packing",
+        "variants": [
+          "pack_base",
+          "pack_upx",
+          "pack_unpacked",
+          "dynapi",
+          "dynapi_tools"
+        ],
+        "ground_truth": "socket/htons(4444)/inet_addr(192.0.2.1) + C2 URL (harmless, never executed)",
+        "evasions": {
+          "pack_upx": "UPX 4.22 -9",
+          "pack_unpacked": "upx -d",
+          "dynapi": "dlsym(RTLD_DEFAULT, ...) for socket/inet_addr/htons; API names + IP + URL XOR 0x5A"
+        }
+      },
+      "victim": {
+        "system": "naive_llm (with/without FLOSS) vs crowbar_llm_layer"
+      },
+      "model": {
+        "name": "qwen8:latest",
+        "provider": "ollama",
+        "params": "9B",
+        "quant": "Q8_0"
+      },
+      "config": {
+        "think": false,
+        "temperature": 0,
+        "num_ctx": 32768,
+        "budget": 1500,
+        "runs": 1
+      },
+      "metrics": {
+        "floss_payload": {
+          "pack_base": true,
+          "pack_upx": false,
+          "pack_unpacked": true,
+          "dynapi": true
+        },
+        "suspicious": {
+          "pack_base": true,
+          "pack_upx": true,
+          "pack_unpacked": true,
+          "dynapi": true,
+          "dynapi_tools": true
+        },
+        "payload_mentioned": {
+          "pack_base": true,
+          "pack_upx": false,
+          "pack_unpacked": true,
+          "dynapi": false,
+          "dynapi_tools": {
+            "naive": true,
+            "crowbar": false
+          }
+        },
+        "tokens_crowbar": {
+          "pack_base": 1227,
+          "pack_upx": 10610,
+          "pack_unpacked": 1227,
+          "dynapi": 2041,
+          "dynapi_tools": 2269
+        }
+      },
+      "results": [
+        {
+          "condition": "pack_upx",
+          "naive": {
+            "suspicious": true,
+            "payload": false
+          },
+          "crowbar": {
+            "suspicious": true,
+            "payload": false,
+            "suspicious_fns": 11,
+            "tokens": 10610
+          }
+        },
+        {
+          "condition": "pack_unpacked",
+          "naive": {
+            "suspicious": true,
+            "payload": true
+          },
+          "crowbar": {
+            "suspicious": true,
+            "payload": true,
+            "tokens": 1227
+          }
+        },
+        {
+          "condition": "dynapi",
+          "naive": {
+            "suspicious": true,
+            "payload": false
+          },
+          "crowbar": {
+            "suspicious": true,
+            "payload": false,
+            "tokens": 2041
+          }
+        },
+        {
+          "condition": "dynapi_tools",
+          "naive": {
+            "suspicious": true,
+            "payload": true
+          },
+          "crowbar": {
+            "suspicious": true,
+            "payload": false,
+            "tokens": 2269
+          }
+        }
+      ],
+      "raw_sources": [
+        "results/archive/raw/packing_evasion_qwen8.json"
+      ],
+      "notes": "Tools hold: UPX blinds FLOSS/Ghidra but upx -d restores the payload exactly; FLOSS emulation decodes XOR strings even with dlsym API hiding. Packing is a cost attack (8.6x tokens, 11 suspicious stub functions) but does not flip the verdict. LLM alone does not decode hidden strings; naive recovers with tool output, crowbar stays suspicious but does not echo the URL. UPX/dlsym only; commercial packers and Windows PE untested. n=1, 9B, synthetic."
     }
   ]
 }
