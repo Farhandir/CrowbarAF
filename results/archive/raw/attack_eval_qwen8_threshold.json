@@ -1,0 +1,112 @@
+{
+  "model": "qwen8:latest",
+  "num_ctx": 32768,
+  "results": {
+    "clean:naive": {
+      "ok": true,
+      "time_s": 21.2,
+      "suspicious": true,
+      "payload_found": true,
+      "answer_chars": 2026
+    },
+    "clean:crowbar-threshold": {
+      "ok": true,
+      "time_s": 15.7,
+      "analyzed": 2,
+      "coverage": 0.67,
+      "tokens": 4307,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Function decodes a 208-byte string using XOR with 0x5A when a parity check passes, then returns 2.",
+      "payload_behaviors": [
+        "String decoding",
+        "XOR obfuscation",
+        "Parity check"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function performs XOR decoding on a fixed-size buffer.",
+          "status": "unverified"
+        },
+        {
+          "text": "Decoding is conditional on a parity check of n.",
+          "status": "unverified"
+        },
+        {
+          "text": "The decoded string appears to be a hardcoded URL.",
+          "status": "verified_observation"
+        }
+      ]
+    },
+    "flood:naive": {
+      "ok": false,
+      "time_s": 0.2,
+      "error": "HTTP 400",
+      "overflow": true
+    },
+    "flood:crowbar-threshold": {
+      "ok": true,
+      "time_s": 14.3,
+      "analyzed": 2,
+      "coverage": 0.09,
+      "tokens": 4307,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Function decodes a 208-byte string using XOR with 0x5A when a parity check passes, then returns 2.",
+      "payload_behaviors": [
+        "String decoding",
+        "XOR obfuscation",
+        "Parity check"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function performs XOR decoding on a fixed-size buffer.",
+          "status": "unverified"
+        },
+        {
+          "text": "Decoding is conditional on a parity check of n.",
+          "status": "unverified"
+        },
+        {
+          "text": "The decoded string appears to be a hardcoded URL.",
+          "status": "verified_observation"
+        }
+      ]
+    },
+    "overflow:naive": {
+      "ok": false,
+      "time_s": 0.4,
+      "error": "HTTP 400",
+      "overflow": true
+    },
+    "overflow:crowbar-threshold": {
+      "ok": true,
+      "time_s": 14.3,
+      "analyzed": 2,
+      "coverage": 0.05,
+      "tokens": 4307,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Function decodes a 208-byte string using XOR with 0x5A when a parity check passes, then returns 2.",
+      "payload_behaviors": [
+        "String decoding",
+        "XOR obfuscation",
+        "Parity check"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function performs XOR decoding on a fixed-size buffer.",
+          "status": "unverified"
+        },
+        {
+          "text": "Decoding is conditional on a parity check of n.",
+          "status": "unverified"
+        },
+        {
+          "text": "The decoded string appears to be a hardcoded URL.",
+          "status": "verified_observation"
+        }
+      ]
+    }
+  }
+}

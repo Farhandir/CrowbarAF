@@ -140,3 +140,6 @@ Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
 - Fidelity kayıtları **n=1** (model deterministik olduğu için).
 - `verifier_before_after` elle etiketlendi.
 - Sonuçlar **9B lokal model** için; frontier açık soru.
+- **Prompt dili 2026-10-24'te İngilizceye çevrildi.** Bu tarihten önceki kayıtlar
+  Türkçe prompt ile üretildi; dil model davranışını değiştirebilir. Bu sınırın iki
+  tarafındaki kayıtları doğrudan kıyaslamayın; gerekirse yeniden koşun.

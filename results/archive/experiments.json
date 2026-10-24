@@ -1511,6 +1511,73 @@
         "results/archive/raw/fidelity_strong_obf_lowprio_qwen8.json"
       ],
       "notes": "KRITIK: yuksek tasarruf (%96) ama payload kacirildi. Oncelik skorunun recall'u, esik kullanmanin on kosulu. Soft budget ayni ornekte recall 1.00 ve %83 tasarruf."
+    },
+    {
+      "experiment_id": "attack_overflow_decoy_qwen8_n1",
+      "date": "2026-10-24",
+      "question": "Decoy flood / context overflow naive LLM'i yener mi; CrowbarAF hayatta kalir mi?",
+      "dataset": {
+        "name": "attack_samples",
+        "kind": "synthetic_c",
+        "variants": [
+          "clean",
+          "flood",
+          "overflow"
+        ],
+        "items": "clean=5, flood=23, overflow=43 fonksiyon"
+      },
+      "victim": {
+        "system": "naive_llm (tek prompt) vs crowbar_llm_layer (threshold)"
+      },
+      "model": {
+        "name": "qwen8:latest",
+        "provider": "ollama",
+        "params": "9B",
+        "quant": "Q8_0"
+      },
+      "config": {
+        "think": false,
+        "temperature": 0,
+        "num_ctx": 32768,
+        "budget": 1500,
+        "min_priority": 1
+      },
+      "metrics": {
+        "naive": {
+          "clean": "ok, payload found",
+          "flood": "HTTP 400 (49,587 tokens > 32,768)",
+          "overflow": "HTTP 400 (266,907 tokens > 32,768)"
+        },
+        "crowbar_threshold": {
+          "clean": "payload found, 4,307 tokens",
+          "flood": "payload found, 4,307 tokens",
+          "overflow": "payload found, 4,307 tokens"
+        }
+      },
+      "results": [
+        {
+          "attack": "clean",
+          "naive": "ok",
+          "crowbar": "ok",
+          "crowbar_tokens": 4307
+        },
+        {
+          "attack": "flood",
+          "naive": "overflow 400 (49587 tok)",
+          "crowbar": "ok",
+          "crowbar_tokens": 4307
+        },
+        {
+          "attack": "overflow",
+          "naive": "overflow 400 (266907 tok)",
+          "crowbar": "ok",
+          "crowbar_tokens": 4307
+        }
+      ],
+      "raw_sources": [
+        "results/archive/raw/attack_eval_qwen8_threshold.json"
+      ],
+      "notes": "Naive = tum kod tek prompt. Overflow gercek (Ollama token sayilari). Crowbar threshold decoy'lari atlayarak hayatta kaliyor; coverage dusuk. Oyuncak olcek. Prompt dili bu turda Ingilizceye cevrildi -> onceki kayitlarla dogrudan kiyaslanmamali."
     }
   ]
 }
