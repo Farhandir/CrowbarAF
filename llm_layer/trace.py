@@ -47,6 +47,7 @@ class Tracer:
             "status": "analyzed",
             "cached": cached,
             "context_tokens": ctx_stats.get("estimated_tokens"),
+            "chars_per_token": ctx_stats.get("chars_per_token"),
             "code_truncated": ctx_stats.get("code_truncated"),
             "children_included": children,
             "findings_included": n_findings,

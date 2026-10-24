@@ -52,7 +52,7 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     functions = _to_function_infos(state)
     findings = _to_findings(state)
     if not functions:
-        return {"intent_analysis": "Analiz edilecek fonksiyon yok (Ghidra cikisi bos)."}
+        return {"intent_analysis": "No functions to analyze (empty Ghidra output)."}
 
     client = client or from_env()
     max_workers = int(os.getenv("CROWBAR_LLM_MAX_WORKERS", "1"))
@@ -93,19 +93,19 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     unverified = sum(1 for s in result.summaries.values()
                      for c in s.claims if c.status == "unverified")
     intent = (
-        f"{result.calls} fonksiyon ozetlendi; "
-        f"supheli={sum(1 for s in result.summaries.values() if s.suspicious)}; "
-        f"dogrulanmis iddia={verified}, dogrulanamayan={unverified}; "
-        f"token={result.token_total()}."
-        + (f" Iz: {trace_path}" if trace_path else "")
+        f"{result.calls} functions summarized; "
+        f"suspicious={sum(1 for s in result.summaries.values() if s.suspicious)}; "
+        f"verified claims={verified}, unverified={unverified}; "
+        f"tokens={result.token_total()}."
+        + (f" Trace: {trace_path}" if trace_path else "")
         + "\n"
-        + ("\n".join(lines) if lines else "Supheli fonksiyon bulunamadi.")
+        + ("\n".join(lines) if lines else "No suspicious functions found.")
     )
     return {"source_code": updated, "intent_analysis": intent}
 
 
 def run_supervisor(state) -> dict:
-    """ai_supervisor_agent: deterministik sentez (kanit/kanitsiz ayrimi ile)."""
+    """ai_supervisor_agent: deterministic synthesis (evidence vs no-evidence)."""
     summaries = list(getattr(state, "source_code", []) or [])
 
     evidence = [
@@ -113,23 +113,23 @@ def run_supervisor(state) -> dict:
         for f in getattr(state, "findings", []) or []
     ]
 
-    suspicious = [d for d in summaries if getattr(d, "llm_summary", "")]
-    confidence = "yuksek" if evidence else ("orta" if suspicious else "dusuk")
+    summarized = [d for d in summaries if getattr(d, "llm_summary", "")]
+    confidence = "high" if evidence else ("medium" if summarized else "low")
 
     lines = [
-        "# CrowbarAF Analiz Raporu",
+        "# CrowbarAF Analysis Report",
         "",
-        f"- **Kanit sayisi:** {len(evidence)}",
-        f"- **Ozetlenen fonksiyon:** {len(suspicious)}",
-        f"- **Genel guven:** {confidence}",
+        f"- **Evidence items:** {len(evidence)}",
+        f"- **Summarized functions:** {len(summarized)}",
+        f"- **Overall confidence:** {confidence}",
         "",
-        "## Deterministik kanit",
+        "## Deterministic evidence",
     ]
-    lines += [f"- {e}" for e in evidence] or ["- (kanit bulunamadi)"]
-    lines += ["", "## Fonksiyon ozetleri"]
-    lines += [f"- `{d.offset}` {getattr(d, 'name', '')}: {d.llm_summary[:160]}" for d in suspicious] \
-        or ["- (ozet yok)"]
+    lines += [f"- {e}" for e in evidence] or ["- (no evidence found)"]
+    lines += ["", "## Function summaries"]
+    lines += [f"- `{d.offset}` {getattr(d, 'name', '')}: {d.llm_summary[:160]}" for d in summarized] \
+        or ["- (no summaries)"]
     if not evidence:
-        lines += ["", "> **Dikkat:** Deterministik kanit yok. Bu dosya icin karar "
-                      "'belirsiz'dir; 'temiz' olarak yorumlanmamalidir."]
+        lines += ["", "> **Warning:** No deterministic evidence. This sample is "
+                      "'unknown', not 'clean'; manual review is required."]
     return {"analysis_report": "\n".join(lines)}

@@ -115,9 +115,9 @@ def test_scc_order_handles_cycle():
 class FakeClient:
     def chat(self, messages, json_mode=True, temperature=0.0):
         return LLMResult(
-            content='{"ozet":"test ozet","supheli":false,"guven":"orta",'
-                    '"davranis":["x"],"iddialar":[{"iddia":"i","kanit":"return 1"}],'
-                    '"onerilen_isim":"test_fn"}',
+            content='{"summary":"test summary","suspicious":false,"confidence":"medium",'
+                    '"behaviors":["x"],"claims":[{"claim":"i","evidence":"return 1"}],'
+                    '"suggested_name":"test_fn"}',
             prompt_tokens=10, completion_tokens=5,
         )
 
@@ -151,8 +151,8 @@ def test_run_reverser_updates_state_and_intent():
         source_code=[DecompiledFunction(offset="0x1", name="f", c_code="int f(){return 1;}")],
     )
     out = run_reverser(st, client=FakeClient())
-    assert out["source_code"][0].llm_summary == "test ozet"
-    assert "fonksiyon ozetlendi" in out["intent_analysis"]
+    assert out["source_code"][0].llm_summary == "test summary"
+    assert "functions summarized" in out["intent_analysis"]
 
 
 def test_run_supervisor_flags_missing_evidence():
@@ -160,8 +160,8 @@ def test_run_supervisor_flags_missing_evidence():
     from state import AgentState
 
     report = run_supervisor(AgentState(file_path="x"))["analysis_report"]
-    assert "kanit bulunamadi" in report
-    assert "belirsiz" in report
+    assert "no evidence found" in report
+    assert "unknown" in report
 
 
 # --- iz (trace) ---
@@ -235,7 +235,7 @@ class FlakyClient:
         if self.calls == 1:
             return LLMResult(content="bu JSON degil", prompt_tokens=5, completion_tokens=2)
         return LLMResult(
-            content='{"ozet":"ok","supheli":false,"guven":"orta","davranis":[],"iddialar":[],"onerilen_isim":"x"}',
+            content='{"summary":"ok","suspicious":false,"confidence":"medium","behaviors":[],"claims":[],"suggested_name":"x"}',
             prompt_tokens=5, completion_tokens=2)
 
 
@@ -284,7 +284,7 @@ class CountingClient:
     def chat(self, messages, json_mode=True, temperature=0.0):
         self.calls += 1
         return LLMResult(
-            content='{"ozet":"ok","supheli":false,"guven":"orta","davranis":[],"iddialar":[],"onerilen_isim":"x"}',
+            content='{"summary":"ok","suspicious":false,"confidence":"medium","behaviors":[],"claims":[],"suggested_name":"x"}',
             prompt_tokens=5, completion_tokens=2)
 
 
@@ -350,7 +350,7 @@ def test_run_supervisor_uses_state_findings():
     report = run_supervisor(st)["analysis_report"]
     assert "yara/rule: Emotet" in report
     assert "ignored" not in report
-    assert "kanit bulunamadi" not in report
+    assert "no evidence found" not in report
 
 
 def test_to_function_infos_passes_size():

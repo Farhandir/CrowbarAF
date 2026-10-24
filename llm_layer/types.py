@@ -47,14 +47,14 @@ class FunctionSummary:
     offset: str
     summary: str = ""
     suspicious: bool | None = None
-    confidence: str = "dusuk"          # dusuk | orta | yuksek
+    confidence: str = "low"            # low | medium | high
     behaviors: list[str] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     suggested_name: str = ""
 
     def note(self) -> str:
         """Ust fonksiyona tasinacak kisa not (sabit ve dar)."""
-        flag = "SUPHELI" if self.suspicious else "normal"
+        flag = "SUSPICIOUS" if self.suspicious else "benign"
         return f"[{self.name_or_offset()}] {flag}: {self.summary}"[:300]
 
     def name_or_offset(self) -> str:

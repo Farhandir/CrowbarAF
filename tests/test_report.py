@@ -17,20 +17,20 @@ def _state(findings=None, functions=None, capabilities=None):
 
 def test_belirsiz_when_no_evidence():
     rep = report.build(_state())
-    assert rep["verdict"]["level"] == "belirsiz"
+    assert rep["verdict"]["level"] == "unknown"
     assert rep["verdict"]["has_deterministic_evidence"] is False
-    assert any("belirsiz" in x.lower() for x in rep["limitations"])
+    assert any("unknown" in x.lower() for x in rep["limitations"])
 
 
 def test_deterministic_evidence_raises_verdict():
     rep = report.build(_state(findings=[{"source": "yara", "kind": "rule", "value": "Test", "address": ""}]))
-    assert rep["verdict"]["level"] == "yuksek"
+    assert rep["verdict"]["level"] == "high"
     assert rep["tools"]["yara"][0]["rule"] == "Test"
 
 
 def test_floss_only_is_medium():
     rep = report.build(_state(findings=[{"source": "floss", "kind": "url", "value": "http://x"}]))
-    assert rep["verdict"]["level"] == "orta"
+    assert rep["verdict"]["level"] == "medium"
     assert "http://x" in rep["tools"]["floss"]["ioc_findings"]
 
 
@@ -63,21 +63,21 @@ def test_markdown_has_tool_sections_and_ai_separate():
              "totals": {"functions_analyzed": 1}}
     rep = report.build(_state(findings=[{"source": "yara", "kind": "rule", "value": "T"}]), trace)
     md = report.render_markdown(rep)
-    for sec in ("## 1) YARA", "## 6) Ghidra", "AI yorumu"):
+    for sec in ("## 1) YARA", "## 6) Ghidra", "AI commentary"):
         assert sec in md
-    # emoji yerine baslikli gruplar
-    assert "Doğrulanamayan iddialar" in md
+    # heading-based groups (no emoji)
+    assert "Unverified claims" in md
     assert "⚠️" not in md
     assert rep["counts"]["ai_unverified"] == 1
 
 
 def test_markdown_groups_file_level_claims():
     trace = {"functions": [{"offset": "0x1", "name": "f",
-                            "claims": [{"text": "dosya kaniti", "evidence": "x", "status": "file_level"}]}],
+                            "claims": [{"text": "file evidence", "evidence": "x", "status": "file_level"}]}],
              "totals": {"functions_analyzed": 1}}
     rep = report.build(_state(), trace)
     md = report.render_markdown(rep)
-    assert "Dosya düzeyi kanıt" in md
+    assert "File-level evidence" in md
     assert rep["counts"]["ai_file_level"] == 1
 
 

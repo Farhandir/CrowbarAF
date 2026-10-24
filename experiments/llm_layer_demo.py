@@ -64,8 +64,8 @@ def main() -> None:
           f"calls={res.calls} token={res.token_total()}")
     for off, s in res.summaries.items():
         print(f"\n--- {s.name_or_offset()} @ {off} ---")
-        print(f"ozet: {s.summary}")
-        print(f"supheli={s.suspicious} guven={s.confidence}")
+        print(f"summary: {s.summary}")
+        print(f"suspicious={s.suspicious} confidence={s.confidence}")
         for c in s.claims:
             print(f"  [{c.status}] {c.text[:80]}")
     if res.failures:

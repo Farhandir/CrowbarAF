@@ -1,14 +1,13 @@
-"""Araç-öncelikli rapor: deterministik araçların toplu çıktısı + (opsiyonel) AI yorumu.
+"""Tool-first report: deterministic tool output + (optional) AI commentary.
 
-İlke:
-  * **Araç çıktısı** (DIE/YARA/capa/FLOSS/import/entropy/Ghidra) ana içeriktir.
-  * **AI yorumu** ayrı ve işaretlidir ("doğrulanmamış olabilir").
-  * Kanıt yoksa karar **"belirsiz"**dir, asla "temiz" değil.
+Principles:
+  * **Tool output** (DIE/YARA/capa/FLOSS/import/entropy/Ghidra) is the main content.
+  * **AI commentary** is separate and marked ("may be unverified").
+  * If there is no evidence, the verdict is **"unknown"** — never "clean".
 
-Kullanım:
+Usage:
     python report.py <state.json> [--format md|html|json] [--out reports/]
     python report.py --db <sha256> [--format md] [--out reports/]
-    # AI iddialarını da eklemek için: --trace runs/llm_trace_X.json
 """
 from __future__ import annotations
 
@@ -24,13 +23,19 @@ FLOSS_CAP = 60
 IMPORT_CAP = 80
 FUNC_CAP = 40
 
+CLAIM_GROUPS = [
+    ("verified_claim", "Verified claims (function-local evidence)"),
+    ("verified_observation", "Observations (code-quote based)"),
+    ("file_level", "File-level evidence (function attribution unclear)"),
+    ("unverified", "Unverified claims (not sure)"),
+]
+
 
 def _by_source(findings: list[dict], source: str) -> list[dict]:
     return [f for f in findings if f.get("source") == source]
 
 
-def _has(fn: dict) -> bool:
-    """Fonksiyon 'ilgi çekici' mi (capa eşleşmesi / yüksek öncelik)?"""
+def _interesting(fn: dict) -> bool:
     return bool(fn.get("capa_hits")) or (fn.get("priority") or 0) >= 4
 
 
@@ -41,7 +46,6 @@ def build(state: dict, trace: dict | None = None) -> dict:
     functions = state.get("source_code", []) or []
     strings = state.get("extracted_strings", []) or []
 
-    # --- araç bölümleri (deterministik) ---
     yara = [{"rule": f.get("value"), "address": f.get("address")} for f in _by_source(findings, "yara")]
     imports = [f.get("value") for f in _by_source(findings, "import")]
     combos = [f.get("value") for f in _by_source(findings, "import_combo")]
@@ -56,12 +60,12 @@ def build(state: dict, trace: dict | None = None) -> dict:
 
     deterministic = bool(yara or caps.get("matched_rules") or combos or imports or entropy)
     if deterministic:
-        level, note = "yuksek", "Deterministik araç(lar) bulgu üretti."
+        level, note = "high", "Deterministic tool(s) produced findings."
     elif floss_findings or strings:
-        level, note = "orta", "Yalnızca string/IoC düzeyinde çıktı var."
+        level, note = "medium", "Only string/IoC-level output is available."
     else:
-        level, note = "belirsiz", ("Araç çıktısı yok. Bu dosya 'temiz' DEĞİL; "
-                                   "'belirsiz'dir, manuel inceleme gerekir.")
+        level, note = "unknown", ("No tool output. This file is NOT 'clean'; it is "
+                                  "'unknown' and requires manual review.")
 
     ai = None
     if trace:
@@ -97,7 +101,7 @@ def build(state: dict, trace: dict | None = None) -> dict:
                 "call_edges": edges, "decompile_warnings": warnings,
                 "prioritized": [
                     {"offset": f.get("offset"), "name": f.get("name"), "priority": f.get("priority", 0),
-                     "size": f.get("size", 0), "interesting": _has(f),
+                     "size": f.get("size", 0), "interesting": _interesting(f),
                      "capa_hits": f.get("capa_hits", []), "callees": f.get("callees", [])}
                     for f in prioritized[:FUNC_CAP]
                 ],
@@ -116,17 +120,17 @@ def build(state: dict, trace: dict | None = None) -> dict:
 
 
 def _limitations(level: str, deterministic: bool, ai: dict | None) -> list[str]:
-    out = ["Statik analiz; dosya çalıştırılmadı.",
-           "Decompile çıktısı hatalı olabilir; isimler yer tutucu olabilir."]
+    out = ["Static analysis only; the sample was not executed.",
+           "Decompiled code may be inaccurate; identifiers may be placeholders."]
     if not deterministic:
-        out.append("Deterministik araç çıktısı yok → karar belirsiz.")
+        out.append("No deterministic tool output -> verdict is unknown.")
     if ai and ai.get("claims"):
         n = sum(1 for c in ai["claims"] if c.get("status") == "unverified")
         if n:
-            out.append(f"{n} AI iddiası doğrulanamadı (emin değilim) — otorite değildir.")
+            out.append(f"{n} AI claim(s) could not be verified (not authoritative).")
         nf = sum(1 for c in ai["claims"] if c.get("status") == "file_level")
         if nf:
-            out.append(f"{nf} AI iddiası dosya düzeyinde kanıtlı ama fonksiyon atfı belirsiz.")
+            out.append(f"{nf} AI claim(s) have file-level evidence but unclear function attribution.")
     return out
 
 
@@ -137,103 +141,97 @@ def render_json(rep: dict) -> str:
 def render_markdown(rep: dict) -> str:
     ident, v, t = rep["identity"], rep["verdict"], rep["tools"]
     L = [
-        "# CrowbarAF — Araç Raporu", "", f"_{rep['generated_at']}_", "",
-        "## Kimlik",
+        "# CrowbarAF — Tool Report", "", f"_{rep['generated_at']}_", "",
+        "## Identity",
         f"- **SHA-256:** `{ident['sha256']}`",
-        f"- **DIE:** {ident['file_type']} / {ident['arch']}  |  **Packer:** {ident['packer']}  |  **Rota:** {ident['route']}",
+        f"- **DIE:** {ident['file_type']} / {ident['arch']}  |  **Packer:** {ident['packer']}  |  **Route:** {ident['route']}",
         "",
-        "## Karar",
-        f"- **Düzey:** `{v['level']}` — {v['note']}",
+        "## Verdict",
+        f"- **Level:** `{v['level']}` — {v['note']}",
         "",
         "## 1) YARA",
     ]
-    L += [f"- `{y['rule']}`" + (f" @ {y['address']}" if y.get("address") else "") for y in t["yara"]] or ["- (eşleşme yok)"]
+    L += [f"- `{y['rule']}`" + (f" @ {y['address']}" if y.get("address") else "") for y in t["yara"]] or ["- (no matches)"]
 
-    L += ["", "## 2) capa (yetenekler)"]
+    L += ["", "## 2) capa (capabilities)"]
     capa = t["capa"]
     if capa["matched_rules"] or capa["mitre_attack"] or capa["malware_behavior"]:
         for r in capa["matched_rules"]:
-            L.append(f"- kural: `{r}`")
+            L.append(f"- rule: `{r}`")
         for a in capa["mitre_attack"]:
             L.append(f"- ATT&CK: {a}")
         for m in capa["malware_behavior"]:
             L.append(f"- MBC: {m}")
     else:
-        L.append("- (yetenek bulunamadı)")
+        L.append("- (no capabilities found)")
 
-    L += ["", f"## 3) FLOSS (string/IoC) — toplam {t['floss']['string_count']}"]
+    L += ["", f"## 3) FLOSS (strings/IoC) — total {t['floss']['string_count']}"]
     if t["floss"]["ioc_findings"]:
         L += [f"- **IoC:** {x}" for x in t["floss"]["ioc_findings"]]
-    L += [f"- `{s[:90]}`" for s in t["floss"]["strings"][:20]] or ["- (string yok)"]
+    L += [f"- `{s[:90]}`" for s in t["floss"]["strings"][:20]] or ["- (no strings)"]
 
-    L += ["", f"## 4) Import analizi — {t['imports']['import_count']} import"]
+    L += ["", f"## 4) Import analysis — {t['imports']['import_count']} imports"]
     if t["imports"]["combos"]:
-        L += [f"- ⚠️ **kombinasyon:** {c}" for c in t["imports"]["combos"]]
-    L += [f"- `{i}`" for i in t["imports"]["list"][:20]] or ["- (import yok)"]
+        L += [f"- **combination:** {c}" for c in t["imports"]["combos"]]
+    L += [f"- `{i}`" for i in t["imports"]["list"][:20]] or ["- (no imports)"]
 
     if t["entropy"]:
         L += ["", "## 5) Entropy / section"]
         L += [f"- {e['value']} ({e['kind']})" for e in t["entropy"]]
 
     g = t["ghidra"]
-    L += ["", "## 6) Ghidra fonksiyon envanteri",
-          f"- Fonksiyon: {g['function_count']} (decompile: {g['decompiled']})  |  çağrı kenarı: {g['call_edges']}  |  decompile uyarısı: {g['decompile_warnings']}",
-          "", "| offset | isim | pri | boyut | ilgi |", "|---|---|---|---|---|"]
+    L += ["", "## 6) Ghidra function inventory",
+          f"- Functions: {g['function_count']} (decompiled: {g['decompiled']})  |  call edges: {g['call_edges']}  |  decompile warnings: {g['decompile_warnings']}",
+          "", "| offset | name | pri | size | interesting |", "|---|---|---|---|---|"]
     for f in g["prioritized"][:25]:
-        L.append(f"| `{f['offset']}` | {f['name']} | {f['priority']} | {f['size']} | {'evet' if f['interesting'] else '—'} |")
+        L.append(f"| `{f['offset']}` | {f['name']} | {f['priority']} | {f['size']} | {'yes' if f['interesting'] else '—'} |")
     if not g["prioritized"]:
-        L.append("| - | (fonksiyon yok) | | | |")
+        L.append("| - | (no functions) | | | |")
 
     if rep["ai"]:
-        L += ["", "## AI yorumu (otorite değil — ihtiyatla oku)"]
-        groups = [
-            ("verified_claim", "### Doğrulanmış iddialar (fonksiyona yerel kanıt)"),
-            ("verified_observation", "### Kod alıntısına dayalı gözlemler"),
-            ("file_level", "### Dosya düzeyi kanıt (fonksiyon atfı belirsiz)"),
-            ("unverified", "### Doğrulanamayan iddialar (emin değilim)"),
-        ]
+        L += ["", "## AI commentary (not authoritative — read with caution)"]
         claims = rep["ai"]["claims"]
-        for status, title in groups:
+        for status, title in CLAIM_GROUPS:
             bucket = [c for c in claims if c.get("status") == status]
             if not bucket:
                 continue
-            L += ["", f"{title} — {len(bucket)} adet"]
+            L += ["", f"### {title} — {len(bucket)}"]
             for c in bucket[:30]:
                 L.append(f"- `{c.get('offset')}` {str(c.get('text',''))[:120]}")
         if not claims:
-            L.append("- (iddia yok)")
+            L.append("- (no claims)")
 
-    L += ["", "## Sınırlılıklar"] + [f"- {x}" for x in rep["limitations"]]
+    L += ["", "## Limitations"] + [f"- {x}" for x in rep["limitations"]]
     return "\n".join(L)
 
 
 def render_html(rep: dict) -> str:
     body = html.escape(render_markdown(rep))
-    color = {"yuksek": "#c0392b", "orta": "#e67e22", "belirsiz": "#7f8c8d"}.get(rep["verdict"]["level"], "#7f8c8d")
+    color = {"high": "#c0392b", "medium": "#e67e22", "unknown": "#7f8c8d"}.get(rep["verdict"]["level"], "#7f8c8d")
     return f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><title>CrowbarAF {rep['identity']['sha256'][:12]}</title>
+<html lang="en"><head><meta charset="utf-8"><title>CrowbarAF {rep['identity']['sha256'][:12]}</title>
 <style>body{{font-family:system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#222}}
 pre{{background:#f6f8fa;padding:1rem;border-radius:8px;white-space:pre-wrap;word-break:break-word}}
 .badge{{display:inline-block;padding:.2rem .6rem;border-radius:6px;color:#fff;background:{color};font-weight:600}}</style>
-</head><body><p>Karar: <span class="badge">{html.escape(rep['verdict']['level'])}</span></p><pre>{body}</pre></body></html>"""
+</head><body><p>Verdict: <span class="badge">{html.escape(rep['verdict']['level'])}</span></p><pre>{body}</pre></body></html>"""
 
 
 def _from_db(sha256: str) -> dict:
     import db
     detail = db.get_sample_details(sha256)
     if detail is None:
-        raise SystemExit(f"DB'de bulunamadı: {sha256}")
+        raise SystemExit(f"Not found in DB: {sha256}")
     return {"sample": detail["sample"], "findings": detail["findings"],
             "source_code": detail["functions"], "analysis_report": detail.get("supervisor_report", "")}
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="CrowbarAF araç raporu")
-    ap.add_argument("state_json", nargs="?", help="state JSON (main.py çıktısı)")
-    ap.add_argument("--db", help="DB'deki sha256")
-    ap.add_argument("--trace", help="LLM iz JSON'u (AI yorumu için)")
+    ap = argparse.ArgumentParser(description="CrowbarAF tool report")
+    ap.add_argument("state_json", nargs="?", help="state JSON (main.py output)")
+    ap.add_argument("--db", help="sample sha256 in the DB")
+    ap.add_argument("--trace", help="LLM trace JSON (for AI commentary)")
     ap.add_argument("--format", choices=["md", "html", "json"], default="md")
-    ap.add_argument("--out", help="çıktı dizini (yoksa stdout)")
+    ap.add_argument("--out", help="output directory (stdout if omitted)")
     args = ap.parse_args()
 
     if args.db:
@@ -242,12 +240,12 @@ def main() -> None:
         with open(args.state_json, encoding="utf-8") as fh:
             state = json.load(fh)
     else:
-        ap.error("state_json veya --db gerekli")
+        ap.error("state_json or --db is required")
 
     trace = None
     trace_path = args.trace
     if not trace_path:
-        m = re.search(r"Iz:\s*(\S+\.json)", state.get("intent_analysis", "") or "")
+        m = re.search(r"Trace:\s*(\S+\.json)", state.get("intent_analysis", "") or "")
         if m:
             trace_path = m.group(1)
     if trace_path and os.path.isfile(trace_path):
