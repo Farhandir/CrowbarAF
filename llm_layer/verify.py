@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 
+from .context import looks_like_instruction
 from .types import Claim, Finding
 
 
@@ -33,6 +34,10 @@ def verify_claim(claim: Claim, code: str, findings: list[Finding],
         return "verified_observation"
 
     if not ev:
+        return "unverified"
+
+    # Instruction-like text is sample data, never a verified claim.
+    if looks_like_instruction(claim.text) or looks_like_instruction(claim.evidence):
         return "unverified"
 
     # 2) kanit bir bulguyla ortusuyor mu? Yerel ise verified_claim, degilse file_level.

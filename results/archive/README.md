@@ -143,3 +143,8 @@ Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
 - **Prompt dili 2026-10-24'te İngilizceye çevrildi.** Bu tarihten önceki kayıtlar
   Türkçe prompt ile üretildi; dil model davranışını değiştirebilir. Bu sınırın iki
   tarafındaki kayıtları doğrudan kıyaslamayın; gerekirse yeniden koşun.
+- **Kanıt kanalı sertleştirmesi 2026-10-25.** Bulgu seçimi `findings[:20]` yerine
+  sıralı + bütçeli + izlenebilir; bulgular `DATA: {...}` JSON olarak render ediliyor;
+  talimat benzeri string'ler karantinaya alınıyor (içerik modele gitmiyor, izde kalıyor);
+  sistem prompt'u tool çıktısını da kapsıyor; talimat destekli iddialar `unverified`.
+  Bu tarihten önceki ve sonraki kayıtlar doğrudan kıyaslanmamalı; gerekirse yeniden koşun.
