@@ -1,0 +1,102 @@
+{
+  "model": "qwen8:latest",
+  "runs": 1,
+  "workers": 2,
+  "oracle_stability": 1.0,
+  "oracle_tokens": "82574.00",
+  "oracle_per_function": {
+    "0x4010a0": "suspicious",
+    "0x402005": "suspicious",
+    "0x402003": "suspicious",
+    "0x401200": "suspicious",
+    "0x402000": "suspicious",
+    "0x402004": "suspicious",
+    "0x4010c0": "suspicious",
+    "0x4010e0": "suspicious",
+    "0x401300": "benign",
+    "0x402002": "suspicious",
+    "0x401340": "suspicious",
+    "0x402001": "suspicious",
+    "0x401000": "suspicious"
+  },
+  "ground_truth": [
+    "0x401000",
+    "0x4010a0",
+    "0x4010e0"
+  ],
+  "oracle_gt": {
+    "precision": 0.25,
+    "recall": 1.0,
+    "tp": 3,
+    "fp": 9,
+    "fn": 0
+  },
+  "rows": [
+    {
+      "strategy": "truncated",
+      "runs": 1,
+      "coverage": "1.00",
+      "fidelity": "0.85",
+      "oracle_recall": "0.83",
+      "gt_precision": "0.30",
+      "gt_recall": "1.00",
+      "tokens": "32253.00",
+      "decisions_last_run": {
+        "0x401340": "suspicious",
+        "0x401300": "benign",
+        "0x402005": "suspicious",
+        "0x402004": "suspicious",
+        "0x402003": "suspicious",
+        "0x402002": "suspicious",
+        "0x402001": "suspicious",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious",
+        "0x401200": "benign"
+      }
+    },
+    {
+      "strategy": "priority_soft",
+      "runs": 1,
+      "coverage": "1.00",
+      "fidelity": "0.85",
+      "oracle_recall": "0.83",
+      "gt_precision": "0.30",
+      "gt_recall": "1.00",
+      "tokens": "14173.00",
+      "decisions_last_run": {
+        "0x401340": "suspicious",
+        "0x401300": "benign",
+        "0x402005": "suspicious",
+        "0x402004": "suspicious",
+        "0x402003": "suspicious",
+        "0x402002": "suspicious",
+        "0x402001": "suspicious",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious",
+        "0x401200": "benign"
+      }
+    },
+    {
+      "strategy": "priority_threshold",
+      "runs": 1,
+      "coverage": "0.31",
+      "fidelity": "0.50",
+      "oracle_recall": "0.17",
+      "gt_precision": "1.00",
+      "gt_recall": "0.67",
+      "tokens": "3178.00",
+      "decisions_last_run": {
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x4010e0": "suspicious",
+        "0x401200": "benign"
+      }
+    }
+  ]
+}

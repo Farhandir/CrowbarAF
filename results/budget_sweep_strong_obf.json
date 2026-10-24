@@ -1,0 +1,59 @@
+{
+  "model": "qwen8:latest",
+  "strategy": "priority_soft",
+  "oracle_tokens": 82909.0,
+  "ground_truth": [
+    "0x401000",
+    "0x4010a0",
+    "0x4010e0"
+  ],
+  "oracle_gt": {
+    "precision": 0.3,
+    "recall": 1.0,
+    "tp": 3,
+    "fp": 7,
+    "fn": 0
+  },
+  "sweep": [
+    {
+      "budget": 1500,
+      "functions": 13,
+      "gt_precision": 0.3,
+      "gt_recall": 1.0,
+      "tokens": 16569,
+      "saving": 0.8
+    },
+    {
+      "budget": 800,
+      "functions": 13,
+      "gt_precision": 0.273,
+      "gt_recall": 1.0,
+      "tokens": 12140,
+      "saving": 0.854
+    },
+    {
+      "budget": 400,
+      "functions": 13,
+      "gt_precision": 0.273,
+      "gt_recall": 1.0,
+      "tokens": 11030,
+      "saving": 0.867
+    },
+    {
+      "budget": 200,
+      "functions": 13,
+      "gt_precision": 0.273,
+      "gt_recall": 1.0,
+      "tokens": 10564,
+      "saving": 0.873
+    },
+    {
+      "budget": 100,
+      "functions": 13,
+      "gt_precision": 0.273,
+      "gt_recall": 1.0,
+      "tokens": 10468,
+      "saving": 0.874
+    }
+  ]
+}

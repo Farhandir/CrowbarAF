@@ -1,0 +1,142 @@
+{
+  "model": "qwen8:latest",
+  "oracle_decisions": 10,
+  "oracle_per_function": {
+    "0x101020": "suspicious",
+    "0x10125c": "benign",
+    "0x101000": "suspicious",
+    "0x101080": "suspicious",
+    "0x1010e0": "benign",
+    "0x1010b0": "benign",
+    "0x101169": "suspicious",
+    "0x1011c7": "benign",
+    "0x101120": "benign",
+    "0x1011ec": "benign"
+  },
+  "rows": [
+    {
+      "strategy": "full",
+      "decisions": 10,
+      "coverage": 1.0,
+      "fidelity": 1.0,
+      "recall": 1.0,
+      "missed_suspicious": [],
+      "common": 10,
+      "tokens": 7700,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x101020": "suspicious",
+        "0x10125c": "benign",
+        "0x101000": "suspicious",
+        "0x101080": "suspicious",
+        "0x1010e0": "benign",
+        "0x1010b0": "benign",
+        "0x101169": "suspicious",
+        "0x1011c7": "benign",
+        "0x101120": "benign",
+        "0x1011ec": "benign"
+      }
+    },
+    {
+      "strategy": "truncated",
+      "decisions": 2,
+      "coverage": 0.2,
+      "fidelity": 0.5,
+      "recall": 0.25,
+      "missed_suspicious": [
+        "0x101000",
+        "0x101020",
+        "0x101080"
+      ],
+      "common": 2,
+      "tokens": 1686,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x101169": "suspicious",
+        "0x1011ec": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority",
+      "decisions": 2,
+      "coverage": 0.2,
+      "fidelity": 0.5,
+      "recall": 0.25,
+      "missed_suspicious": [
+        "0x101000",
+        "0x101020",
+        "0x101080"
+      ],
+      "common": 2,
+      "tokens": 1686,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x101169": "suspicious",
+        "0x1011ec": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_ev",
+      "decisions": 2,
+      "coverage": 0.2,
+      "fidelity": 0.5,
+      "recall": 0.25,
+      "missed_suspicious": [
+        "0x101000",
+        "0x101020",
+        "0x101080"
+      ],
+      "common": 2,
+      "tokens": 1995,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x101169": "suspicious",
+        "0x1011ec": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_soft",
+      "decisions": 2,
+      "coverage": 0.2,
+      "fidelity": 0.5,
+      "recall": 0.25,
+      "missed_suspicious": [
+        "0x101000",
+        "0x101020",
+        "0x101080"
+      ],
+      "common": 2,
+      "tokens": 1686,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x101169": "suspicious",
+        "0x1011ec": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_soft_ev",
+      "decisions": 2,
+      "coverage": 0.2,
+      "fidelity": 0.5,
+      "recall": 0.25,
+      "missed_suspicious": [
+        "0x101000",
+        "0x101020",
+        "0x101080"
+      ],
+      "common": 2,
+      "tokens": 1995,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x101169": "suspicious",
+        "0x1011ec": "suspicious"
+      }
+    }
+  ]
+}

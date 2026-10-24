@@ -1,0 +1,5 @@
+
+### model: qwen8:latest  (native, runs=3)
+seviye   girdi  json  DOGRU  YANLIS  mesaj+  uydurma  bilmiyorum
+------------------------------------------------------------------
+L0        1756   3/3    3/3     0/3     0/3      0/3         0/3

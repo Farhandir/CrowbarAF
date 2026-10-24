@@ -1,0 +1,136 @@
+{
+  "model": "qwen8:latest",
+  "oracle_decisions": 6,
+  "oracle_per_function": {
+    "0x401300": "benign",
+    "0x402000": "suspicious",
+    "0x4010c0": "benign",
+    "0x4010a0": "suspicious",
+    "0x401000": "suspicious",
+    "0x4010e0": "suspicious"
+  },
+  "rows": [
+    {
+      "strategy": "full",
+      "decisions": 6,
+      "coverage": 1.0,
+      "fidelity": 1.0,
+      "recall": 1.0,
+      "missed_suspicious": [],
+      "common": 6,
+      "tokens": 21475,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x401300": "benign",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious"
+      }
+    },
+    {
+      "strategy": "truncated",
+      "decisions": 6,
+      "coverage": 1.0,
+      "fidelity": 1.0,
+      "recall": 1.0,
+      "missed_suspicious": [],
+      "common": 6,
+      "tokens": 12234,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x401300": "benign",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority",
+      "decisions": 5,
+      "coverage": 0.833,
+      "fidelity": 1.0,
+      "recall": 0.75,
+      "missed_suspicious": [
+        "0x402000"
+      ],
+      "common": 5,
+      "tokens": 7499,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x401300": "benign",
+        "0x4010c0": "benign",
+        "0x401000": "suspicious",
+        "0x4010a0": "suspicious",
+        "0x4010e0": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_ev",
+      "decisions": 5,
+      "coverage": 0.833,
+      "fidelity": 1.0,
+      "recall": 0.75,
+      "missed_suspicious": [
+        "0x402000"
+      ],
+      "common": 5,
+      "tokens": 7525,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x401300": "benign",
+        "0x4010c0": "benign",
+        "0x401000": "suspicious",
+        "0x4010a0": "suspicious",
+        "0x4010e0": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_soft",
+      "decisions": 6,
+      "coverage": 1.0,
+      "fidelity": 1.0,
+      "recall": 1.0,
+      "missed_suspicious": [],
+      "common": 6,
+      "tokens": 8975,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x401300": "benign",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_soft_ev",
+      "decisions": 6,
+      "coverage": 1.0,
+      "fidelity": 1.0,
+      "recall": 1.0,
+      "missed_suspicious": [],
+      "common": 6,
+      "tokens": 9038,
+      "cache_hits": 0,
+      "failures": 0,
+      "per_function": {
+        "0x401300": "benign",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious"
+      }
+    }
+  ]
+}

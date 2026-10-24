@@ -1,0 +1,177 @@
+[
+  {
+    "offset": "0x1011ec",
+    "name": "main",
+    "c_code": "\nundefined8 main(void)\n\n{\n  int iVar1;\n  long in_FS_OFFSET;\n  undefined1 local_58 [72];\n  long local_10;\n  \n  local_10 = *(long *)(in_FS_OFFSET + 0x28);\n  iVar1 = opaque(7);\n  if (iVar1 != 0) {\n    (*(code *)fp_build)(local_58);\n  }\n  printf(\"connecting to %s\\n\",local_58);\n  if (local_10 != *(long *)(in_FS_OFFSET + 0x28)) {\n                    /* WARNING: Subroutine does not return */\n    __stack_chk_fail();\n  }\n  return 0;\n}\n\n",
+    "priority": 5,
+    "size": 111,
+    "is_library": false,
+    "callees": [
+      "0x101070",
+      "0x101060",
+      "0x1011c7",
+      "0x101169"
+    ]
+  },
+  {
+    "offset": "0x101169",
+    "name": "bx",
+    "c_code": "\nvoid bx(long param_1)\n\n{\n  int local_c;\n  \n  for (local_c = 0; local_c < 0x1e; local_c = local_c + 1) {\n    *(byte *)(param_1 + local_c) = enc[local_c] ^ 0x5a;\n  }\n  *(undefined1 *)(param_1 + 0x1e) = 0;\n  return;\n}\n\n",
+    "priority": 5,
+    "size": 94,
+    "is_library": false,
+    "callees": []
+  },
+  {
+    "offset": "0x101120",
+    "name": "__do_global_dtors_aux",
+    "c_code": "\nvoid __do_global_dtors_aux(void)\n\n{\n  if (completed_0 == '\\0') {\n    if (PTR___cxa_finalize_00103ff8 != (undefined *)0x0) {\n      __cxa_finalize(__dso_handle);\n    }\n    deregister_tm_clones();\n    completed_0 = 1;\n    return;\n  }\n  return;\n}\n\n",
+    "priority": 0,
+    "size": 54,
+    "is_library": false,
+    "callees": [
+      "0x101050",
+      "0x1010b0"
+    ]
+  },
+  {
+    "offset": "0x1010e0",
+    "name": "register_tm_clones",
+    "c_code": "\n/* WARNING: Removing unreachable block (ram,0x00101104) */\n/* WARNING: Removing unreachable block (ram,0x00101110) */\n\nvoid register_tm_clones(void)\n\n{\n  return;\n}\n\n",
+    "priority": 0,
+    "size": 51,
+    "is_library": false,
+    "callees": [
+      "0x105028"
+    ]
+  },
+  {
+    "offset": "0x101080",
+    "name": "_start",
+    "c_code": "\nvoid processEntry _start(undefined8 param_1,undefined8 param_2)\n\n{\n  undefined1 auStack_8 [8];\n  \n  (*(code *)PTR___libc_start_main_00103fd8)(main,param_2,&stack0x00000008,0,0,param_1,auStack_8);\n  do {\n                    /* WARNING: Do nothing block with infinite loop */\n  } while( true );\n}\n\n",
+    "priority": 0,
+    "size": 38,
+    "is_library": false,
+    "callees": [
+      "0x105000"
+    ]
+  },
+  {
+    "offset": "0x1011c7",
+    "name": "opaque",
+    "c_code": "\nbool opaque(int param_1)\n\n{\n  return (param_1 + param_1 * param_1 & 1U) == 0;\n}\n\n",
+    "priority": 3,
+    "size": 37,
+    "is_library": false,
+    "callees": []
+  },
+  {
+    "offset": "0x1010b0",
+    "name": "deregister_tm_clones",
+    "c_code": "\n/* WARNING: Removing unreachable block (ram,0x001010c3) */\n/* WARNING: Removing unreachable block (ram,0x001010cf) */\n\nvoid deregister_tm_clones(void)\n\n{\n  return;\n}\n\n",
+    "priority": 0,
+    "size": 34,
+    "is_library": false,
+    "callees": [
+      "0x105008"
+    ]
+  },
+  {
+    "offset": "0x101000",
+    "name": "_init",
+    "c_code": "\nint _init(EVP_PKEY_CTX *ctx)\n\n{\n  int iVar1;\n  \n  iVar1 = 0;\n  if (PTR___gmon_start___00103fe8 != (undefined *)0x0) {\n    iVar1 = (*(code *)PTR___gmon_start___00103fe8)();\n  }\n  return iVar1;\n}\n\n",
+    "priority": 0,
+    "size": 27,
+    "is_library": false,
+    "callees": [
+      "0x105020"
+    ]
+  },
+  {
+    "offset": "0x10125c",
+    "name": "_fini",
+    "c_code": "\nvoid _fini(void)\n\n{\n  return;\n}\n\n",
+    "priority": 0,
+    "size": 13,
+    "is_library": false,
+    "callees": []
+  },
+  {
+    "offset": "0x101020",
+    "name": "FUN_00101020",
+    "c_code": "\nvoid FUN_00101020(void)\n\n{\n  (*(code *)PTR_00103fc0)();\n  return;\n}\n\n",
+    "priority": 0,
+    "size": 12,
+    "is_library": false,
+    "callees": []
+  },
+  {
+    "offset": "0x101070",
+    "name": "printf",
+    "c_code": "",
+    "priority": 0,
+    "size": 10,
+    "is_library": true,
+    "callees": [
+      "0x105018"
+    ]
+  },
+  {
+    "offset": "0x101060",
+    "name": "__stack_chk_fail",
+    "c_code": "",
+    "priority": 0,
+    "size": 10,
+    "is_library": true,
+    "callees": [
+      "0x105010"
+    ]
+  },
+  {
+    "offset": "0x101050",
+    "name": "__cxa_finalize",
+    "c_code": "",
+    "priority": 0,
+    "size": 10,
+    "is_library": true,
+    "callees": [
+      "0x105030"
+    ]
+  },
+  {
+    "offset": "0x105028",
+    "name": "_ITM_registerTMCloneTable",
+    "c_code": "",
+    "priority": 0,
+    "size": 1,
+    "is_library": true,
+    "callees": []
+  },
+  {
+    "offset": "0x105000",
+    "name": "__libc_start_main",
+    "c_code": "",
+    "priority": 0,
+    "size": 1,
+    "is_library": true,
+    "callees": []
+  },
+  {
+    "offset": "0x105008",
+    "name": "_ITM_deregisterTMCloneTable",
+    "c_code": "",
+    "priority": 0,
+    "size": 1,
+    "is_library": true,
+    "callees": []
+  },
+  {
+    "offset": "0x105020",
+    "name": "__gmon_start__",
+    "c_code": "",
+    "priority": 0,
+    "size": 1,
+    "is_library": true,
+    "callees": []
+  }
+]

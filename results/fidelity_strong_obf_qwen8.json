@@ -1,0 +1,93 @@
+{
+  "model": "qwen8:latest",
+  "runs": 1,
+  "workers": 2,
+  "oracle_stability": 1.0,
+  "oracle_tokens": "82909.00",
+  "oracle_per_function": {
+    "0x402002": "suspicious",
+    "0x4010e0": "suspicious",
+    "0x401340": "suspicious",
+    "0x401000": "suspicious",
+    "0x402005": "suspicious",
+    "0x4010a0": "suspicious",
+    "0x402003": "suspicious",
+    "0x401300": "benign",
+    "0x4010c0": "benign",
+    "0x401200": "suspicious",
+    "0x402000": "suspicious",
+    "0x402004": "suspicious",
+    "0x402001": "benign"
+  },
+  "rows": [
+    {
+      "strategy": "truncated",
+      "runs": 1,
+      "coverage": "1.00",
+      "fidelity": "0.92",
+      "recall": "1.00",
+      "tokens": "32519.00",
+      "decisions_last_run": {
+        "0x401300": "benign",
+        "0x401340": "suspicious",
+        "0x402005": "suspicious",
+        "0x402004": "suspicious",
+        "0x402003": "suspicious",
+        "0x402002": "suspicious",
+        "0x402001": "suspicious",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious",
+        "0x401200": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_soft",
+      "runs": 1,
+      "coverage": "1.00",
+      "fidelity": "0.92",
+      "recall": "1.00",
+      "tokens": "16746.00",
+      "decisions_last_run": {
+        "0x401300": "benign",
+        "0x401340": "suspicious",
+        "0x402005": "suspicious",
+        "0x402004": "suspicious",
+        "0x402003": "suspicious",
+        "0x402002": "suspicious",
+        "0x402001": "suspicious",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious",
+        "0x401200": "suspicious"
+      }
+    },
+    {
+      "strategy": "priority_soft_ev",
+      "runs": 1,
+      "coverage": "1.00",
+      "fidelity": "0.92",
+      "recall": "1.00",
+      "tokens": "16872.00",
+      "decisions_last_run": {
+        "0x401300": "benign",
+        "0x401340": "suspicious",
+        "0x402005": "suspicious",
+        "0x402004": "suspicious",
+        "0x402003": "suspicious",
+        "0x402002": "suspicious",
+        "0x402001": "suspicious",
+        "0x402000": "suspicious",
+        "0x4010c0": "benign",
+        "0x4010a0": "suspicious",
+        "0x401000": "suspicious",
+        "0x4010e0": "suspicious",
+        "0x401200": "suspicious"
+      }
+    }
+  ]
+}
