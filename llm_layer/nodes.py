@@ -62,9 +62,10 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         from .cache import SummaryCache
         cache = SummaryCache(cache_path)
     low_budget = int(os.getenv("CROWBAR_LLM_LOW_PRIORITY_BUDGET", "0")) or None
+    min_priority = int(os.getenv("CROWBAR_LLM_MIN_PRIORITY", "0"))
     result = analyze(functions, findings, client, budget_tokens=budget_tokens,
                      max_workers=max_workers, cache=cache,
-                     low_priority_budget=low_budget)
+                     low_priority_budget=low_budget, min_priority=min_priority)
 
     # llm_summary'leri state'e geri yaz
     updated = []

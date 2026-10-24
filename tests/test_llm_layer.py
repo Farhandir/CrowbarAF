@@ -176,6 +176,21 @@ def test_select_with_reasons_reports_library_and_budget():
     assert "0x3" in [f.offset for f in selected]
 
 
+def test_select_with_reasons_min_priority():
+    fn = _fn("0x1", "a" * 10, priority=0)
+    selected, skipped = select_with_reasons([fn], budget_tokens=100, min_priority=1)
+    assert selected == []
+    assert skipped and skipped[0][1] == "priority"
+
+
+def test_analyze_min_priority_skips_low():
+    f0 = _fn("0x1", "int f(){return 1;}", priority=0)
+    f1 = _fn("0x2", "int g(){return 1;}", priority=5)
+    res = analyze([f0, f1], [], FakeClient(), budget_tokens=1000, min_priority=1)
+    assert "0x1" not in res.summaries
+    assert "0x2" in res.summaries
+
+
 def test_tracer_records_totals_and_saves(tmp_path):
     tr = Tracer(model="m", provider="p", budget_tokens=100)
     tr.skipped(_fn("0x2", "", is_library=True), "library")

@@ -44,6 +44,7 @@ def analyze(
     max_retries: int = 2,
     low_priority_budget: int | None = None,
     low_priority_threshold: int = 1,
+    min_priority: int = 0,
 ) -> AnalysisResult:
     """Tum fonksiyonlari bottom-up ozetler.
 
@@ -60,7 +61,7 @@ def analyze(
     )
 
     if total_budget_tokens is not None:
-        fns, skipped = select_with_reasons(functions, total_budget_tokens, skip_library)
+        fns, skipped = select_with_reasons(functions, total_budget_tokens, skip_library, min_priority)
         for fn, reason in skipped:
             tracer.skipped(fn, reason)
     else:
@@ -68,6 +69,8 @@ def analyze(
         for f in functions:
             if skip_library and f.is_library:
                 tracer.skipped(f, "library")
+            elif (f.priority or 0) < min_priority:
+                tracer.skipped(f, "priority")
             else:
                 fns.append(f)
 

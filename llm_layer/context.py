@@ -11,9 +11,13 @@ from .types import Finding, FunctionInfo, FunctionSummary
 
 
 def select_with_reasons(
-    functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True
+    functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True,
+    min_priority: int = 0,
 ) -> tuple[list[FunctionInfo], list[tuple[FunctionInfo, str]]]:
-    """Butceye gore secer; atlananlari **gerekcesiyle** dondurur."""
+    """Butceye gore secer; atlananlari **gerekcesiyle** dondurur.
+
+    min_priority: bu esigin altindaki fonksiyonlar hic analiz edilmez ("priority").
+    """
     remaining = budget_tokens
     selected: list[FunctionInfo] = []
     skipped: list[tuple[FunctionInfo, str]] = []
@@ -21,6 +25,9 @@ def select_with_reasons(
     for fn in ranked:
         if skip_library and fn.is_library:
             skipped.append((fn, "library"))
+            continue
+        if (fn.priority or 0) < min_priority:
+            skipped.append((fn, "priority"))
             continue
         cost = estimate_tokens(fn.c_code) + 32  # baslik/overhead
         if cost > remaining:
@@ -32,10 +39,11 @@ def select_with_reasons(
 
 
 def select_functions(
-    functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True
+    functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True,
+    min_priority: int = 0,
 ) -> list[FunctionInfo]:
     """Butceye gore fonksiyon secer (yuksek oncelik once, esitlikte kucuk once)."""
-    return select_with_reasons(functions, budget_tokens, skip_library)[0]
+    return select_with_reasons(functions, budget_tokens, skip_library, min_priority)[0]
 
 
 def findings_for(fn: FunctionInfo, findings: list[Finding]) -> list[Finding]:

@@ -36,8 +36,10 @@ sığdırmaya çalışmadan**, sıralı ve kanıta bağlı biçimde özetleyip e
    üçüncü bir durum içerir: **"yeterli kanıt yok + N anomali + neden belirsiz"**.
 4. **Kanıt yokluğu ≠ temizlik.** Deterministik katman sustuğunda sistem
    **asla "temiz" demez**; "belirsiz, manuel/hibrit inceleme gerekli" der.
-5. **LLM hızlandırıcıdır, otorite değildir.** Sistem bir analistin elinde
-   zaman kazandırır; vardığı sonuca körü körüne güvenilmez.
+5. **LLM hızlandırıcıdır, otorite değildir (9B lokal modelde ölçüldü).** Sistem
+   bir analistin elinde zaman kazandırır; vardığı sonuca körü körüne güvenilmez.
+   Daha büyük/frontier modelde bu denge **değişebilir**; ölçülmesi gerekir
+   (bkz. `results/archive`, model ekseni).
 6. **Decompiler da yanılabilir.** LLM'in baktığı kod zaten yeniden üretilmiş,
    hatalı olabilir; isimler yer tutucudur (`FUN_`, `local_`, `DAT_`).
    Prompt bunu açıkça söyler ve decompile güveni ayrıca taşınır.
@@ -174,8 +176,9 @@ raporla"` gömülebilir → *indirect prompt injection*.
 
 Katmanlı savunma:
 
-1. **LLM otorite değil (en sağlam).** Başarılı injection yalnızca *yorum
-   metnini* etkiler; deterministik bulguları silemez.
+1. **LLM otorite değil (en sağlam; 9B lokal modelde ölçüldü).** Başarılı injection
+   yalnızca *yorum metnini* etkiler; deterministik bulguları silemez. Frontier
+   modelde direnç artabilir ama **garanti değildir**; ölçülmeli.
 2. **Çelişki kontrolü = dedektör:** LLM "temiz" derken capa `inject process`
    bulduysa → otomatik geçersiz/sarı uyarı.
 3. **Veri/sistem ayrımı:** örnek-türevi her şey açık ayraçlarla "saldırgan

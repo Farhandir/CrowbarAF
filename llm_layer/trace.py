@@ -78,6 +78,7 @@ class Tracer:
             "functions_skipped": len(skipped),
             "skipped_library": sum(1 for f in skipped if f["skip_reason"] == "library"),
             "skipped_budget": sum(1 for f in skipped if f["skip_reason"] == "budget"),
+            "skipped_priority": sum(1 for f in skipped if f["skip_reason"] == "priority"),
             "coverage": round(len(analyzed) / total, 3) if total else 0.0,
             "calls": result.calls,
             "cache_hits": getattr(result, "cache_hits", 0),
