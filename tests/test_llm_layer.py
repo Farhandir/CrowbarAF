@@ -7,11 +7,27 @@ from llm_layer.context import (build_function_context, select_findings,
                                select_functions, select_with_reasons)
 from llm_layer.pipeline import AnalysisResult, analyze
 from llm_layer.summarize import summarize_function
-from llm_layer.tokens import TokenCounter, estimate_tokens, truncate_to_tokens
+import pytest
+
+from llm_layer.tokens import (DEFAULT_COUNTER, TokenCounter, estimate_tokens,
+                              truncate_to_tokens)
 from llm_layer.trace import Tracer
 from llm_layer.traverse import scc_levels, scc_order
 from llm_layer.types import Claim, Finding, FunctionInfo, FunctionSummary
 from llm_layer.verify import verify_claim
+from llm_layer.context import select_findings_sections
+from llm_layer.verdict import apply_fail_closed, compute_verdict
+
+
+
+@pytest.fixture(autouse=True)
+def _reset_token_counter():
+    """Calibration is global; isolate tests from each other."""
+    DEFAULT_COUNTER.chars_per_token = 4.0
+    DEFAULT_COUNTER.samples = 0
+    yield
+    DEFAULT_COUNTER.chars_per_token = 4.0
+    DEFAULT_COUNTER.samples = 0
 
 
 # --- tokens ---
@@ -201,6 +217,25 @@ class FakeClient:
                     '"suggested_name":"test_fn"}',
             prompt_tokens=10, completion_tokens=5,
         )
+
+
+def test_pipeline_fail_closed_with_critical_c2():
+    fn = _fn("0x1", "int f(){return 1;}")
+    findings = [Finding(source="floss", kind="string",
+                        value="http://192.0.2.1:4444/gate.php", address=None)]
+    res = analyze([fn], findings, FakeClient(), budget_tokens=1000)
+    s = res.summaries["0x1"]
+    assert s.suspicious is None
+    assert s.fail_closed is True
+    assert compute_verdict([fn], findings, res.summaries)["verdict"] == "needs_review"
+
+
+def test_pipeline_fail_closed_yara_is_malicious():
+    fn = _fn("0x1", "int f(){return 1;}")
+    findings = [Finding(source="yara", kind="rule", value="Malware.X", address=None)]
+    res = analyze([fn], findings, FakeClient(), budget_tokens=1000)
+    assert res.summaries["0x1"].fail_closed is True
+    assert compute_verdict([fn], findings, res.summaries)["verdict"] == "malicious"
 
 
 def test_analyze_end_to_end_with_fake_client():
@@ -452,3 +487,106 @@ def test_to_function_infos_skips_functions_without_code():
         DecompiledFunction(offset="0x3", c_code="   "),
     ])
     assert [f.offset for f in _to_function_infos(st)] == ["0x1"]
+
+
+# --- verdict / two-tier evidence ---
+def _summary(offset, suspicious):
+    return FunctionSummary(offset=offset, summary="s", suspicious=suspicious)
+
+
+def test_two_tier_sections_split_local_and_global():
+    fn = _fn("0x1", "code")
+    findings = [
+        Finding(source="capa", kind="capability", value="local", address="0x1"),
+        Finding(source="floss", kind="string", value="global", address=None),
+    ]
+    local, glob, stats = select_findings_sections(fn, findings, 1000)
+    assert any("local" in x for x in local)
+    assert any("global" in x for x in glob)
+    assert stats["local_used"] == 1
+    assert stats["global_used"] == 1
+
+
+def test_critical_c2_is_included_even_when_last():
+    fn = _fn("0x1", "code")
+    findings = [Finding(source="floss", kind="string", value=f"noise_{i}", address=None)
+                for i in range(30)]
+    findings.append(Finding(source="floss", kind="string",
+                            value="http://192.0.2.1:4444/gate.php", address=None))
+    local, glob, stats = select_findings_sections(fn, findings, 200)
+    assert any("192.0.2.1" in x for x in glob)
+    assert stats["critical_used"] >= 1
+
+
+def test_global_digest_reports_dropped():
+    fn = _fn("0x1", "code")
+    findings = [Finding(source="floss", kind="string", value="x" * 200 + str(i),
+                        address=None) for i in range(20)]
+    local, glob, stats = select_findings_sections(fn, findings, 200)
+    assert stats["global_dropped"] > 0
+    assert any("more global findings" in x for x in glob)
+
+
+def test_verdict_no_evidence_when_covered():
+    fns = [_fn("0x1", "code"), _fn("0x2", "code")]
+    summaries = {"0x1": _summary("0x1", False), "0x2": _summary("0x2", False)}
+    v = compute_verdict(fns, [], summaries)
+    assert v["verdict"] == "no_evidence"
+    assert v["coverage"]["ratio"] == 1.0
+
+
+def test_verdict_unknown_when_packed():
+    fns = [_fn("0x1", "code")]
+    summaries = {"0x1": _summary("0x1", False)}
+    v = compute_verdict(fns, [], summaries, packed=True)
+    assert v["verdict"] == "unknown"
+    assert any("packed" in r for r in v["unknown_reasons"])
+
+
+def test_verdict_unknown_when_low_coverage():
+    fns = [_fn("0x1", "code"), _fn("0x2", "code")]
+    summaries = {"0x1": _summary("0x1", False)}
+    v = compute_verdict(fns, [], summaries)
+    assert v["verdict"] == "unknown"
+    assert v["coverage"]["ratio"] == 0.5
+
+
+def test_verdict_malicious_on_suspicious_function():
+    fns = [_fn("0x1", "code")]
+    summaries = {"0x1": _summary("0x1", True)}
+    v = compute_verdict(fns, [], summaries)
+    assert v["verdict"] == "malicious"
+
+
+def test_verdict_malicious_on_yara():
+    fns = [_fn("0x1", "code")]
+    summaries = {"0x1": _summary("0x1", False)}
+    v = compute_verdict(fns, [Finding(source="yara", kind="rule", value="Malware.X")], summaries)
+    assert v["verdict"] == "malicious"
+
+
+def test_verdict_needs_review_on_c2_string():
+    fns = [_fn("0x1", "code")]
+    summaries = {"0x1": _summary("0x1", False)}
+    v = compute_verdict(fns, [Finding(source="floss", kind="string",
+                                     value="http://192.0.2.1:4444/gate.php")], summaries)
+    assert v["verdict"] == "needs_review"
+
+
+def test_fail_closed_overrides_benign_on_critical():
+    fn = _fn("0x1", "code")
+    s = _summary("0x1", False)
+    findings = [Finding(source="floss", kind="string",
+                        value="http://192.0.2.1:4444/gate.php", address=None)]
+    out = apply_fail_closed(s, fn, findings)
+    assert out.suspicious is None
+    assert out.fail_closed is True
+
+
+def test_fail_closed_keeps_benign_without_critical():
+    fn = _fn("0x1", "code")
+    s = _summary("0x1", False)
+    findings = [Finding(source="floss", kind="string", value="hello", address=None)]
+    out = apply_fail_closed(s, fn, findings)
+    assert out.suspicious is False
+    assert out.fail_closed is False

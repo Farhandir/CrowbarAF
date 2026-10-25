@@ -67,6 +67,15 @@ def build(state: dict, trace: dict | None = None) -> dict:
         level, note = "unknown", ("No tool output. This file is NOT 'clean'; it is "
                                   "'unknown' and requires manual review.")
 
+    v4 = state.get("verdict") or {}
+    state_v = None
+    if v4:
+        state_v = v4.get("verdict", "unknown")
+        level = {"malicious": "high", "needs_review": "medium",
+                 "unknown": "unknown", "no_evidence": "unknown"}.get(state_v, "unknown")
+        note = "; ".join(v4.get("reasons") or v4.get("unknown_reasons") or [])
+        deterministic = bool(v4.get("critical_findings"))
+
     ai = None
     if trace:
         claims = []
@@ -82,7 +91,14 @@ def build(state: dict, trace: dict | None = None) -> dict:
             "arch": sample.get("arch", "unknown"), "packer": sample.get("packer", "unknown"),
             "route": sample.get("route", "unknown"),
         },
-        "verdict": {"level": level, "note": note, "has_deterministic_evidence": deterministic},
+        "verdict": {
+            "level": level, "note": note,
+            "state": state_v,
+            "has_deterministic_evidence": deterministic,
+            "coverage": (v4.get("coverage") or {}),
+            "unknown_reasons": (v4.get("unknown_reasons") or []),
+            "next_actions": (v4.get("next_actions") or []),
+        },
         "tools": {
             "die": {"file_type": sample.get("file_type", "unknown"), "arch": sample.get("arch", "unknown"),
                     "packer": sample.get("packer", "unknown")},
@@ -148,9 +164,19 @@ def render_markdown(rep: dict) -> str:
         "",
         "## Verdict",
         f"- **Level:** `{v['level']}` — {v['note']}",
-        "",
-        "## 1) YARA",
     ]
+    if v.get("state"):
+        L.append(f"- **State:** `{v['state']}`")
+    if v.get("coverage"):
+        cov = v["coverage"]
+        ratio = float(cov.get("ratio", 0.0) or 0.0)
+        L.append(f"- **Coverage:** {cov.get('analyzed', 0)}/{cov.get('total', 0)} "
+                 f"({ratio:.0%})")
+    if v.get("unknown_reasons"):
+        L.append("- **Unknown because:** " + "; ".join(v["unknown_reasons"]))
+    if v.get("next_actions"):
+        L.append("- **Next:** " + "; ".join(v["next_actions"]))
+    L += ["", "## 1) YARA"]
     L += [f"- `{y['rule']}`" + (f" @ {y['address']}" if y.get("address") else "") for y in t["yara"]] or ["- (no matches)"]
 
     L += ["", "## 2) capa (capabilities)"]

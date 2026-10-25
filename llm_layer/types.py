@@ -51,6 +51,7 @@ class FunctionSummary:
     behaviors: list[str] = field(default_factory=list)
     claims: list[Claim] = field(default_factory=list)
     suggested_name: str = ""
+    fail_closed: bool = False  # LLM said benign, but a critical finding overrode it
 
     def note(self) -> str:
         """Ust fonksiyona tasinacak kisa not (sabit ve dar)."""

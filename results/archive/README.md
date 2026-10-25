@@ -147,4 +147,6 @@ Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
   sıralı + bütçeli + izlenebilir; bulgular `DATA: {...}` JSON olarak render ediliyor;
   talimat benzeri string'ler karantinaya alınıyor (içerik modele gitmiyor, izde kalıyor);
   sistem prompt'u tool çıktısını da kapsıyor; talimat destekli iddialar `unverified`.
-  Bu tarihten önceki ve sonraki kayıtlar doğrudan kıyaslanmamalı; gerekirse yeniden koşun.
+  **P0 (aynı gün):** dört durumlu dosya verdict'i (`malicious/needs_review/unknown/no_evidence`),
+  fail-closed backstop ve iki katmanlı kanıt (yerel + global digest). Bu tarihten önceki ve
+  sonraki kayıtlar doğrudan kıyaslanmamalı; gerekirse yeniden koşun.

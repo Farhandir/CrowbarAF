@@ -140,6 +140,10 @@ class AgentState(BaseModel):
     # AI ajanlarının ürettiği ara çıktılar
     iocs: dict[str, list[str]] = Field(default_factory=dict)  # ai_extractor_agent
     intent_analysis: str = ""  # ai_reverser_agent
+    verdict: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Deterministic file-level verdict (malicious/needs_review/unknown/no_evidence).",
+    )
 
     # Nihai sentez raporu (JSON / Markdown)
     analysis_report: str = ""

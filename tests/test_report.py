@@ -85,3 +85,19 @@ def test_render_json_roundtrip():
     rep = report.build(_state())
     import json
     assert json.loads(report.render_json(rep))["identity"]["sha256"] == "abc"
+
+
+def test_state_verdict_is_rendered_with_coverage():
+    st = _state()
+    st["verdict"] = {
+        "verdict": "unknown",
+        "coverage": {"analyzed": 2, "total": 5, "ratio": 0.4},
+        "unknown_reasons": ["coverage 40% < 80%"],
+        "next_actions": ["analyze skipped functions"],
+    }
+    rep = report.build(st)
+    assert rep["verdict"]["state"] == "unknown"
+    assert rep["verdict"]["coverage"]["ratio"] == 0.4
+    md = report.render_markdown(rep)
+    assert "State" in md
+    assert "40%" in md

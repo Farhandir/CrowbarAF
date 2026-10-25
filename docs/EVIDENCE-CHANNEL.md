@@ -41,6 +41,29 @@ In `llm_layer/context.py`, `summarize.py`, `verify.py`, `trace.py`:
   findings are data, quarantined entries are evidence of manipulation.
 - **Verifier rule.** Claims backed by instruction-like text are `unverified`.
 
+### P0 (2026-10-25): verdict + fail-closed + two-tier evidence
+
+- **Four-state file verdict** in `llm_layer/verdict.py` (`malicious` /
+  `needs_review` / `unknown` / `no_evidence`), integrated into `state.verdict`,
+  the supervisor report and `report.py`. Coverage and unknown reasons are explicit.
+- **Fail-closed backstop:** if the LLM says benign and a critical finding is
+  relevant (YARA, high-confidence capa/IOC, C2-like URL/IP), the function becomes
+  `unknown` and the file verdict cannot be `no_evidence`. Tested end-to-end with a
+  fake benign client (`test_pipeline_fail_closed_*`).
+- **Two-tier evidence:** address-local findings + one compact global digest per
+  function. Critical findings **bypass the budget**; non-critical findings are
+  ranked and budgeted; the dropped count is traced. This replaces the arbitrary
+  per-function 25% share for the decisive evidence.
+- **Decision recall:** `is_critical_finding` + must-include. Unit test with 30
+  noise findings and the C2 last still includes it; `flood_last` (60 URLs + C2)
+  keeps the C2 and the verdict (`malicious`).
+- **Paraphrase/encoded tests:** paraphrase, polite note, base64, ROT13 and split
+  strings were **not** caught by quarantine (`q=0`), but the verdict stayed
+  `malicious` in every case. Defense-in-depth: the model resisted, and the
+  critical-evidence/fail-closed path is the backstop.
+- Tests: **307 passing**.
+
+
 ### Measured effect
 
 | test | before | after |
@@ -52,7 +75,7 @@ In `llm_layer/context.py`, `summarize.py`, `verify.py`, `trace.py`:
 | #4 `pack_upx` / `dynapi_tools` | true | true |
 | #6 fake reputation | true | true |
 | cost | 2791 tokens | 3396 tokens (+22%) |
-| tests | 286 | 293 |
+| tests | 286 | 307 |
 
 Archive: 26 records; the hardening boundary is noted in
 `results/archive/README.md`. Records before/after this boundary are not directly
@@ -70,15 +93,18 @@ comparable.
    corroborated by imports/behaviour. No corroboration score.
 4. **Source-specific policy.** YARA/capa, imports, IOC and raw strings are not
    treated differently at the authority level.
-5. **Conflict policy.** A finding that claims "benign/signed" is not explicitly
-   marked as a claim; it is only quarantined if it matches an instruction marker.
+5. **Conflict policy.** The file verdict detects a benign claim that conflicts
+   with critical evidence (`needs_review`), but there is no full per-claim
+   conflict ledger yet.
 6. **Source coverage.** Only FLOSS strings were tested. capa, YARA, imports,
    IOC, file metadata and signatures are untested.
 7. **Multi-hop.** Instructions carried through child summaries are untested.
-8. **Paraphrase / encoded instructions.** Quarantine is marker-based; a
-   paraphrased or base64 instruction may evade it.
-9. **Decision-recall measurement.** No labeled set of "decisive findings" and no
-   permutation/ablation test yet.
+8. **Paraphrase / encoded instructions.** Tested (paraphrase, polite, base64,
+   ROT13, split): quarantine was evaded but the verdict held. Stronger encodings
+   and multi-turn phrasing are untested.
+9. **Decision-recall measurement.** Must-include critical findings + a unit test
+   (C2 last) and `flood_last` are done; a labeled permutation/ablation suite
+   across samples is still missing.
 10. **RAG.** Not implemented (not needed at the current scale).
 
 ## 4. "100%" — what it means and what it costs

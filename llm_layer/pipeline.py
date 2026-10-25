@@ -12,7 +12,7 @@ from .summarize import summarize_function
 from .trace import Tracer
 from .traverse import scc_levels
 from .types import Finding, FunctionInfo, FunctionSummary
-
+from .verdict import apply_fail_closed
 ZERO_RESULT = LLMResult(content="", prompt_tokens=0, completion_tokens=0)
 
 
@@ -98,6 +98,8 @@ def analyze(
             try:
                 summary, res, stats = summarize_function(
                     client, fn, callee_summaries, findings, fn_budget, max_retries)
+                summary = apply_fail_closed(summary, fn, findings)
+                stats["fail_closed"] = summary.fail_closed
                 return offset, summary, res, stats, time.monotonic() - t0, None
             except Exception as exc:  # noqa: BLE001
                 return offset, None, None, {}, time.monotonic() - t0, f"{type(exc).__name__}: {exc}"

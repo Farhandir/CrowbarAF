@@ -8,6 +8,7 @@ from __future__ import annotations
 from .factory import from_env
 from .pipeline import analyze
 from .types import Finding, FunctionInfo
+from .verdict import compute_verdict
 
 
 def _to_function_infos(state) -> list[FunctionInfo]:
@@ -52,7 +53,8 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     functions = _to_function_infos(state)
     findings = _to_findings(state)
     if not functions:
-        return {"intent_analysis": "No functions to analyze (empty Ghidra output)."}
+        return {"intent_analysis": "No functions to analyze (empty Ghidra output).",
+                "verdict": compute_verdict([], findings, {})}
 
     client = client or from_env()
     max_workers = int(os.getenv("CROWBAR_LLM_MAX_WORKERS", "1"))
@@ -101,7 +103,12 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         + "\n"
         + ("\n".join(lines) if lines else "No suspicious functions found.")
     )
-    return {"source_code": updated, "intent_analysis": intent}
+    packer = (getattr(getattr(state, "sample", None), "packer", "") or "").lower()
+    packed = packer not in ("", "none", "unknown") and (
+        not functions or all(f.is_library for f in functions))
+    verdict = compute_verdict(functions, findings, result.summaries,
+                              packed=packed, analysis_failures=result.failures)
+    return {"source_code": updated, "intent_analysis": intent, "verdict": verdict}
 
 
 def run_supervisor(state) -> dict:
@@ -116,15 +123,27 @@ def run_supervisor(state) -> dict:
     summarized = [d for d in summaries if getattr(d, "llm_summary", "")]
     confidence = "high" if evidence else ("medium" if summarized else "low")
 
-    lines = [
-        "# CrowbarAF Analysis Report",
-        "",
+    lines = ["# CrowbarAF Analysis Report", ""]
+    v = getattr(state, "verdict", {}) or {}
+    if v:
+        cov = v.get("coverage", {}) or {}
+        lines += [
+            f"- **Verdict:** `{v.get('verdict', 'unknown')}`",
+            f"- **Coverage:** {cov.get('analyzed', 0)}/{cov.get('total', 0)} functions "
+            f"({float(cov.get('ratio', 0.0)):.0%})",
+        ]
+    lines += [
         f"- **Evidence items:** {len(evidence)}",
         f"- **Summarized functions:** {len(summarized)}",
         f"- **Overall confidence:** {confidence}",
-        "",
-        "## Deterministic evidence",
     ]
+    if v.get("reasons"):
+        lines.append("- **Reasons:** " + "; ".join(v["reasons"]))
+    if v.get("unknown_reasons"):
+        lines.append("- **Unknown because:** " + "; ".join(v["unknown_reasons"]))
+    if v.get("next_actions"):
+        lines.append("- **Next:** " + "; ".join(v["next_actions"]))
+    lines += ["", "## Deterministic evidence"]
     lines += [f"- {e}" for e in evidence] or ["- (no evidence found)"]
     lines += ["", "## Function summaries"]
     lines += [f"- `{d.offset}` {getattr(d, 'name', '')}: {d.llm_summary[:160]}" for d in summarized] \

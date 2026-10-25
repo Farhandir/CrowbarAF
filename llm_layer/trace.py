@@ -63,6 +63,7 @@ class Tracer:
             "completion_tokens": completion,
             "duration_s": round(duration_s, 2),
             "json_ok": ctx_stats.get("json_ok"),
+            "fail_closed": ctx_stats.get("fail_closed"),
             "summary": summary.summary,
             "suspicious": summary.suspicious,
             "confidence": summary.confidence,
