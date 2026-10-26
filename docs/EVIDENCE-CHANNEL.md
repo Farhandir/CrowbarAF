@@ -249,8 +249,8 @@ Same synthetic sample, only the payload's priority changes:
   at the payload address cannot force the function into the run.
 - **Fix:** selection-level must-include — if a critical finding has an address,
   force that function into the analyzed set; for address-less critical findings,
-  use Ghidra xrefs to map the string to a function, otherwise fall back to soft or
-  a file-level evidence pass.
+  use Ghidra xrefs to map the string to a function (**done**, see below), otherwise
+  fall back to soft or a file-level evidence pass.
 
 #### After the fix (must-include + Linux/call-graph priority)
 
@@ -273,8 +273,29 @@ Same synthetic sample, only the payload's priority changes:
   2,268 tokens. **Soft remains the safe default**; threshold is an opt-in.
 - **Priority fixes:** Linux APIs (`socket`, `connect`, `execve`, `system`,
   `dlsym`, `ptrace`, `mprotect`, ...) now score +4; `propagate_priority` raises
-  direct callees of high-priority functions by one. Ghidra xref population is
-  still a TODO.
+  direct callees of high-priority functions by one.
+- **Address-less string -> function mapping: done (2026-10-26, producer side).**
+  `export_functions.py` collects `ip/url/domain/registry/file/email` finding values,
+  scans the program's defined strings (`DefinedDataIterator.definedStrings`; equal or
+  *contained in* the string, case-insensitive), follows `getReferencesTo(string)` to
+  `getFunctionContaining(from)` and writes the matched values into the function's
+  `iocs` (state `DecompiledFunction.iocs`, DB `functions.iocs`). A function that
+  references an IoC gets **+3 priority** (once per function, however many IoCs), so it
+  is a decompile candidate even with no capa/API signal. Pure logic and a fake-Ghidra
+  harness are unit-tested; **not yet run on a real Ghidra**.
+  **Consumer side: done (2026-10-26).** `llm_layer.types.FunctionInfo` now carries
+  `iocs` and `_to_function_infos` copies them from `DecompiledFunction.iocs`.
+  `context.finding_matches_function` (used by `must_include_offsets`) matches a
+  finding to a function by address, by value-in-code, **or by `fn.iocs`**: the finding
+  value equals an IoC (case-insensitive) or, for values of 8+ chars, is contained in
+  one. A critical address-less finding whose string Ghidra linked by xref therefore
+  forces that function into the run (bypassing `min_priority` and the budget, with
+  its direct callees), even when the string is not visible in the pseudo-C. Reverse
+  containment (a short IoC inside a longer finding) is deliberately not matched.
+  Unit-tested, including an `analyze(..., min_priority=1)` run; **not yet exercised on
+  a real Ghidra output**.
+  *Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
+  not defined strings in the binary and still cannot be mapped.
 
 #### Scale check (after the fix)
 

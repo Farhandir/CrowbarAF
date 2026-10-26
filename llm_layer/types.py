@@ -30,6 +30,8 @@ class FunctionInfo:
     callees: list[str] = field(default_factory=list)
     xrefs: list[str] = field(default_factory=list)
     decompile_warnings: list[str] = field(default_factory=list)
+    # Ghidra string xref eşlemesi: bu fonksiyonun string referansıyla kullandığı IoC değerleri
+    iocs: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS functions (
     size               INTEGER,
     is_library         BOOLEAN,
     capa_hits          TEXT,
-    xrefs              TEXT
+    xrefs              TEXT,
+    iocs               TEXT
 );
 
 CREATE TABLE IF NOT EXISTS calls (
@@ -62,7 +63,8 @@ CREATE TABLE IF NOT EXISTS calls (
 CREATE TABLE IF NOT EXISTS llm_claims (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     sha256            TEXT,
-    supervisor_report TEXT
+    supervisor_report TEXT,
+    verdict           TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_findings_sha256   ON findings(sha256);
@@ -78,7 +80,14 @@ FUNCTION_EXTRA_COLUMNS = (
     ("is_library", "BOOLEAN"),
     ("capa_hits", "TEXT"),
     ("xrefs", "TEXT"),
+    ("iocs", "TEXT"),
 )
+
+# llm_claims'e sonradan eklenen sütunlar (verdict: dosya düzeyi karar, JSON metni)
+LLM_CLAIMS_EXTRA_COLUMNS = (("verdict", "TEXT"),)
+
+# tablo -> sonradan eklenen sütunlar (eski veritabanı migrasyonu)
+_MIGRATIONS = (("functions", FUNCTION_EXTRA_COLUMNS), ("llm_claims", LLM_CLAIMS_EXTRA_COLUMNS))
 
 
 def _path(db_path: str | None) -> str:
@@ -96,10 +105,11 @@ def init_db(db_path: str | None = None) -> str:
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.executescript(SCHEMA)
         # CREATE TABLE IF NOT EXISTS mevcut tabloya sütun eklemez: eski şemayı yükselt
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(functions)")}
-        for column, sql_type in FUNCTION_EXTRA_COLUMNS:
-            if column not in existing:
-                conn.execute(f"ALTER TABLE functions ADD COLUMN {column} {sql_type}")
+        for table, columns in _MIGRATIONS:
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for column, sql_type in columns:
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
     return path
 
 
@@ -153,6 +163,7 @@ def insert_functions_and_calls(
                 int(bool(fn.is_library)),
                 json.dumps(list(fn.capa_hits), ensure_ascii=False),
                 json.dumps(list(fn.xrefs), ensure_ascii=False),
+                json.dumps(list(fn.iocs), ensure_ascii=False),
             )
         )
         for callee in dict.fromkeys(fn.callees):
@@ -163,7 +174,7 @@ def insert_functions_and_calls(
         conn.execute("DELETE FROM calls WHERE sha256 = ?", (sha256,))
         conn.executemany(
             "INSERT INTO functions (sha256, offset, name, priority, c_code, decompile_warnings, "
-            "llm_summary, size, is_library, capa_hits, xrefs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "llm_summary, size, is_library, capa_hits, xrefs, iocs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             function_rows,
         )
         conn.executemany(
@@ -173,13 +184,25 @@ def insert_functions_and_calls(
     return len(function_rows), len(call_rows)
 
 
-def insert_llm_claims(sha256: str, report: str, db_path: str | None = None) -> None:
-    """Supervisor raporunu ``llm_claims`` tablosuna yazar (örneğin önceki raporunun yerine)."""
+def insert_llm_claims(
+    sha256: str,
+    report: str,
+    db_path: str | None = None,
+    verdict: dict[str, Any] | str | None = None,
+) -> None:
+    """Supervisor raporunu ve dosya kararını (``verdict``) ``llm_claims`` tablosuna yazar.
+
+    Önceki kayıt silinir. ``verdict`` bir ``dict`` ise ``json.dumps`` ile JSON metnine çevrilir;
+    ``None``/boş ise sütun ``NULL`` kalır. (Geriye uyumluluk: ``verdict`` isteğe bağlıdır.)
+    """
+    verdict_json = None
+    if verdict:
+        verdict_json = verdict if isinstance(verdict, str) else json.dumps(verdict, ensure_ascii=False)
     with closing(sqlite3.connect(_path(db_path))) as conn, conn:
         conn.execute("DELETE FROM llm_claims WHERE sha256 = ?", (sha256,))
         conn.execute(
-            "INSERT INTO llm_claims (sha256, supervisor_report) VALUES (?, ?)",
-            (sha256, report),
+            "INSERT INTO llm_claims (sha256, supervisor_report, verdict) VALUES (?, ?, ?)",
+            (sha256, report, verdict_json),
         )
 
 
@@ -191,6 +214,12 @@ def _loads(text: str | None, default: Any) -> Any:
         return json.loads(text) if text else default
     except (TypeError, ValueError):
         return default
+
+
+def _loads_dict(text: str | None) -> dict[str, Any]:
+    """JSON metnini ``dict``'e çevirir; boş, bozuk veya dict olmayan değerde ``{}``."""
+    value = _loads(text, {})
+    return value if isinstance(value, dict) else {}
 
 
 def _connect_ro(db_path: str | None) -> sqlite3.Connection:
@@ -208,12 +237,20 @@ def get_all_samples(db_path: str | None = None) -> list[dict[str, Any]]:
             SELECT s.sha256, s.file_type, s.route, s.packer, s.arch,
                    (SELECT COUNT(*) FROM findings  f WHERE f.sha256 = s.sha256) AS findings_count,
                    (SELECT COUNT(*) FROM functions u WHERE u.sha256 = s.sha256) AS functions_count,
-                   EXISTS(SELECT 1 FROM llm_claims c WHERE c.sha256 = s.sha256)  AS has_report
+                   EXISTS(SELECT 1 FROM llm_claims c WHERE c.sha256 = s.sha256)  AS has_report,
+                   (SELECT c.verdict FROM llm_claims c WHERE c.sha256 = s.sha256
+                    ORDER BY c.id DESC LIMIT 1) AS verdict_json
             FROM samples s
             ORDER BY s.rowid DESC
             """
         ).fetchall()
-    return [{**dict(r), "has_report": bool(r["has_report"])} for r in rows]
+    out = []
+    for r in rows:
+        item = dict(r)
+        item["verdict"] = _loads_dict(item.pop("verdict_json"))
+        item["has_report"] = bool(item["has_report"])
+        out.append(item)
+    return out
 
 
 def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any] | None:
@@ -250,6 +287,7 @@ def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any
                 "llm_summary": r["llm_summary"] or "",
                 "capa_hits": _loads(r["capa_hits"], []),
                 "xrefs": _loads(r["xrefs"], []),
+                "iocs": _loads(r["iocs"], []),
                 "decompile_warnings": _loads(r["decompile_warnings"], []),
                 "callees": callees.get(r["offset"], []),
             }
@@ -259,12 +297,14 @@ def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any
         ]
 
         report_row = conn.execute(
-            "SELECT supervisor_report FROM llm_claims WHERE sha256 = ? ORDER BY id DESC LIMIT 1", (sha256,)
+            "SELECT supervisor_report, verdict FROM llm_claims WHERE sha256 = ? ORDER BY id DESC LIMIT 1",
+            (sha256,),
         ).fetchone()
 
     return {
         "sample": dict(sample),
         "findings": findings,
         "functions": functions,
-        "supervisor_report": report_row["supervisor_report"] if report_row else "",
+        "supervisor_report": (report_row["supervisor_report"] or "") if report_row else "",
+        "verdict": _loads_dict(report_row["verdict"]) if report_row else {},
     }

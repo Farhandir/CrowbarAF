@@ -693,3 +693,107 @@ def test_analyze_without_critical_still_skips_low_priority():
     res = analyze([fn], [], FakeClient(), budget_tokens=1000, min_priority=1)
     assert res.summaries == {}
     assert res.must_include == []
+
+
+# --- Ghidra string xref (fn.iocs) -> must-include ---
+C2 = "http://192.0.2.1:4444/gate.php"
+
+
+def _fn_with_iocs(offset, code="int f(void){return 1;}", iocs=(), **kw):
+    fn = _fn(offset, code, **kw)
+    fn.iocs = list(iocs)
+    return fn
+
+
+def test_functioninfo_has_iocs_default_empty():
+    assert FunctionInfo(offset="0x1").iocs == []
+    assert FunctionInfo(offset="0x1").iocs is not FunctionInfo(offset="0x2").iocs  # paylaşılan liste yok
+
+
+def test_to_function_infos_passes_iocs_losslessly():
+    from types import SimpleNamespace
+
+    from llm_layer.nodes import _to_function_infos
+    from state import AgentState, DecompiledFunction
+
+    iocs = [C2, "10.0.0.1", "evil.example"]
+    st = AgentState(
+        file_path="x",
+        source_code=[
+            DecompiledFunction(offset="0x1", c_code="int f(){}", iocs=iocs),
+            DecompiledFunction(offset="0x2", c_code="int g(){}"),
+        ],
+    )
+    infos = _to_function_infos(st)
+    assert infos[0].iocs == iocs and infos[0].iocs is not iocs  # kayıpsız, ayrı kopya
+    assert infos[1].iocs == []
+    # iocs alanı olmayan eski kayıtlar da çökmemeli
+    legacy = SimpleNamespace(source_code=[SimpleNamespace(offset="0x3", c_code="x")])
+    assert _to_function_infos(legacy)[0].iocs == []
+
+
+def test_must_include_by_ghidra_ioc_when_code_does_not_contain_the_string():
+    # C2 string'i kodda düz metin olarak görünmüyor (ör. dolaylı referans); Ghidra xref ile bağladı
+    fn = _fn_with_iocs("0x401000", "int f(void){return sub_402000(p);}", iocs=[C2])
+    other = _fn_with_iocs("0x402000", "int g(void){return 2;}")
+    f = Finding(source="floss", kind="url", value=C2, address=None)
+    assert must_include_offsets([fn, other], [f]) == {"0x401000"}
+
+
+def test_ioc_match_is_case_insensitive_and_accepts_value_inside_longer_ioc():
+    fn = _fn_with_iocs("0x1", iocs=["HTTP://192.0.2.1:4444/GATE.PHP?id=7"])
+    f = Finding(source="floss", kind="url", value=C2, address=None)  # değer, IoC'nin içinde
+    assert must_include_offsets([fn], [f]) == {"0x1"}
+
+
+def test_ioc_match_does_not_use_reverse_containment_or_unrelated_iocs():
+    fn = _fn_with_iocs("0x1", iocs=["http://192.0.2.1"])  # bulgunun yalnızca bir parçası
+    f = Finding(source="floss", kind="url", value=C2, address=None)
+    assert must_include_offsets([fn], [f]) == set()
+    assert must_include_offsets([_fn_with_iocs("0x2", iocs=["http://other.example/x"])], [f]) == set()
+
+
+def test_noncritical_finding_with_matching_ioc_is_not_must_include():
+    fn = _fn_with_iocs("0x1", iocs=["hello world string"])
+    f = Finding(source="floss", kind="string", value="hello world string", address=None)
+    assert must_include_offsets([fn], [f]) == set()
+
+
+def test_ioc_equality_works_for_short_values_but_substring_needs_length():
+    from llm_layer.context import _value_matches_iocs
+
+    assert _value_matches_iocs("a.exe", ["A.EXE"])  # eşitlik: kısa da olsa
+    assert not _value_matches_iocs("a.exe", ["dropper_a.exe"])  # kısa değer alt-dize olarak eşleşmez
+    assert _value_matches_iocs("dropper.exe", ["c:\\tmp\\dropper.exe"])
+    assert not _value_matches_iocs("", ["x"]) and not _value_matches_iocs("x", [])
+
+
+def test_ioc_linked_function_pulls_in_direct_callees():
+    parent = _fn_with_iocs("0x1", iocs=[C2], callees=["0x2"])
+    child = _fn_with_iocs("0x2")
+    f = Finding(source="floss", kind="url", value=C2, address=None)
+    assert must_include_offsets([parent, child], [f]) == {"0x1", "0x2"}
+
+
+def test_code_match_still_works_without_iocs():
+    fn = _fn(  # mevcut davranış korunur
+        "0x401000", f'const char *u = "{C2}";')
+    f = Finding(source="floss", kind="url", value=C2, address=None)
+    assert must_include_offsets([fn], [f]) == {"0x401000"}
+
+
+def test_analyze_forces_low_priority_ioc_linked_function_under_threshold():
+    fn = _fn_with_iocs("0x401000", "int f(void){return sub_402000(p);}", iocs=[C2], priority=0)
+    decoy = _fn_with_iocs("0x402000", "int g(void){return 2;}", priority=0)
+    findings = [Finding(source="floss", kind="url", value=C2, address=None)]
+    res = analyze([fn, decoy], findings, FakeClient(), budget_tokens=1000, min_priority=1)
+    assert "0x401000" in res.summaries
+    assert res.must_include == ["0x401000"]
+    assert res.summaries["0x401000"].fail_closed is True  # LLM "zararsız" dese bile fail-closed
+
+
+def test_analyze_without_ioc_link_still_skips_the_same_function():
+    fn = _fn_with_iocs("0x401000", "int f(void){return sub_402000(p);}", priority=0)  # iocs boş
+    findings = [Finding(source="floss", kind="url", value=C2, address=None)]
+    res = analyze([fn], findings, FakeClient(), budget_tokens=1000, min_priority=1)
+    assert res.summaries == {} and res.must_include == []

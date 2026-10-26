@@ -50,7 +50,10 @@ def build(state: dict, trace: dict | None = None) -> dict:
     imports = [f.get("value") for f in _by_source(findings, "import")]
     combos = [f.get("value") for f in _by_source(findings, "import_combo")]
     entropy = [{"value": f.get("value"), "kind": f.get("kind")} for f in
-               (_by_source(findings, "entropy") + _by_source(findings, "pefile_entropy"))]
+               (_by_source(findings, "entropy") + _by_source(findings, "pefile_entropy")
+                + _by_source(findings, "elf_entropy"))]
+    imphash = next((f.get("value") for f in _by_source(findings, "imphash")), "")
+    pe_metadata = [{"kind": f.get("kind"), "value": f.get("value")} for f in _by_source(findings, "pe_metadata")]
     floss_findings = _by_source(findings, "floss")
 
     ghidra_funcs = [f for f in functions if (f.get("c_code") or "").strip()]
@@ -110,8 +113,10 @@ def build(state: dict, trace: dict | None = None) -> dict:
             },
             "floss": {"strings": strings[:FLOSS_CAP], "string_count": len(strings),
                       "ioc_findings": [f.get("value") for f in floss_findings]},
-            "imports": {"list": imports[:IMPORT_CAP], "import_count": len(imports), "combos": combos},
+            "imports": {"list": imports[:IMPORT_CAP], "import_count": len(imports), "combos": combos,
+                        "imphash": imphash},
             "entropy": entropy,
+            "pe_metadata": pe_metadata,
             "ghidra": {
                 "function_count": len(functions), "decompiled": len(ghidra_funcs),
                 "call_edges": edges, "decompile_warnings": warnings,
@@ -199,11 +204,17 @@ def render_markdown(rep: dict) -> str:
     L += ["", f"## 4) Import analysis — {t['imports']['import_count']} imports"]
     if t["imports"]["combos"]:
         L += [f"- **combination:** {c}" for c in t["imports"]["combos"]]
+    if t["imports"].get("imphash"):
+        L.append(f"- **imphash:** `{t['imports']['imphash']}`")
     L += [f"- `{i}`" for i in t["imports"]["list"][:20]] or ["- (no imports)"]
 
     if t["entropy"]:
         L += ["", "## 5) Entropy / section"]
         L += [f"- {e['value']} ({e['kind']})" for e in t["entropy"]]
+
+    if t.get("pe_metadata"):
+        L += ["", "## 5b) PE metadata (signature presence is NOT verified)"]
+        L += [f"- {m['kind']}: {m['value']}" for m in t["pe_metadata"]]
 
     g = t["ghidra"]
     L += ["", "## 6) Ghidra function inventory",
@@ -248,7 +259,8 @@ def _from_db(sha256: str) -> dict:
     if detail is None:
         raise SystemExit(f"Not found in DB: {sha256}")
     return {"sample": detail["sample"], "findings": detail["findings"],
-            "source_code": detail["functions"], "analysis_report": detail.get("supervisor_report", "")}
+            "source_code": detail["functions"], "analysis_report": detail.get("supervisor_report", ""),
+            "verdict": detail.get("verdict", {})}
 
 
 def main() -> None:

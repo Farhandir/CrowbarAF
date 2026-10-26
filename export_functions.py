@@ -18,6 +18,10 @@ Mantık:
      Puanlı fonksiyon yoksa en büyük birkaç fonksiyon (FALLBACK_DECOMPILE) denenir.
   4. Decompile edilenlerin doğrudan callee'leri ``c_code: ""`` ile (çağrı grafiği
      bağlansın diye) çıktıya eklenir; diğer yüzlerce fonksiyon çıktıya girmez.
+  5. Adressiz IoC -> fonksiyon eşleme: ``findings``'teki ip/url/domain/registry/file/email
+     değerleri, programın tanımlı string'lerinde aranır (eşit veya string'in içinde geçen);
+     eşleşen string'e referans veren fonksiyonun ``iocs`` listesine değer eklenir ve
+     fonksiyon +3 puan alır (IoC sayısından bağımsız, fonksiyon başına bir kez).
 
 Not: Saf mantık (puanlama/seçim) Ghidra olmadan da import edilip test edilebilir;
 ``main()`` yalnızca Ghidra ortamında (``currentProgram`` varsa) çalışır.
@@ -32,6 +36,13 @@ DANGEROUS_API_BONUS = 4
 IMPORT_COMBO_BONUS = 4
 LARGE_FUNCTION_BYTES = 10000
 LARGE_FUNCTION_PENALTY = 2
+IOC_REFERENCE_BONUS = 3  # fonksiyon bir IoC string'ine referans veriyorsa (kaç IoC olursa olsun bir kez)
+
+# findings içinde string->fonksiyon eşlemesine girecek bulgu türleri
+IOC_KINDS = ("ip", "url", "domain", "registry", "file", "email")
+MIN_IOC_LENGTH = 4  # "a.b" gibi çok kısa değerler rastgele string'lerle eşleşmesin
+MAX_TARGET_IOCS = 2000  # aranacak IoC üst sınırı (string sayısı x IoC sayısı patlamasın)
+MAX_IOCS_PER_FUNCTION = 20
 
 MAX_DECOMPILE = 100  # Top-N: decompile edilecek en fazla fonksiyon
 FALLBACK_DECOMPILE = 20  # hiç puanlı fonksiyon yoksa denenecek en büyük fonksiyon sayısı
@@ -111,14 +122,58 @@ def active_combo_apis(findings, combo_apis):
     return apis
 
 
-def compute_priority(capa_hits, callee_names, size, is_library, combo_apis):
-    """Fonksiyon öncelik puanı (kütüphane/thunk her zaman 0)."""
+def collect_target_iocs(findings):
+    """Bulgulardan (kind: ip/url/domain/registry/file/email) aranacak IoC değerlerinin kümesi."""
+    targets = set()
+    for finding in findings:
+        if not isinstance(finding, dict) or finding.get("kind") not in IOC_KINDS:
+            continue
+        value = finding.get("value")
+        if isinstance(value, str) and len(value.strip()) >= MIN_IOC_LENGTH:
+            targets.add(value.strip())
+        if len(targets) >= MAX_TARGET_IOCS:
+            break
+    return targets
+
+
+def build_ioc_index(target_iocs):
+    """[(küçük_harf, orijinal), ...] — her string için yeniden küçültme yapılmasın."""
+    return sorted((ioc.lower(), ioc) for ioc in target_iocs)
+
+
+def match_iocs(text, ioc_index):
+    """``text`` bir IoC'ye eşitse veya IoC'yi içeriyorsa eşleşen IoC'ler (orijinal yazımla).
+
+    Büyük/küçük harf duyarsız (domain, registry yolu, URL). Ters yön (IoC içinde kısa string)
+    bilerek aranmaz: kısa string'ler yanlış pozitif üretir.
+    """
+    lowered = str(text).lower()
+    if len(lowered.strip()) < MIN_IOC_LENGTH:
+        return []
+    return [original for low, original in ioc_index if low in lowered]
+
+
+def add_ioc_hits(hits, entry, iocs):
+    """``hits[entry]`` listesine IoC'leri tekrarsız ekler (fonksiyon başına en fazla MAX_IOCS_PER_FUNCTION)."""
+    bucket = hits.setdefault(entry, [])
+    for ioc in iocs:
+        if ioc not in bucket and len(bucket) < MAX_IOCS_PER_FUNCTION:
+            bucket.append(ioc)
+
+
+def compute_priority(capa_hits, callee_names, size, is_library, combo_apis, ioc_hits=None):
+    """Fonksiyon öncelik puanı (kütüphane/thunk her zaman 0).
+
+    ``ioc_hits``: fonksiyonun string referansıyla kullandığı IoC'ler; doluysa +3 (bir kez).
+    """
     if is_library:
         return 0
 
     priority = 0
     if capa_hits:
         priority += CAPA_HIT_BONUS
+    if ioc_hits:
+        priority += IOC_REFERENCE_BONUS
 
     names = [base_name(n) for n in callee_names]
     if any(api in name for name in names for api in DANGEROUS_APIS):
@@ -236,6 +291,44 @@ def map_hints_to_functions(hints):
     return hits
 
 
+def map_iocs_to_functions(target_iocs):
+    """Programın tanımlı string'lerinde IoC arar; referans veren fonksiyonlara eşler.
+
+    Dönüş: {fonksiyon_giriş_adresi: [ioc, ...]}. String'e gelen her referansın kaynak adresini
+    içeren fonksiyon bulunur (``getFunctionContaining``). Fonksiyon dışı (ör. veri tablosu)
+    referanslar atlanır. Hata olursa o ana kadar bulunanlar döner.
+    """
+    hits = {}
+    if not target_iocs:
+        return hits
+    try:
+        from ghidra.program.util import DefinedDataIterator
+
+        ioc_index = build_ioc_index(target_iocs)
+        ref_manager = currentProgram.getReferenceManager()  # noqa: F821 (Ghidra)
+        func_manager = currentProgram.getFunctionManager()  # noqa: F821 (Ghidra)
+        for data in DefinedDataIterator.definedStrings(currentProgram):  # noqa: F821 (Ghidra)
+            try:
+                value = data.getValue()
+                text = str(value) if value is not None else str(data.getDefaultValueRepresentation())
+                matched = match_iocs(text, ioc_index)
+                if not matched:
+                    continue
+                for ref in ref_manager.getReferencesTo(data.getAddress()):
+                    source = ref.getFromAddress()
+                    if not source.isMemoryAddress():
+                        continue
+                    func = func_manager.getFunctionContaining(source)
+                    if func is None:
+                        continue
+                    add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), matched)
+            except Exception as exc:
+                printerr("[export_functions] string islenemedi: " + str(exc))  # noqa: F821
+    except Exception as exc:
+        printerr("[export_functions] IoC eslemesi basarisiz: " + str(exc))  # noqa: F821
+    return hits
+
+
 def get_callees(func):
     """Çağrılan fonksiyonlar: (hex adresler, isimler). JSON'a sadece adresler yazılır."""
     from ghidra.util.task import TaskMonitor
@@ -298,8 +391,12 @@ def decompile(decomp, func):
     return code, warnings
 
 
-def collect_records(hits, combo_apis):
-    """TÜM fonksiyonlar için decompile'sız kayıt (ad, adres, size, callees, priority) üretir."""
+def collect_records(hits, combo_apis, ioc_hits=None):
+    """TÜM fonksiyonlar için decompile'sız kayıt (ad, adres, size, callees, priority) üretir.
+
+    ``ioc_hits``: {giriş_adresi: [ioc, ...]} (``map_iocs_to_functions`` çıktısı).
+    """
+    ioc_hits = ioc_hits or {}
     records = []
     for func in currentProgram.getFunctionManager().getFunctions(True):  # noqa: F821 (Ghidra)
         try:
@@ -308,6 +405,7 @@ def collect_records(hits, combo_apis):
 
             entry = fmt_addr(func.getEntryPoint())
             capa_hits = list(hits.get(entry, []))
+            iocs = list(ioc_hits.get(entry, []))
             is_library = bool(func.isThunk())
             size = int(func.getBody().getNumAddresses())
             callee_addrs, callee_names = get_callees(func)
@@ -315,13 +413,14 @@ def collect_records(hits, combo_apis):
             records.append({
                 "offset": entry,
                 "name": str(func.getName()),
-                "priority": compute_priority(capa_hits, callee_names, size, is_library, combo_apis),
+                "priority": compute_priority(capa_hits, callee_names, size, is_library, combo_apis, iocs),
                 "size": size,
                 "is_library": is_library,
                 "callees": callee_addrs,
                 "xrefs": [],
                 "decompile_warnings": [],
                 "capa_hits": capa_hits,
+                "iocs": iocs,
                 "c_code": "",
                 "llm_summary": "",
                 "_func": func,
@@ -346,7 +445,10 @@ def main():
         hits = map_hints_to_functions(hints)
         combo_set = active_combo_apis(findings, combo_apis)
 
-        records = collect_records(hits, combo_set)
+        ioc_hits = map_iocs_to_functions(collect_target_iocs(findings))
+        println("[export_functions] %d fonksiyon IoC string'ine referans veriyor" % len(ioc_hits))  # noqa: F821
+
+        records = collect_records(hits, combo_set, ioc_hits)
         propagate_priority(records)
         chosen, stubs = plan_export(records)
         println("[export_functions] %d fonksiyon tarandi, %d decompile edilecek, %d stub" % (  # noqa: F821

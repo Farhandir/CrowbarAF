@@ -46,7 +46,7 @@ class TestInitDb:
         assert cols("findings") == ["id", "sha256", "source", "kind", "value", "address", "confidence"]
         assert cols("functions") == [
             "id", "sha256", "offset", "name", "priority", "c_code", "decompile_warnings",
-            "llm_summary", "size", "is_library", "capa_hits", "xrefs",
+            "llm_summary", "size", "is_library", "capa_hits", "xrefs", "iocs",
         ]
         assert cols("calls") == ["id", "sha256", "caller_offset", "callee_offset"]
 
@@ -154,6 +154,164 @@ class TestDbWriterNode:
         assert len(_rows(db_path, "SELECT * FROM functions")) == 1
         assert len(_rows(db_path, "SELECT * FROM calls")) == 1
         assert len(_rows(db_path, "SELECT * FROM samples")) == 1
+
+
+VERDICT = {
+    "verdict": "malicious",
+    "reasons": ["2 suspicious function(s)"],
+    "unknown_reasons": [],
+    "coverage": {"total": 3, "analyzed": 3, "skipped": 0, "ratio": 1.0, "min_required": 0.8},
+}
+
+
+class TestVerdictPersistence:
+    def test_llm_claims_has_verdict_column(self, db_path) -> None:
+        db.init_db(db_path)
+        cols = [r[1] for r in _rows(db_path, "PRAGMA table_info(llm_claims)")]
+        assert cols == ["id", "sha256", "supervisor_report", "verdict"]
+
+    def test_old_llm_claims_schema_is_migrated_and_keeps_data(self, tmp_path) -> None:
+        path = str(tmp_path / "old.db")
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute(
+                "CREATE TABLE llm_claims (id INTEGER PRIMARY KEY AUTOINCREMENT, sha256 TEXT, supervisor_report TEXT)"
+            )
+            conn.execute("INSERT INTO llm_claims (sha256, supervisor_report) VALUES ('x', 'eski rapor')")
+        db.init_db(path)
+        db.init_db(path)  # tekrar çalıştırmak ALTER TABLE hatası vermemeli
+        assert [r[1] for r in _rows(path, "PRAGMA table_info(llm_claims)")][-1] == "verdict"
+        assert _rows(path, "SELECT sha256, supervisor_report, verdict FROM llm_claims") == [("x", "eski rapor", None)]
+
+    def test_insert_stores_verdict_as_json(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_llm_claims(SHA, "rapor", db_path, verdict=VERDICT)
+        (stored,) = _rows(db_path, "SELECT verdict FROM llm_claims")[0]
+        assert isinstance(stored, str)
+        assert json.loads(stored) == VERDICT
+
+    def test_insert_without_verdict_keeps_backward_compat(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_llm_claims(SHA, "rapor", db_path)
+        assert _rows(db_path, "SELECT supervisor_report, verdict FROM llm_claims") == [("rapor", None)]
+
+    def test_insert_replaces_previous_verdict(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_llm_claims(SHA, "bir", db_path, verdict={"verdict": "unknown"})
+        db.insert_llm_claims(SHA, "iki", db_path, verdict={"verdict": "malicious"})
+        rows = _rows(db_path, "SELECT supervisor_report, verdict FROM llm_claims")
+        assert [(r, json.loads(v)["verdict"]) for r, v in rows] == [("iki", "malicious")]
+
+    def test_get_sample_details_returns_parsed_verdict(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        db.insert_llm_claims(SHA, "rapor", db_path, verdict=VERDICT)
+        assert db.get_sample_details(SHA, db_path)["verdict"] == VERDICT
+
+    def test_get_sample_details_without_claims_has_empty_verdict(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        d = db.get_sample_details(SHA, db_path)
+        assert d["verdict"] == {} and d["supervisor_report"] == ""
+
+    def test_get_all_samples_includes_parsed_verdict(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        db.insert_sample(SampleInfo(sha256="b" * 64), db_path)  # kararı olmayan örnek
+        db.insert_llm_claims(SHA, "rapor", db_path, verdict=VERDICT)
+        by_sha = {s["sha256"]: s for s in db.get_all_samples(db_path)}
+        assert by_sha[SHA]["verdict"] == VERDICT and by_sha[SHA]["has_report"] is True
+        assert by_sha["b" * 64]["verdict"] == {} and by_sha["b" * 64]["has_report"] is False
+        assert "verdict_json" not in by_sha[SHA]
+
+    @pytest.mark.parametrize("raw", ["not json", "[1, 2]", '"str"', ""])
+    def test_corrupt_or_non_dict_verdict_becomes_empty(self, db_path, raw) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        db.insert_llm_claims(SHA, "r", db_path, verdict=raw)
+        assert db.get_sample_details(SHA, db_path)["verdict"] == {}
+        assert db.get_all_samples(db_path)[0]["verdict"] == {}
+
+
+class TestFunctionIocs:
+    def test_iocs_are_stored_as_json_and_read_back(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        fn = DecompiledFunction(offset="0x1", name="f", c_code="x", iocs=["http://evil.example/ü", "10.0.0.1"])
+        db.insert_functions_and_calls(SHA, [fn, DecompiledFunction(offset="0x2")], db_path)
+        raw = dict(_rows(db_path, "SELECT offset, iocs FROM functions"))
+        assert json.loads(raw["0x1"]) == ["http://evil.example/ü", "10.0.0.1"]
+        assert json.loads(raw["0x2"]) == []
+        by_offset = {f["offset"]: f for f in db.get_sample_details(SHA, db_path)["functions"]}
+        assert by_offset["0x1"]["iocs"] == ["http://evil.example/ü", "10.0.0.1"]
+        assert by_offset["0x2"]["iocs"] == []
+
+    def test_old_functions_table_gets_iocs_column_and_old_rows_read_as_empty(self, tmp_path) -> None:
+        path = str(tmp_path / "old.db")
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute(
+                "CREATE TABLE functions (id INTEGER PRIMARY KEY AUTOINCREMENT, sha256 TEXT, offset TEXT, name TEXT, "
+                "priority INTEGER, c_code TEXT, decompile_warnings TEXT, llm_summary TEXT, size INTEGER, "
+                "is_library BOOLEAN, capa_hits TEXT, xrefs TEXT)"
+            )
+            conn.execute("INSERT INTO functions (sha256, offset, name) VALUES (?, '0x1', 'f')", (SHA,))
+            conn.execute("CREATE TABLE samples (sha256 TEXT PRIMARY KEY, file_type TEXT, route TEXT, packer TEXT, arch TEXT)")
+            conn.execute("INSERT INTO samples (sha256) VALUES (?)", (SHA,))
+        db.init_db(path)
+        assert [r[1] for r in _rows(path, "PRAGMA table_info(functions)")][-1] == "iocs"
+        assert db.get_sample_details(SHA, path)["functions"][0]["iocs"] == []
+
+    def test_db_writer_node_persists_function_iocs(self, db_path, monkeypatch) -> None:
+        monkeypatch.setattr(db, "DEFAULT_DB_PATH", db_path)
+        state = AgentState(
+            file_path="x", sample=SampleInfo(sha256=SHA),
+            source_code=[DecompiledFunction(offset="0x1", name="f", c_code="x", iocs=["10.0.0.1"])],
+        )
+        nodes.db_writer_node(state)
+        assert db.get_sample_details(SHA, db_path)["functions"][0]["iocs"] == ["10.0.0.1"]
+
+
+class TestDbWriterNodeVerdictAndSummaries:
+    @pytest.fixture(autouse=True)
+    def _isolate_db(self, db_path, monkeypatch):
+        monkeypatch.setattr(db, "DEFAULT_DB_PATH", db_path)
+
+    def test_writes_verdict_report_and_function_summaries(self, db_path) -> None:
+        state = AgentState(
+            file_path="x",
+            sample=SampleInfo(sha256=SHA),
+            source_code=[
+                DecompiledFunction(offset="0x1", name="a", c_code="int a(){}", llm_summary="Şifreleme yapar"),
+                DecompiledFunction(offset="0x2", name="b", c_code="int b(){}"),
+            ],
+            analysis_report="# Rapor",
+            verdict=VERDICT,
+        )
+        assert nodes.db_writer_node(state) == {}
+
+        assert _rows(db_path, "SELECT offset, llm_summary FROM functions ORDER BY offset") == [
+            ("0x1", "Şifreleme yapar"),
+            ("0x2", ""),
+        ]
+        assert json.loads(_rows(db_path, "SELECT verdict FROM llm_claims")[0][0]) == VERDICT
+        d = db.get_sample_details(SHA, db_path)
+        assert d["verdict"]["verdict"] == "malicious"
+        assert {f["offset"]: f["llm_summary"] for f in d["functions"]} == {"0x1": "Şifreleme yapar", "0x2": ""}
+
+    def test_verdict_without_report_is_still_saved(self, db_path) -> None:
+        state = AgentState(file_path="x", sample=SampleInfo(sha256=SHA), verdict=VERDICT)
+        nodes.db_writer_node(state)
+        assert db.get_sample_details(SHA, db_path)["verdict"] == VERDICT
+
+    def test_nothing_written_to_llm_claims_when_no_report_and_no_verdict(self, db_path) -> None:
+        nodes.db_writer_node(AgentState(file_path="x", sample=SampleInfo(sha256=SHA)))
+        assert _rows(db_path, "SELECT * FROM llm_claims") == []
+
+    def test_reanalysis_overwrites_verdict(self, db_path) -> None:
+        base = dict(file_path="x", sample=SampleInfo(sha256=SHA), analysis_report="r")
+        nodes.db_writer_node(AgentState(**base, verdict={"verdict": "unknown"}))
+        nodes.db_writer_node(AgentState(**base, verdict={"verdict": "malicious"}))
+        assert len(_rows(db_path, "SELECT * FROM llm_claims")) == 1
+        assert db.get_sample_details(SHA, db_path)["verdict"]["verdict"] == "malicious"
 
 
 class TestGraphWiring:

@@ -298,3 +298,302 @@ def test_propagate_priority_raises_direct_callee():
     ef.propagate_priority(records)
     assert records[1]["priority"] == 4
     assert records[2]["priority"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Adım 5: adressiz IoC string'i -> fonksiyon eşleme
+# --------------------------------------------------------------------------- #
+class TestCollectTargetIocs:
+    def test_only_ioc_kinds_are_collected(self) -> None:
+        findings = [
+            {"source": "floss", "kind": "ip", "value": "10.0.0.1"},
+            {"source": "floss", "kind": "url", "value": "http://evil.example/gate.php"},
+            {"source": "x", "kind": "domain", "value": "evil.example"},
+            {"source": "floss", "kind": "registry", "value": "HKLM\\Software\\Run"},
+            {"source": "floss", "kind": "file", "value": "dropper.exe"},
+            {"source": "x", "kind": "email", "value": "bad@evil.example"},
+            {"source": "capa", "kind": "rule", "value": "encrypt data using AES"},  # IoC türü değil
+            {"source": "import_combo", "kind": "behavior", "value": "Process Injection Combo"},
+        ]
+        assert ef.collect_target_iocs(findings) == {
+            "10.0.0.1", "http://evil.example/gate.php", "evil.example",
+            "HKLM\\Software\\Run", "dropper.exe", "bad@evil.example",
+        }
+
+    def test_ignores_garbage_short_and_non_dict(self) -> None:
+        findings = ["x", None, {"kind": "ip"}, {"kind": "ip", "value": 5}, {"kind": "file", "value": "a.b"},
+                    {"kind": "ip", "value": "  1.2.3.4  "}]
+        assert ef.collect_target_iocs(findings) == {"1.2.3.4"}
+
+    def test_cap(self, monkeypatch) -> None:
+        monkeypatch.setattr(ef, "MAX_TARGET_IOCS", 3)
+        findings = [{"kind": "file", "value": f"file{i}.exe"} for i in range(10)]
+        assert len(ef.collect_target_iocs(findings)) == 3
+
+
+class TestMatchIocs:
+    INDEX = ef.build_ioc_index({"10.0.0.1", "http://Evil.example/gate.php", "evil.example"})
+
+    def test_equal_and_contains(self) -> None:
+        assert ef.match_iocs("10.0.0.1", self.INDEX) == ["10.0.0.1"]
+        text = "GET http://evil.example/gate.php HTTP/1.1"
+        assert sorted(ef.match_iocs(text, self.INDEX)) == ["evil.example", "http://Evil.example/gate.php"]
+
+    def test_case_insensitive_returns_original_spelling(self) -> None:
+        # eşleşme büyük/küçük harf duyarsız; dönen değer findings'teki orijinal yazım
+        assert sorted(ef.match_iocs("HTTP://EVIL.EXAMPLE/GATE.PHP", self.INDEX)) == [
+            "evil.example", "http://Evil.example/gate.php",
+        ]
+
+    def test_no_match_and_short_strings(self) -> None:
+        assert ef.match_iocs("hello world", self.INDEX) == []
+        assert ef.match_iocs("", self.INDEX) == []
+        assert ef.match_iocs("a", self.INDEX) == []
+
+    def test_reverse_containment_is_not_matched(self) -> None:
+        # bellekteki kısa string IoC'nin parçası olsa bile eşleşmemeli
+        assert ef.match_iocs("evil", self.INDEX) == []
+
+
+class TestIocScoring:
+    def test_ioc_bonus_is_three_and_applied_once(self) -> None:
+        assert ef.compute_priority([], [], 100, False, set(), ["a", "b", "c"]) == 3
+        assert ef.compute_priority([], [], 100, False, set(), []) == 0
+        assert ef.compute_priority([], [], 100, False, set(), None) == 0
+
+    def test_stacks_with_other_bonuses(self) -> None:
+        assert ef.compute_priority(["r"], ["VirtualAlloc"], 100, False, COMBO, ["x"]) == 5 + 4 + 4 + 3
+
+    def test_library_stays_zero(self) -> None:
+        assert ef.compute_priority([], [], 100, True, set(), ["x"]) == 0
+
+    def test_large_penalty_still_applies(self) -> None:
+        assert ef.compute_priority([], [], 20000, False, set(), ["x"]) == 1
+
+    def test_add_ioc_hits_dedupes_and_caps(self, monkeypatch) -> None:
+        hits: dict = {}
+        ef.add_ioc_hits(hits, "0x1", ["a", "b", "a"])
+        ef.add_ioc_hits(hits, "0x1", ["b", "c"])
+        assert hits == {"0x1": ["a", "b", "c"]}
+        monkeypatch.setattr(ef, "MAX_IOCS_PER_FUNCTION", 2)
+        ef.add_ioc_hits(hits, "0x2", ["a", "b", "c"])
+        assert hits["0x2"] == ["a", "b"]
+
+
+# --- Ghidra API'sini taklit eden küçük sahte nesneler -------------------------------------------
+class _Addr:
+    def __init__(self, offset, memory=True):
+        self.offset, self.memory = offset, memory
+
+    def getOffset(self):
+        return self.offset
+
+    def isMemoryAddress(self):
+        return self.memory
+
+
+class _Data:
+    def __init__(self, offset, value):
+        self.addr, self.value = _Addr(offset), value
+
+    def getValue(self):
+        return self.value
+
+    def getDefaultValueRepresentation(self):
+        return f'"{self.value}"'
+
+    def getAddress(self):
+        return self.addr
+
+
+class _Ref:
+    def __init__(self, source):
+        self.source = source
+
+    def getFromAddress(self):
+        return self.source
+
+
+class _Func:
+    def __init__(self, entry, size=0x40, name=None, thunk=False, callees=()):
+        self.entry, self.size, self.name, self.thunk, self.callees = entry, size, name or f"FUN_{entry:x}", thunk, callees
+
+    def getEntryPoint(self):
+        return _Addr(self.entry)
+
+    def contains(self, offset):
+        return self.entry <= offset < self.entry + self.size
+
+    def isExternal(self):
+        return False
+
+    def isThunk(self):
+        return self.thunk
+
+    def getName(self):
+        return self.name
+
+    def getBody(self):
+        size = self.size
+        return type("B", (), {"getNumAddresses": lambda s: size})()
+
+    def getCalledFunctions(self, monitor):
+        return list(self.callees)
+
+
+class _Program:
+    def __init__(self, strings, refs, functions):
+        self.strings, self.refs, self.functions = strings, refs, functions
+
+    def getReferenceManager(self):
+        prog = self
+        return type("RM", (), {"getReferencesTo": lambda s, addr: prog.refs.get(addr.getOffset(), [])})()
+
+    def getFunctionManager(self):
+        prog = self
+
+        def containing(s, addr):
+            return next((f for f in prog.functions if f.contains(addr.getOffset())), None)
+
+        return type("FM", (), {
+            "getFunctionContaining": containing,
+            "getFunctions": lambda s, forward: list(prog.functions),
+        })()
+
+
+@pytest.fixture
+def fake_ghidra(monkeypatch):
+    import sys
+    import types
+
+    def install(program):
+        monkeypatch.setattr(ef, "currentProgram", program, raising=False)
+        errors: list[str] = []
+        monkeypatch.setattr(ef, "printerr", errors.append, raising=False)
+
+        iterator = type("DefinedDataIterator", (), {"definedStrings": staticmethod(lambda prog: list(prog.strings))})
+        util = types.ModuleType("ghidra.program.util")
+        util.DefinedDataIterator = iterator
+        task = types.ModuleType("ghidra.util.task")
+        task.TaskMonitor = type("TaskMonitor", (), {"DUMMY": object()})
+        for name, mod in {
+            "ghidra": types.ModuleType("ghidra"), "ghidra.program": types.ModuleType("ghidra.program"),
+            "ghidra.program.util": util, "ghidra.util": types.ModuleType("ghidra.util"), "ghidra.util.task": task,
+        }.items():
+            monkeypatch.setitem(sys.modules, name, mod)
+        return errors
+
+    return install
+
+
+class TestMapIocsToFunctions:
+    def _program(self):
+        f1, f2, f3 = _Func(0x401000), _Func(0x401100), _Func(0x401200)
+        strings = [
+            _Data(0x500000, "http://evil.example/gate.php"),
+            _Data(0x500100, "10.0.0.1"),
+            _Data(0x500200, "Hello, world"),               # IoC değil
+            _Data(0x500300, "GET /a HTTP/1.1 Host: EVIL.EXAMPLE"),  # IoC'yi içerir
+        ]
+        refs = {
+            0x500000: [_Ref(_Addr(0x401010)), _Ref(_Addr(0x401110))],  # f1 ve f2
+            0x500100: [_Ref(_Addr(0x401120)), _Ref(_Addr(0x600000, memory=False))],  # f2 + bellek dışı
+            0x500200: [_Ref(_Addr(0x401210))],                         # f3 ama eşleşmeyen string
+            0x500300: [_Ref(_Addr(0x700000))],                         # hiçbir fonksiyonda değil
+        }
+        return _Program(strings, refs, [f1, f2, f3])
+
+    def test_maps_string_references_to_containing_functions(self, fake_ghidra) -> None:
+        errors = fake_ghidra(self._program())
+        hits = ef.map_iocs_to_functions({"http://evil.example/gate.php", "10.0.0.1"})
+        assert hits == {
+            "0x401000": ["http://evil.example/gate.php"],
+            "0x401100": ["http://evil.example/gate.php", "10.0.0.1"],
+        }
+        assert errors == []
+
+    def test_containing_string_matches_and_non_function_reference_is_dropped(self, fake_ghidra) -> None:
+        # "evil.example" hem URL string'inin içinde (f1, f2 referans verir) hem de "...Host: EVIL.EXAMPLE"
+        # string'inde geçer; ikincisine yalnızca fonksiyon dışından (0x700000) referans var -> yok sayılır.
+        fake_ghidra(self._program())
+        assert ef.map_iocs_to_functions({"evil.example"}) == {
+            "0x401000": ["evil.example"],
+            "0x401100": ["evil.example"],
+        }
+
+    def test_no_targets_returns_empty_without_scanning(self, fake_ghidra) -> None:
+        fake_ghidra(None)  # currentProgram'a dokunulursa AttributeError olurdu
+        assert ef.map_iocs_to_functions(set()) == {}
+
+    def test_string_error_is_skipped_not_fatal(self, fake_ghidra) -> None:
+        prog = self._program()
+
+        class Broken(_Data):
+            def getValue(self):
+                raise RuntimeError("bozuk string")
+
+        prog.strings.insert(0, Broken(0x500400, "x"))
+        errors = fake_ghidra(prog)
+        hits = ef.map_iocs_to_functions({"10.0.0.1"})
+        assert hits == {"0x401100": ["10.0.0.1"]}
+        assert any("string islenemedi" in e for e in errors)
+
+    def test_total_failure_returns_partial_empty(self, fake_ghidra) -> None:
+        errors = fake_ghidra(None)  # getReferenceManager çağrısı patlar
+        assert ef.map_iocs_to_functions({"10.0.0.1"}) == {}
+        assert any("IoC eslemesi basarisiz" in e for e in errors)
+
+
+class TestCollectRecordsWithIocs:
+    def test_records_get_iocs_and_bonus(self, fake_ghidra) -> None:
+        f1, f2 = _Func(0x401000), _Func(0x401100)
+        fake_ghidra(_Program([], {}, [f1, f2]))
+        records = ef.collect_records({}, set(), {"0x401100": ["10.0.0.1"]})
+        by_offset = {r["offset"]: r for r in records}
+        assert by_offset["0x401000"]["iocs"] == [] and by_offset["0x401000"]["priority"] == 0
+        assert by_offset["0x401100"]["iocs"] == ["10.0.0.1"] and by_offset["0x401100"]["priority"] == 3
+
+    def test_ioc_function_becomes_a_decompile_candidate(self, fake_ghidra) -> None:
+        f1, f2 = _Func(0x401000), _Func(0x401100)
+        fake_ghidra(_Program([], {}, [f1, f2]))
+        records = ef.collect_records({}, set(), {"0x401100": ["10.0.0.1"]})
+        chosen, _ = ef.plan_export(records)
+        assert [r["offset"] for r in chosen] == ["0x401100"]
+
+    def test_thunk_with_ioc_keeps_zero_priority(self, fake_ghidra) -> None:
+        fake_ghidra(_Program([], {}, [_Func(0x401000, thunk=True)]))
+        (record,) = ef.collect_records({}, set(), {"0x401000": ["10.0.0.1"]})
+        assert record["priority"] == 0
+
+    def test_without_ioc_hits_behaves_as_before(self, fake_ghidra) -> None:
+        fake_ghidra(_Program([], {}, [_Func(0x401000)]))
+        (record,) = ef.collect_records({}, set())
+        assert record["iocs"] == [] and record["priority"] == 0
+
+
+class TestIocsContract:
+    def test_decompiled_function_accepts_iocs_from_script_output(self) -> None:
+        fn = DecompiledFunction(**{"offset": "0x1", "iocs": ["10.0.0.1"], "c_code": "x"})
+        assert fn.iocs == ["10.0.0.1"]
+        assert DecompiledFunction(offset="0x1").iocs == []
+
+    def test_run_ghidra_passes_ioc_findings_in_and_parses_iocs_out(self, monkeypatch) -> None:
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            i = cmd.index("-postScript")
+            seen["input"] = json.load(open(cmd[i + 2], encoding="utf-8"))
+            with open(cmd[i + 3], "w", encoding="utf-8") as fh:
+                json.dump([{"offset": "0x1", "name": "f", "priority": 3, "c_code": "", "iocs": ["10.0.0.1"]}], fh)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(ghidra_runner, "_find_analyze_headless", lambda: "analyzeHeadless")
+        monkeypatch.setattr(ghidra_runner.subprocess, "run", fake_run)
+        findings = [Finding(source="floss", kind="ip", value="10.0.0.1")]
+
+        result = ghidra_runner.run_ghidra("sample.exe", [], findings)
+
+        # betiğin IoC'leri toplayabilmesi için kind/value girdi JSON'una ulaşmalı
+        assert {(f["kind"], f["value"]) for f in seen["input"]["findings"]} == {("ip", "10.0.0.1")}
+        assert ef.collect_target_iocs(seen["input"]["findings"]) == {"10.0.0.1"}
+        assert [f.iocs for f in result] == [["10.0.0.1"]]

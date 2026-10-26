@@ -52,6 +52,10 @@ class DecompiledFunction(BaseModel):
         default_factory=list,
         description="Bu spesifik fonksiyonda eşleşen Capa kural isimleri.",
     )
+    iocs: list[str] = Field(
+        default_factory=list,
+        description="Bu fonksiyonun string referansıyla kullandığı IoC değerleri (Ghidra string->fonksiyon eşlemesi).",
+    )
     llm_summary: str = Field(
         default="",
         description="Reverser Agent'ın bu fonksiyon için ürettiği analiz özeti.",

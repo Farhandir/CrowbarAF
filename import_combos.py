@@ -9,6 +9,19 @@ IMPORT_COMBO_RULES: dict[str, list[tuple[str, ...]]] = {
         ("writeprocessmemory",),
         ("createremotethread", "createremotethreadex"),
     ],
+    # --- ELF / Linux (readelf --dyn-syms UND sembolleri; eşleşme küçük harf) ---
+    # Not: strace/gdb gibi meşru araçlar da bu kombinasyonu import eder; tek başına kesin kanıt değildir.
+    "Linux Process Injection": [
+        ("ptrace",),
+        ("waitpid", "wait4"),
+        ("execve", "execv", "execvp", "execvpe", "fexecve"),
+    ],
+    # Not: dlsym+mmap+mprotect JIT/eklenti yükleyen meşru yazılımlarda da yaygındır (düşük kesinlik).
+    "Linux Evasion": [
+        ("mprotect",),
+        ("mmap", "mmap64"),
+        ("dlsym",),
+    ],
 }
 
 

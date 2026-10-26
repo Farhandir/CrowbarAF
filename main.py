@@ -196,7 +196,15 @@ INDEX_HTML = r"""<!doctype html>
   pre { background: #0b0e13; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: auto;
         white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; max-height: 420px; }
   details { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; background: var(--panel2); }
-  details summary { cursor: pointer; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  details summary { cursor: pointer; }
+  .fn-row { display: inline-flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .fn-summary { color: var(--muted); font-style: italic; margin: 3px 0 0 18px; font-size: 13px; }
+  /* Karar rozetleri */
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 700;
+           letter-spacing: .3px; background: #4b5563; color: #f3f4f6; white-space: nowrap; }
+  .badge.malicious { background: #d63031; color: #fff; }
+  .badge.needs_review { background: #f5a623; color: #000; }
+  .badge.unknown, .badge.no_evidence { background: #6b7280; color: #fff; }
   .kv { margin: 6px 0; } .kv b { color: var(--muted); font-weight: 600; margin-right: 6px; }
   .banner { padding: 8px 12px; border-radius: 8px; background: #2a2412; color: var(--warn); margin-bottom: 12px; }
   .empty { color: var(--muted); padding: 14px 4px; }
@@ -220,7 +228,7 @@ INDEX_HTML = r"""<!doctype html>
       <button class="ghost" id="refresh">Yenile</button>
     </div>
     <table>
-      <thead><tr><th>SHA-256</th><th>Tür</th><th>Rota</th><th>Packer</th><th>Mimari</th><th>Bulgu</th><th>Fonksiyon</th><th>Rapor</th></tr></thead>
+      <thead><tr><th>SHA-256</th><th>Karar</th><th>Tür</th><th>Rota</th><th>Packer</th><th>Mimari</th><th>Bulgu</th><th>Fonksiyon</th><th>Rapor</th></tr></thead>
       <tbody id="samples"></tbody>
     </table>
     <div id="samples-empty" class="empty" hidden>Henüz analiz edilmiş örnek yok.</div>
@@ -270,6 +278,7 @@ async function loadSamples() {
   for (const s of list) {
     const tr = el("tr", { class: "sample" + (s.sha256 === selected ? " sel" : ""), onclick: () => showDetail(s.sha256) },
       el("td", {}, el("code", { text: s.sha256.slice(0, 16) + "…", title: s.sha256 })),
+      el("td", {}, verdictBadge(s.verdict)),
       el("td", { text: s.file_type }),
       el("td", {}, el("span", { class: "chip", text: s.route })),
       el("td", { text: s.packer }),
@@ -285,15 +294,25 @@ function kv(label, value) {
   return el("div", { class: "kv" }, el("b", { text: label }), value);
 }
 
+// Karar rozeti. CSS sınıfı yalnızca bilinen değerlerden seçilir (veritabanından gelen metin sınıf adı olmaz).
+const KNOWN_VERDICTS = ["malicious", "needs_review", "unknown", "no_evidence"];
+function verdictBadge(verdict) {
+  const name = verdict && typeof verdict.verdict === "string" ? verdict.verdict : "";
+  if (!name) return el("span", { class: "muted", text: "—" });
+  return el("span", { class: "badge" + (KNOWN_VERDICTS.includes(name) ? " " + name : ""), text: name });
+}
+
 function renderFunction(fn) {
   const summary = el("summary", {},
-    el("code", { text: fn.name || "(adsız)" }),
-    el("span", { class: "muted", text: fn.offset || "—" }),
-    el("span", { class: "chip" + (fn.priority > 0 ? " hi" : ""), text: "öncelik " + fn.priority }),
-    fn.size ? el("span", { class: "chip", text: fn.size + " B" }) : null,
-    fn.is_library ? el("span", { class: "chip", text: "kütüphane" }) : null);
+    el("span", { class: "fn-row" },
+      el("code", { text: fn.name || "(adsız)" }),
+      el("span", { class: "muted", text: fn.offset || "—" }),
+      el("span", { class: "chip" + (fn.priority > 0 ? " hi" : ""), text: "öncelik " + fn.priority }),
+      fn.size ? el("span", { class: "chip", text: fn.size + " B" }) : null,
+      fn.is_library ? el("span", { class: "chip", text: "kütüphane" }) : null),
+    // LLM özeti fonksiyon adının hemen altında (soluk, italik)
+    fn.llm_summary ? el("div", { class: "fn-summary", text: fn.llm_summary }) : null);
   const body = [];
-  if (fn.llm_summary) body.push(kv("Özet", fn.llm_summary));
   if (fn.capa_hits.length) body.push(kv("capa", fn.capa_hits.join(", ")));
   if (fn.callees.length) body.push(kv("Çağırdıkları", fn.callees.join(", ")));
   if (fn.xrefs.length) body.push(kv("Referanslar", fn.xrefs.join(", ")));
@@ -312,7 +331,12 @@ function renderDetail(d) {
     el("div", { class: "kv" }, el("code", { text: s.sha256 })),
     el("div", { class: "kv" },
       el("span", { class: "chip", text: s.file_type }), el("span", { class: "chip", text: s.route }),
-      el("span", { class: "chip", text: "packer: " + s.packer }), el("span", { class: "chip", text: s.arch })));
+      el("span", { class: "chip", text: "packer: " + s.packer }), el("span", { class: "chip", text: s.arch })),
+    kv("Karar", verdictBadge(d.verdict)));
+  const v = d.verdict || {};
+  const notes = [...(v.reasons || []), ...(v.unknown_reasons || [])].map(String);
+  if (notes.length) box.append(el("div", { class: "kv muted", text: notes.join(" · ") }));
+  if (v.coverage && typeof v.coverage.ratio === "number") box.append(el("div", { class: "kv muted", text: "Kapsam: " + Math.round(v.coverage.ratio * 100) + "%" }));
 
   if (d.analysis_status === "running") box.append(el("div", { class: "banner", text: "Yeniden analiz sürüyor; gösterilen veri önceki çalıştırmaya ait." }));
   if (d.error) box.append(el("div", { class: "banner", text: "Son analiz hatası: " + d.error }));

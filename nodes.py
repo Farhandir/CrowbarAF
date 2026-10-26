@@ -11,10 +11,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import subprocess
 import tempfile
+from collections import Counter
 from typing import Any
 
 try:
@@ -517,9 +519,23 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
     # Hata/timeout durumunda: ({"error": ...}, [])
     capabilities, ghidra_hints = run_capa(state.file_path)
 
-    imports = extract_imports(state.file_path)  # PE değilse []
-    entropy = section_entropy(state.file_path)  # PE değilse {}
+    # Ham import listesi findings'e GİRMEZ (gürültü); yalnızca combo eşleşmesi ve imphash için kullanılır.
+    imports = extract_imports(state.file_path)  # PE: pefile, ELF: readelf; aksi halde []
+    imphash = compute_imphash(state.file_path, imports)  # PE: pefile imphash, ELF: MD5(imports); yoksa ""
+    entropy = section_entropy(state.file_path)  # PE: pefile, ELF: readelf -S; aksi halde {}
+    entropy_source = "elf_entropy" if is_elf(state.file_path) else "pefile_entropy"
     combos = match_import_combos(imports)
+
+    # PE metadata: dosya tek kez yüklenir, üç yardımcıya aynı nesne verilir
+    pe = _load_pe(state.file_path)
+    pe_metadata: list[Finding] = []
+    try:
+        pe_metadata = pe_metadata_findings(pe)
+    except Exception as exc:  # noqa: BLE001 - metadata hatası analizin geri kalanını düşürmemeli
+        logger.warning("[static_feature_node] PE metadata okunamadı: %s: %s", type(exc).__name__, exc)
+    finally:
+        if pe is not None:
+            pe.close()
 
     # Mevcut değerlere ekle, tekilleştir
     extracted_strings = _unique([*state.extracted_strings, *floss_iocs])
@@ -531,6 +547,9 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
         import_combos=combos,
         entropy=entropy,
         ioc_strings=extracted_strings,
+        imphash=imphash,
+        entropy_source=entropy_source,
+        pe_metadata=pe_metadata,
     )
 
     return {
@@ -545,12 +564,90 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
 # pefile: importlar, section entropy, import kombinasyonları
 # --------------------------------------------------------------------------- #
 HIGH_ENTROPY_THRESHOLD = 7.0
+ELF_MAGIC = b"\x7fELF"
+READELF_TIMEOUT_SECONDS = 30
+
+# `readelf --wide --dyn-syms` satırı:
+#   "    12: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND ptrace@GLIBC_2.2.5 (2)"
+# Gruplar: (Type, Name). Ndx = UND olanlar dışarıdan (libc/ld.so) import edilen sembollerdir.
+_READELF_UND_RE = re.compile(
+    r"^\s*\d+:\s+[0-9A-Fa-f]+\s+\d+\s+(?P<type>\w+)\s+\w+\s+\w+\s+UND\s+(?P<name>\S+)"
+)
+# Veri sembolleri (stdout, environ...) ve NOTYPE zayıf sembolleri (__gmon_start__) fonksiyon import'u değildir.
+_ELF_IMPORT_TYPES = frozenset({"FUNC", "IFUNC", "GNU_IFUNC"})
+
+
+def is_elf(file_path: str) -> bool:
+    """Dosyanın ilk 4 byte'ı ``\\x7fELF`` mi? Okunamıyorsa ``False``."""
+    try:
+        with open(file_path, "rb") as fh:
+            return fh.read(len(ELF_MAGIC)) == ELF_MAGIC
+    except OSError:
+        return False
+
+
+def parse_readelf_dynsyms(output: str) -> list[str]:
+    """``readelf --wide --dyn-syms`` çıktısından UND fonksiyon isimlerini ayıklar (saf mantık).
+
+    Sürüm eki (``@GLIBC_2.2.5``) atılır; tekilleştirilir, sıra korunur.
+    """
+    names: list[str] = []
+    for line in output.splitlines():
+        match = _READELF_UND_RE.match(line)
+        if not match or match.group("type") not in _ELF_IMPORT_TYPES:
+            continue
+        name = match.group("name").split("@", 1)[0]
+        if name:
+            names.append(name)
+    return _unique(names)
+
+
+def extract_elf_imports(file_path: str) -> list[str]:
+    """ELF dinamik sembol tablosundaki (UND) import edilen fonksiyon isimlerini döndürür.
+
+    ``readelf`` yoksa, timeout olursa, sıfırdan farklı kodla çıkarsa veya başka bir hata olursa
+    hata loglanır ve ``[]`` döner. Statik bağlı ELF'te dinamik sembol tablosu olmadığından ``[]`` döner.
+    """
+    cmd = ["readelf", "--wide", "--dyn-syms", file_path]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=READELF_TIMEOUT_SECONDS,
+            check=False,
+            env={**os.environ, "LC_ALL": "C"},  # sütun biçimi yerelden bağımsız olsun
+        )
+    except FileNotFoundError:
+        logger.warning("[static_feature_node] readelf bulunamadı; ELF importları atlanıyor")
+        return []
+    except subprocess.TimeoutExpired:
+        logger.warning("[static_feature_node] readelf %d saniye içinde bitmedi (timeout)", READELF_TIMEOUT_SECONDS)
+        return []
+    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
+        logger.warning("[static_feature_node] readelf çalıştırılamadı: %s: %s", type(exc).__name__, exc)
+        return []
+
+    if proc.returncode != 0:
+        logger.warning(
+            "[static_feature_node] readelf %d koduyla çıktı: %s", proc.returncode, (proc.stderr or "").strip()[:200]
+        )
+        return []
+    return parse_readelf_dynsyms(proc.stdout or "")
+
 
 def extract_imports(file_path: str) -> list[str]:
-    """PE import tablosundaki API isimlerini döndürür (tekilleştirilmiş, sıra korunur).
+    """Dosyanın import ettiği API/fonksiyon isimlerini döndürür (tekilleştirilmiş, sıra korunur).
 
-    Geçerli bir PE değilse, pefile kurulu değilse veya dosya okunamazsa ``[]`` döner.
+    * İlk 4 byte ``\\x7fELF`` ise ``readelf --wide --dyn-syms`` ile UND semboller (``extract_elf_imports``).
+    * Aksi halde pefile ile PE import tablosu.
+
+    Geçerli bir PE/ELF değilse, araç yoksa veya dosya okunamazsa ``[]`` döner.
     """
+    if is_elf(file_path):
+        return extract_elf_imports(file_path)
     if pefile is None:
         return []
     pe = None
@@ -573,11 +670,174 @@ def extract_imports(file_path: str) -> list[str]:
             pe.close()
 
 
-def section_entropy(file_path: str) -> dict[str, float]:
-    """PE section'larının Shannon entropy değerlerini döndürür: ``{".text": 6.2, ...}``.
+PE_MAGIC = b"MZ"
+ENTROPY_READ_CHUNK = 1024 * 1024  # 1 MiB
 
-    Aynı isimli section'lar ``name#2`` biçiminde ayrıştırılır. Geçerli PE değilse ``{}``.
+# `readelf -S -W` bölüm satırı:
+#   "  [ 1] .interp           PROGBITS        00000000004002a8 0002a8 00001c 00   A  0   0  1"
+# Gruplar: Nr, Name, Type, (Address), Off, Size  (Off/Size hex)
+_READELF_SECTION_RE = re.compile(
+    r"^\s*\[\s*(?P<nr>\d+)\]\s+(?P<name>\S+)\s+(?P<type>\S+)\s+[0-9A-Fa-f]+\s+"
+    r"(?P<off>[0-9A-Fa-f]+)\s+(?P<size>[0-9A-Fa-f]+)\s"
+)
+
+
+def is_pe(file_path: str) -> bool:
+    """Dosyanın ilk 2 byte'ı ``MZ`` mi? Okunamıyorsa ``False``."""
+    try:
+        with open(file_path, "rb") as fh:
+            return fh.read(len(PE_MAGIC)) == PE_MAGIC
+    except OSError:
+        return False
+
+
+def _entropy_from_counts(counts: Any, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    entropy = 0.0
+    for count in counts:
+        if count:
+            p = count / total
+            entropy -= p * math.log2(p)
+    return entropy
+
+
+def shannon_entropy(data: bytes) -> float:
+    """Bayt dizisinin Shannon entropy değeri (0.0 – 8.0). Boş veri için 0.0."""
+    if not data:
+        return 0.0
+    counts = [0] * 256
+    for byte, n in Counter(data).items():
+        counts[byte] = n
+    return _entropy_from_counts(counts, len(data))
+
+
+def file_range_entropy(file_path: str, offset: int, size: int) -> float | None:
+    """Dosyada ``offset``'ten ``size`` bayt okuyup Shannon entropy hesaplar.
+
+    Büyük bölümlerde belleği şişirmemek için parça parça okunur. Okunabilen bayt yoksa
+    (offset dosya dışında, ``size`` 0) veya dosya okunamıyorsa ``None``.
     """
+    if offset < 0 or size <= 0:
+        return None
+    counts = [0] * 256
+    total = 0
+    try:
+        with open(file_path, "rb") as fh:
+            fh.seek(offset)
+            remaining = size
+            while remaining > 0:
+                chunk = fh.read(min(ENTROPY_READ_CHUNK, remaining))
+                if not chunk:
+                    break
+                for byte, n in Counter(chunk).items():
+                    counts[byte] += n
+                total += len(chunk)
+                remaining -= len(chunk)
+    except OSError:
+        return None
+    if total == 0:
+        return None
+    return _entropy_from_counts(counts, total)
+
+
+def parse_readelf_sections(output: str) -> list[tuple[str, int, int]]:
+    """``readelf -S -W`` çıktısından ``(ad, dosya_offset, boyut)`` listesi çıkarır (saf mantık).
+
+    Offset/boyut hex'ten tam sayıya çevrilir. Dosyada yer kaplamayan bölümler (``NULL``, ``NOBITS``/.bss,
+    Nr=0) ve boyutu 0 olanlar atlanır.
+    """
+    sections: list[tuple[str, int, int]] = []
+    for line in output.splitlines():
+        match = _READELF_SECTION_RE.match(line)
+        if not match or match.group("nr") == "0" or match.group("type") in ("NULL", "NOBITS"):
+            continue
+        off, size = int(match.group("off"), 16), int(match.group("size"), 16)
+        if size > 0:
+            sections.append((match.group("name"), off, size))
+    return sections
+
+
+def _elf_section_entropy(file_path: str) -> dict[str, float]:
+    """ELF bölümlerinin entropy değerleri (``readelf -S -W`` + dosyadan bayt okuma). Hata → ``{}``."""
+    cmd = ["readelf", "-S", "-W", file_path]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=READELF_TIMEOUT_SECONDS,
+            check=False,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except FileNotFoundError:
+        logger.warning("[static_feature_node] readelf bulunamadı; ELF entropy atlanıyor")
+        return {}
+    except subprocess.TimeoutExpired:
+        logger.warning("[static_feature_node] readelf -S %d saniye içinde bitmedi (timeout)", READELF_TIMEOUT_SECONDS)
+        return {}
+    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
+        logger.warning("[static_feature_node] readelf -S çalıştırılamadı: %s: %s", type(exc).__name__, exc)
+        return {}
+    if proc.returncode != 0:
+        logger.warning("[static_feature_node] readelf -S %d koduyla çıktı", proc.returncode)
+        return {}
+
+    result: dict[str, float] = {}
+    for name, off, size in parse_readelf_sections(proc.stdout or ""):
+        value = file_range_entropy(file_path, off, size)
+        if value is None:
+            continue
+        key, n = name, 1
+        while key in result:
+            n += 1
+            key = f"{name}#{n}"
+        result[key] = value
+    return result
+
+
+def compute_imphash(file_path: str, imports: list[str]) -> str:
+    """Import özeti (aile gruplama anahtarı).
+
+    * PE (``MZ``): ``pefile`` ``get_imphash()``; hata/pefile yok → ``""``.
+    * ELF (``\\x7fELF``): ``md5(",".join(sorted(imports)))`` (import listesi boşsa ``""``). Sıralama,
+      farklı bağlayıcı/derleyici sıralamalarında aynı import kümesinin aynı özeti vermesini sağlar.
+    * Diğer dosyalar → ``""``.
+    """
+    if is_elf(file_path):
+        names = sorted(n for n in imports if isinstance(n, str) and n)
+        if not names:
+            return ""
+        return hashlib.md5(",".join(names).encode()).hexdigest()  # noqa: S324 - güvenlik amaçlı değil, gruplama anahtarı
+    if is_pe(file_path):
+        if pefile is None:
+            return ""
+        pe = None
+        try:
+            pe = pefile.PE(file_path, fast_load=True)
+            pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]])
+            return pe.get_imphash() or ""
+        except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
+            logger.warning("[static_feature_node] imphash hesaplanamadı: %s: %s", type(exc).__name__, exc)
+            return ""
+        finally:
+            if pe is not None:
+                pe.close()
+    return ""
+
+
+def section_entropy(file_path: str) -> dict[str, float]:
+    """Section'ların Shannon entropy değerlerini döndürür: ``{".text": 6.2, ...}``.
+
+    * ELF (``\\x7fELF``): ``readelf -S -W`` ile bölüm offset/boyutu, dosyadan okunan baytlar üzerinden hesap.
+    * Aksi halde pefile ile PE section'ları.
+
+    Aynı isimli section'lar ``name#2`` biçiminde ayrıştırılır. Geçerli PE/ELF değilse ``{}``.
+    """
+    if is_elf(file_path):
+        return _elf_section_entropy(file_path)
     if pefile is None:
         return {}
     pe = None
@@ -600,6 +860,158 @@ def section_entropy(file_path: str) -> dict[str, float]:
     finally:
         if pe is not None:
             pe.close()
+
+
+# --------------------------------------------------------------------------- #
+# PE metadata: Authenticode varlığı, versiyon bilgisi, manifest ayrıcalık seviyesi
+# --------------------------------------------------------------------------- #
+RT_MANIFEST = 24
+_DEFAULT_SECURITY_DIRECTORY_INDEX = 4  # IMAGE_DIRECTORY_ENTRY_SECURITY
+# Çıktı sırası bu listeyle belirlenir
+PE_VERSION_KEYS = (
+    "OriginalFilename",
+    "CompanyName",
+    "FileDescription",
+    "LegalCopyright",
+    "ProductName",
+    "FileVersion",
+)
+PE_VERSION_VALUE_MAX = 200  # örnekten gelen değer: bağlamı şişirmesin
+# Windows'un kabul ettiği tek üç değer; örnekten gelen başka bir metin bulguya girmez.
+_EXECUTION_LEVELS = {
+    "asinvoker": "asInvoker",
+    "highestavailable": "highestAvailable",
+    "requireadministrator": "requireAdministrator",
+}
+_EXECUTION_LEVEL_RE = re.compile(
+    r"<(?:\w+:)?requestedExecutionLevel\b[^>]*?\blevel\s*=\s*[\"']([^\"']*)[\"']", re.IGNORECASE
+)
+
+
+def _load_pe(file_path: str) -> Any | None:
+    """Dosyayı pefile ile TEK kez yükler (import + resource dizinleri ayrıştırılmış).
+
+    ELF, geçersiz PE (``PEFormatError``), okunamayan dosya veya ``pefile`` yoksa ``None``.
+    Dönen nesneyi çağıran kapatmalıdır (``pe.close()``).
+    """
+    if pefile is None or is_elf(file_path):
+        return None
+    pe = None
+    try:
+        pe = pefile.PE(file_path, fast_load=True)
+        pe.parse_data_directories(
+            directories=[
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"],
+                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"],
+            ]
+        )
+        return pe
+    except Exception as exc:  # noqa: BLE001 - PEFormatError dahil; iş akışı hiçbir koşulda çökmemeli
+        if pe is not None:
+            pe.close()
+        if type(exc).__name__ != "PEFormatError":  # PE olmayan dosya beklenen durum; sessiz geç
+            logger.warning("[static_feature_node] PE yüklenemedi: %s: %s", type(exc).__name__, exc)
+        return None
+
+
+def check_authenticode(pe: Any) -> bool:
+    """Güvenlik (sertifika) veri dizininin ``VirtualAddress`` değeri 0'dan büyükse ``True``.
+
+    Bu yalnızca imzanın **varlığını** söyler; geçerliliği doğrulanmaz. Hata durumunda ``False``.
+    """
+    try:
+        index = pefile.DIRECTORY_ENTRY.get("IMAGE_DIRECTORY_ENTRY_SECURITY", _DEFAULT_SECURITY_DIRECTORY_INDEX)
+        directories = pe.OPTIONAL_HEADER.DATA_DIRECTORY
+        return index < len(directories) and directories[index].VirtualAddress > 0
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[static_feature_node] authenticode okunamadı: %s: %s", type(exc).__name__, exc)
+        return False
+
+
+def _to_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return str(value).replace("\x00", "").strip()
+
+
+def extract_pe_version_info(pe: Any) -> list[str]:
+    """``StringFileInfo`` değerlerini ``["OriginalFilename: calc.exe", ...]`` olarak döndürür.
+
+    Yalnızca ``PE_VERSION_KEYS`` içindeki alanlar alınır (sıra sabit), boş değerler atlanır, her değer
+    ``PE_VERSION_VALUE_MAX`` karakterle sınırlanır. Versiyon bilgisi yoksa veya hata olursa ``[]``.
+    """
+    try:
+        values: dict[str, str] = {}
+        for info in getattr(pe, "FileInfo", None) or []:
+            # Yeni pefile: FileInfo = [[entry, ...], ...]; eski sürümler düz liste verebilir
+            for entry in info if isinstance(info, (list, tuple)) else [info]:
+                if _to_text(getattr(entry, "Key", b"")) != "StringFileInfo":
+                    continue
+                for table in getattr(entry, "StringTable", None) or []:
+                    for raw_key, raw_value in (getattr(table, "entries", None) or {}).items():
+                        key, value = _to_text(raw_key), _to_text(raw_value)
+                        if key in PE_VERSION_KEYS and value and key not in values:
+                            values[key] = value[:PE_VERSION_VALUE_MAX]
+        return [f"{key}: {values[key]}" for key in PE_VERSION_KEYS if key in values]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[static_feature_node] versiyon bilgisi okunamadı: %s: %s", type(exc).__name__, exc)
+        return []
+
+
+def _decode_manifest(raw: bytes) -> str:
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    return raw.decode("utf-8-sig", errors="replace")
+
+
+def parse_execution_level(manifest_xml: str) -> str:
+    """Manifest XML'inden ``requestedExecutionLevel level="..."`` değerini çıkarır.
+
+    Yalnızca Windows'un tanıdığı değerler (asInvoker, highestAvailable, requireAdministrator) döner;
+    başka bir metin veya eşleşme yoksa ``""``.
+    """
+    match = _EXECUTION_LEVEL_RE.search(manifest_xml or "")
+    return _EXECUTION_LEVELS.get(match.group(1).strip().lower(), "") if match else ""
+
+
+def extract_pe_manifest(pe: Any) -> str:
+    """RT_MANIFEST (tip 24) kaynağındaki ``requestedExecutionLevel`` değerini döndürür.
+
+    Kaynak dizini, manifest veya seviye yoksa ya da hata olursa ``""``.
+    """
+    try:
+        resources = getattr(pe, "DIRECTORY_ENTRY_RESOURCE", None)
+        if resources is None:
+            return ""
+        for type_entry in getattr(resources, "entries", None) or []:
+            if getattr(type_entry, "id", None) != RT_MANIFEST:
+                continue
+            for name_entry in type_entry.directory.entries:
+                for lang_entry in name_entry.directory.entries:
+                    data = lang_entry.data.struct
+                    level = parse_execution_level(_decode_manifest(pe.get_data(data.OffsetToData, data.Size)))
+                    if level:
+                        return level
+        return ""
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[static_feature_node] manifest okunamadı: %s: %s", type(exc).__name__, exc)
+        return ""
+
+
+def pe_metadata_findings(pe: Any) -> list[Finding]:
+    """Yüklü ``pe`` nesnesinden (yeniden I/O yapmadan) ``pe_metadata`` bulgularını üretir."""
+    if pe is None:
+        return []
+    findings: list[Finding] = []
+    if check_authenticode(pe):
+        findings.append(Finding(source="pe_metadata", kind="authenticode", value="Present (Unverified)"))
+    version = extract_pe_version_info(pe)
+    if version:
+        findings.append(Finding(source="pe_metadata", kind="version_info", value="; ".join(version)))
+    privilege = extract_pe_manifest(pe)
+    if privilege:
+        findings.append(Finding(source="pe_metadata", kind="manifest_privilege", value=privilege))
+    return findings
 
 
 def match_import_combos(imports: list[str]) -> list[str]:
@@ -645,11 +1057,16 @@ def build_findings(
     import_combos: list[str],
     entropy: dict[str, float],
     ioc_strings: list[str],
+    imphash: str = "",
+    entropy_source: str = "pefile_entropy",
+    pe_metadata: list[Finding] | None = None,
 ) -> list[Finding]:
     """Araç çıktılarını ``Finding`` listesine çevirir (saf mantık).
 
     Sıra, bağlam bütçesi daraldığında en değerli kanıtlar önde kalsın diye:
-    yara, capa, import combo, entropy, floss.
+    yara, capa, import combo, imphash, entropy, floss.
+    Ham import listesi bilerek bulgu üretmez; yalnızca eşleşen combolar ve ``imphash`` gider.
+    ``entropy_source``: PE için ``pefile_entropy``, ELF için ``elf_entropy``.
     """
     findings: list[Finding] = yara_findings(yara_results)
 
@@ -671,9 +1088,14 @@ def build_findings(
     for combo in import_combos:
         findings.append(Finding(source="import_combo", kind="behavior", value=combo))
 
+    if imphash:
+        findings.append(Finding(source="imphash", kind="grouping_key", value=imphash))
+
+    findings.extend(pe_metadata or [])
+
     for name, value in entropy.items():
         if value > HIGH_ENTROPY_THRESHOLD:
-            findings.append(Finding(source="pefile_entropy", kind="high_entropy", value=f"{name}: {value:.2f}"))
+            findings.append(Finding(source=entropy_source, kind="high_entropy", value=f"{name}: {value:.2f}"))
 
     for text in ioc_strings:
         if isinstance(text, str) and text.strip():
@@ -1080,9 +1502,10 @@ def db_writer_node(state: AgentState) -> dict[str, Any]:
         db_path = db.init_db()
         db.insert_sample(state.sample, db_path)
         db.insert_findings(sha256, state.findings, db_path)
+        # llm_summary: DecompiledFunction.llm_summary (ai_reverser state'e geri yazar) -> functions.llm_summary
         db.insert_functions_and_calls(sha256, state.source_code, db_path)
-        if state.analysis_report:  # ai_supervisor_agent'ın ürettiği ana rapor
-            db.insert_llm_claims(sha256, state.analysis_report, db_path)
+        if state.analysis_report or state.verdict:  # supervisor raporu ve/veya dosya kararı
+            db.insert_llm_claims(sha256, state.analysis_report, db_path, verdict=state.verdict)
     except Exception as exc:  # noqa: BLE001 - kalıcılık hatası analiz sonucunu düşürmemeli
         logger.error("[db_writer_node] veritabanı hatası: %s: %s", type(exc).__name__, exc)
     return {}

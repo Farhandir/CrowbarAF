@@ -16,6 +16,12 @@ from nodes import compute_sha256
 from state import AgentState, DecompiledFunction, Finding, SampleInfo
 
 SHA = "b" * 64
+FAKE_VERDICT = {
+    "verdict": "malicious",
+    "reasons": ["1 suspicious function(s)"],
+    "unknown_reasons": [],
+    "coverage": {"total": 1, "analyzed": 1, "skipped": 0, "ratio": 1.0, "min_required": 0.8},
+}
 
 
 @pytest.fixture
@@ -54,6 +60,7 @@ class FakeGraph:
                     )
                 ],
                 analysis_report="# Rapor\nkanıt var",
+                verdict=FAKE_VERDICT,
             )
         )
         return {}
@@ -71,8 +78,10 @@ class TestDbExtensions:
         db.init_db(db_path)
         with closing(sqlite3.connect(db_path)) as conn:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(functions)")]
-            assert cols[-5:] == ["llm_summary", "size", "is_library", "capa_hits", "xrefs"]
-            assert [r[1] for r in conn.execute("PRAGMA table_info(llm_claims)")] == ["id", "sha256", "supervisor_report"]
+            assert cols[-6:] == ["llm_summary", "size", "is_library", "capa_hits", "xrefs", "iocs"]
+            assert [r[1] for r in conn.execute("PRAGMA table_info(llm_claims)")] == [
+                "id", "sha256", "supervisor_report", "verdict",
+            ]
 
     def test_old_schema_is_migrated(self, tmp_path) -> None:
         path = str(tmp_path / "old.db")
@@ -85,7 +94,7 @@ class TestDbExtensions:
         db.init_db(path)
         with closing(sqlite3.connect(path)) as conn:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(functions)")}
-            assert {"llm_summary", "size", "is_library", "capa_hits", "xrefs"} <= cols
+            assert {"llm_summary", "size", "is_library", "capa_hits", "xrefs", "iocs"} <= cols
             assert conn.execute("SELECT COUNT(*) FROM functions").fetchone()[0] == 1  # veri korunur
 
     def test_insert_functions_serializes_new_columns_as_json(self, db_path) -> None:
@@ -150,6 +159,23 @@ class TestIndex:
         assert "http://" not in res.text and "https://" not in res.text  # CDN yok: çevrimdışı çalışır
         assert "innerHTML" not in res.text  # dinamik veri HTML olarak enjekte edilmez
 
+    def test_has_verdict_badge_logic_and_styles(self, client) -> None:
+        html = client.get("/").text
+        assert "function verdictBadge" in html and "<th>Karar</th>" in html
+        # malicious: kırmızı/beyaz, needs_review: turuncu/siyah, unknown + no_evidence: gri
+        assert ".badge.malicious { background: #d63031; color: #fff; }" in html
+        assert ".badge.needs_review { background: #f5a623; color: #000; }" in html
+        assert ".badge.unknown, .badge.no_evidence { background: #6b7280; color: #fff; }" in html
+        # rozet sınıfı yalnızca bilinen karar adlarından seçilir (sınıf enjeksiyonu yok)
+        assert 'KNOWN_VERDICTS = ["malicious", "needs_review", "unknown", "no_evidence"]' in html
+
+    def test_function_summary_is_shown_under_the_name(self, client) -> None:
+        html = client.get("/").text
+        assert ".fn-summary { color: var(--muted); font-style: italic;" in html
+        assert 'el("div", { class: "fn-summary", text: fn.llm_summary })' in html
+        # özet, <summary> (fonksiyon adı satırı) içinde; ayrıca gövdede tekrar edilmez
+        assert 'kv("Özet"' not in html
+
 
 class TestUploadAndRead:
     def test_empty_list(self, client) -> None:
@@ -185,6 +211,31 @@ class TestUploadAndRead:
         )
         assert fn["decompile_warnings"] == ["w"] and fn["is_library"] is False
         assert d["supervisor_report"].startswith("# Rapor")
+        # karar: DB'ye JSON yazılır, API'den ayrıştırılmış dict olarak döner
+        assert d["verdict"] == FAKE_VERDICT
+        assert samples[0]["verdict"] == FAKE_VERDICT
+
+    def test_verdict_is_returned_by_list_and_detail_endpoints(self, client, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        db.insert_sample(SampleInfo(sha256="c" * 64), db_path)
+        db.insert_llm_claims(SHA, "r", db_path, verdict={"verdict": "needs_review", "reasons": ["x"]})
+
+        listed = {s["sha256"]: s for s in client.get("/api/samples").json()}
+        assert listed[SHA]["verdict"] == {"verdict": "needs_review", "reasons": ["x"]}
+        assert listed["c" * 64]["verdict"] == {}  # kararı olmayan örnek: boş dict, hata yok
+
+        detail = client.get(f"/api/samples/{SHA}").json()
+        assert detail["verdict"]["verdict"] == "needs_review"
+        assert client.get(f"/api/samples/{'c' * 64}").json()["verdict"] == {}
+
+    def test_function_llm_summary_is_returned(self, client, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        db.insert_functions_and_calls(
+            SHA, [DecompiledFunction(offset="0x1", name="f", c_code="int f(){}", llm_summary="Soket açar")], db_path
+        )
+        assert client.get(f"/api/samples/{SHA}").json()["functions"][0]["llm_summary"] == "Soket açar"
 
     def test_filename_is_sanitized(self, client, monkeypatch) -> None:
         graph = FakeGraph()

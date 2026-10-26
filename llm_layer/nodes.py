@@ -27,6 +27,7 @@ def _to_function_infos(state) -> list[FunctionInfo]:
             callees=list(getattr(d, "callees", []) or []),
             xrefs=list(getattr(d, "xrefs", []) or []),
             decompile_warnings=list(getattr(d, "decompile_warnings", []) or []),
+            iocs=list(getattr(d, "iocs", []) or []),
         ))
     return out
 
