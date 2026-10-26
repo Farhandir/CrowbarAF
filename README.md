@@ -1,11 +1,9 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/crowbaraf-logo-dark.png">
-    <img src="docs/assets/crowbaraf-logo-light.png" alt="CrowbarAF" width="240">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/crowbaraf-banner-dark.png">
+    <img src="docs/assets/crowbaraf-banner-light.png" alt="CrowbarAF" width="480">
   </picture>
 </p>
-
-<h1 align="center">CrowbarAF</h1>
 
 <p align="center">
   <b>Pry the sample open. Keep the evidence. Never fake certainty.</b><br>
