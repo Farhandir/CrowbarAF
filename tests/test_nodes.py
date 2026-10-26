@@ -74,7 +74,7 @@ class TestFilterIocs:
 # _collect_floss_strings
 # --------------------------------------------------------------------------- #
 class TestCollectFlossStrings:
-    def test_collects_decoded_and_stack_only(self) -> None:
+    def test_collects_decoded_stack_and_static(self) -> None:
         report = {
             "strings": {
                 "static_strings": [{"string": "http://static.com"}],
@@ -84,8 +84,8 @@ class TestCollectFlossStrings:
             }
         }
         pool = _collect_floss_strings(report)
-        assert pool == ["10.0.0.1", "a.exe"]
-        assert "http://static.com" not in pool
+        # static is included (run_floss filters it with filter_iocs); tight is not.
+        assert pool == ["10.0.0.1", "a.exe", "http://static.com"]
         assert "tight.dll" not in pool
 
     def test_accepts_plain_strings_and_dicts(self) -> None:

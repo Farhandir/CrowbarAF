@@ -282,7 +282,7 @@ Same synthetic sample, only the payload's priority changes:
   `iocs` (state `DecompiledFunction.iocs`, DB `functions.iocs`). A function that
   references an IoC gets **+3 priority** (once per function, however many IoCs), so it
   is a decompile candidate even with no capa/API signal. Pure logic and a fake-Ghidra
-  harness are unit-tested; **not yet run on a real Ghidra**.
+  harness are unit-tested; **verified end-to-end on real Ghidra 12.1.4 (2026-10-26)**.
   **Consumer side: done (2026-10-26).** `llm_layer.types.FunctionInfo` now carries
   `iocs` and `_to_function_infos` copies them from `DecompiledFunction.iocs`.
   `context.finding_matches_function` (used by `must_include_offsets`) matches a
@@ -292,8 +292,8 @@ Same synthetic sample, only the payload's priority changes:
   forces that function into the run (bypassing `min_priority` and the budget, with
   its direct callees), even when the string is not visible in the pseudo-C. Reverse
   containment (a short IoC inside a longer finding) is deliberately not matched.
-  Unit-tested, including an `analyze(..., min_priority=1)` run; **not yet exercised on
-  a real Ghidra output**.
+  Unit-tested, including an `analyze(..., min_priority=1)` run; **verified end-to-end
+  on real Ghidra 12.1.4 (2026-10-26)**.
   *Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
   not defined strings in the binary and still cannot be mapped.
 
@@ -312,4 +312,33 @@ Same synthetic sample, only the payload's priority changes:
 - **No finding = no signal:** without a critical finding, threshold misses the
   priority-0 payload (653 / 769 tokens, `unknown`); soft catches it at
   28k / 53k. Soft remains the safe default.
+
+#### End-to-end IoC-xref verification (2026-10-26)
+
+Two harmless ELF samples, both with `http://192.0.2.1:4444/gate.php`:
+
+| sample | before the fix | after the fix |
+|---|---|---|
+| inline `puts("http://...")` | `no_evidence`; URL missing; `main` not decompiled | **`malicious`**; `floss/url`; `main` prio 3, `iocs=[url]` |
+| global `const char *u = "http://..."; puts(u)` | `no_evidence`; URL missing; `main` not decompiled | **`needs_review`**; `floss/url`; `main` prio 3, `iocs=[url]` |
+
+Fixes that made this work:
+
+1. **FLOSS static IoCs** (`nodes.py`): `_collect_floss_strings` now includes
+   `static_strings`, not only decoded/stack. `run_floss` still filters with
+   `filter_iocs`, so only URL/IP/registry/file patterns enter findings.
+2. **Ghidra 12.1.4 API** (`export_functions.py`): `DefinedDataIterator.definedStrings`
+   does not exist there. `_iter_defined_data` falls back to
+   `currentProgram.getListing().getDefinedData(True)` (capped at 200k).
+3. **Pointer indirection** (`export_functions.py`): `_function_for_ref` follows
+   data-pointer chains up to 3 hops, so `const char *u` (string <- pointer <- code)
+   resolves to `main`.
+4. **Entry/main is always decompiled** (`plan_export`): compiler stubs with noise
+   priority can no longer crowd out `main` / `_start`.
+5. **Linux API matching is exact**; the `"clone"` substring no longer matches
+   `deregister_tm_clones` / `register_tm_clones` (which had produced priority 4
+   stubs and skipped `main`).
+
+*Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
+not defined strings in the binary and still cannot be mapped by this path.
 

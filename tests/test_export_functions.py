@@ -597,3 +597,30 @@ class TestIocsContract:
         assert {(f["kind"], f["value"]) for f in seen["input"]["findings"]} == {("ip", "10.0.0.1")}
         assert ef.collect_target_iocs(seen["input"]["findings"]) == {"10.0.0.1"}
         assert [f.iocs for f in result] == [["10.0.0.1"]]
+
+
+def test_compiler_stub_clone_is_not_dangerous():
+    assert ef.compute_priority([], ["deregister_tm_clones"], 100, False, set()) == 0
+    assert ef.compute_priority([], ["register_tm_clones"], 100, False, set()) == 0
+
+
+def test_linux_exact_match_does_not_hit_substrings():
+    assert ef.compute_priority([], ["clone"], 100, False, set()) == 4
+    assert ef.compute_priority([], ["system"], 100, False, set()) == 4
+    assert ef.compute_priority([], ["filesystem"], 100, False, set()) == 0
+
+
+def test_main_is_always_chosen_even_with_scored_stubs():
+    records = [_rec("0x1", 4), _rec("0x2", 4), _rec("0xm", 0)]
+    records[2]["name"] = "main"
+    chosen, _ = ef.plan_export(records)
+    offsets = [r["offset"] for r in chosen]
+    assert "0xm" in offsets
+    assert offsets[0] == "0xm"
+
+
+def test_entry_flag_is_chosen():
+    records = [_rec("0x1", 4), _rec("0xe", 0)]
+    records[1]["is_entry"] = True
+    chosen, _ = ef.plan_export(records)
+    assert "0xe" in [r["offset"] for r in chosen]

@@ -43,6 +43,7 @@ IOC_KINDS = ("ip", "url", "domain", "registry", "file", "email")
 MIN_IOC_LENGTH = 4  # "a.b" gibi çok kısa değerler rastgele string'lerle eşleşmesin
 MAX_TARGET_IOCS = 2000  # aranacak IoC üst sınırı (string sayısı x IoC sayısı patlamasın)
 MAX_IOCS_PER_FUNCTION = 20
+MAX_DEFINED_DATA = 200000  # Listing fallback tarama üst sınırı
 
 MAX_DECOMPILE = 100  # Top-N: decompile edilecek en fazla fonksiyon
 FALLBACK_DECOMPILE = 20  # hiç puanlı fonksiyon yoksa denenecek en büyük fonksiyon sayısı
@@ -51,7 +52,8 @@ MAX_CALLEES = 50
 MAX_XREFS = 50
 
 # Küçük harfli, alt-dize eşleşmesi (CreateProcessA/W/Ex gibi varyantları da yakalar)
-DANGEROUS_APIS = (
+# Windows: substring match (CreateProcessA/W/Ex variants)
+DANGEROUS_APIS_SUBSTRING = (
     "virtualalloc",
     "virtualprotect",
     "createprocess",
@@ -75,7 +77,9 @@ DANGEROUS_APIS = (
     "regsetvalue",
     "regcreatekey",
     "createservice",
-    # Linux / cross-platform (ELF malware in scope)
+)
+# Linux: EXACT match ("clone" must not match "deregister_tm_clones")
+DANGEROUS_APIS_EXACT = frozenset((
     "socket",
     "connect",
     "bind",
@@ -101,7 +105,21 @@ DANGEROUS_APIS = (
     "prctl",
     "setuid",
     "setgid",
-)
+    "socketpair",
+    "sendmsg",
+    "recvmsg",
+    "execv",
+    "execvpe",
+    "fexecve",
+    "execlp",
+    "execle",
+    "vfork",
+    "mmap64",
+    "seteuid",
+    "setegid",
+))
+# Union kept for external imports / backwards compatibility
+DANGEROUS_APIS = tuple(DANGEROUS_APIS_SUBSTRING) + tuple(sorted(DANGEROUS_APIS_EXACT))
 
 
 # --------------------------------------------------------------------------- #
@@ -176,7 +194,9 @@ def compute_priority(capa_hits, callee_names, size, is_library, combo_apis, ioc_
         priority += IOC_REFERENCE_BONUS
 
     names = [base_name(n) for n in callee_names]
-    if any(api in name for name in names for api in DANGEROUS_APIS):
+    substring_hit = any(api in name for name in names for api in DANGEROUS_APIS_SUBSTRING)
+    exact_hit = any(name in DANGEROUS_APIS_EXACT for name in names)
+    if substring_hit or exact_hit:
         priority += DANGEROUS_API_BONUS
     if combo_apis and any(name in combo_apis for name in names):
         priority += IMPORT_COMBO_BONUS
@@ -214,12 +234,29 @@ def plan_export(records):
     * Seçilenlerin doğrudan (dahili) callee'leri stub olarak eklenir (en fazla MAX_STUBS).
     """
     ranked = sorted(records, key=lambda r: (-r["priority"], r["size"], r["offset"]))
-    chosen = [r for r in ranked if r["priority"] > 0][:MAX_DECOMPILE]
+    chosen = []
+    seen = set()
 
-    if not chosen:
+    def add(r):
+        if r["offset"] not in seen and len(chosen) < MAX_DECOMPILE:
+            chosen.append(r)
+            seen.add(r["offset"])
+
+    # Entry point / main is always analyzed; compiler stubs must not crowd it out.
+    for r in records:
+        name = str(r.get("name") or "").strip().lower()
+        if r.get("is_entry") or name in ("main", "_start", "entry", "wmain"):
+            add(r)
+
+    scored = [r for r in ranked if r["priority"] > 0]
+    if scored:
+        for r in scored:
+            add(r)
+    else:
         pool = [r for r in records if not r["is_library"] and 0 < r["size"] <= LARGE_FUNCTION_BYTES]
         pool.sort(key=lambda r: (-r["size"], r["offset"]))
-        chosen = pool[:FALLBACK_DECOMPILE]
+        for r in pool[:FALLBACK_DECOMPILE]:
+            add(r)
 
     by_offset = {r["offset"]: r for r in records}
     seen = set(r["offset"] for r in chosen)
@@ -291,23 +328,67 @@ def map_hints_to_functions(hints):
     return hits
 
 
+def _iter_defined_data():
+    """Defined strings/data: DefinedDataIterator if available, else Listing.getDefinedData.
+
+    Ghidra 12.1.4 does not expose ``DefinedDataIterator.definedStrings``; the
+    Listing fallback is the real path. The iterator branch keeps the fake-Ghidra
+    unit tests and older versions working.
+    """
+    try:
+        from ghidra.program.util import DefinedDataIterator
+
+        if hasattr(DefinedDataIterator, "definedStrings"):
+            yield from DefinedDataIterator.definedStrings(currentProgram)  # noqa: F821
+            return
+    except Exception:
+        pass
+    listing = currentProgram.getListing()  # noqa: F821
+    for i, data in enumerate(listing.getDefinedData(True)):  # noqa: F821
+        if i >= MAX_DEFINED_DATA:
+            break
+        yield data
+
+
+def _function_for_ref(ref, ref_manager, func_manager, depth=0):
+    """Resolve a reference to a containing function; follow data pointer chains."""
+    try:
+        source = ref.getFromAddress()
+    except Exception:
+        return None
+    if source is None or not source.isMemoryAddress():
+        return None
+    func = func_manager.getFunctionContaining(source)
+    if func is not None:
+        return func
+    if depth >= 3:
+        return None
+    try:
+        for ref2 in ref_manager.getReferencesTo(source):
+            func = _function_for_ref(ref2, ref_manager, func_manager, depth + 1)
+            if func is not None:
+                return func
+    except Exception:
+        return None
+    return None
+
+
 def map_iocs_to_functions(target_iocs):
     """Programın tanımlı string'lerinde IoC arar; referans veren fonksiyonlara eşler.
 
-    Dönüş: {fonksiyon_giriş_adresi: [ioc, ...]}. String'e gelen her referansın kaynak adresini
-    içeren fonksiyon bulunur (``getFunctionContaining``). Fonksiyon dışı (ör. veri tablosu)
-    referanslar atlanır. Hata olursa o ana kadar bulunanlar döner.
+    Dönüş: {fonksiyon_giriş_adresi: [ioc, ...]}. String'e gelen referansın kaynak
+    adresini içeren fonksiyon bulunur; doğrudan kod referansı yoksa veri/pointer
+    zinciri 3 hop'a kadar izlenir (global ``const char *u`` durumu). Hata olursa
+    o ana kadar bulunanlar döner.
     """
     hits = {}
     if not target_iocs:
         return hits
     try:
-        from ghidra.program.util import DefinedDataIterator
-
         ioc_index = build_ioc_index(target_iocs)
         ref_manager = currentProgram.getReferenceManager()  # noqa: F821 (Ghidra)
         func_manager = currentProgram.getFunctionManager()  # noqa: F821 (Ghidra)
-        for data in DefinedDataIterator.definedStrings(currentProgram):  # noqa: F821 (Ghidra)
+        for data in _iter_defined_data():
             try:
                 value = data.getValue()
                 text = str(value) if value is not None else str(data.getDefaultValueRepresentation())
@@ -315,10 +396,7 @@ def map_iocs_to_functions(target_iocs):
                 if not matched:
                     continue
                 for ref in ref_manager.getReferencesTo(data.getAddress()):
-                    source = ref.getFromAddress()
-                    if not source.isMemoryAddress():
-                        continue
-                    func = func_manager.getFunctionContaining(source)
+                    func = _function_for_ref(ref, ref_manager, func_manager)
                     if func is None:
                         continue
                     add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), matched)
@@ -327,7 +405,6 @@ def map_iocs_to_functions(target_iocs):
     except Exception as exc:
         printerr("[export_functions] IoC eslemesi basarisiz: " + str(exc))  # noqa: F821
     return hits
-
 
 def get_callees(func):
     """Çağrılan fonksiyonlar: (hex adresler, isimler). JSON'a sadece adresler yazılır."""
@@ -398,6 +475,10 @@ def collect_records(hits, combo_apis, ioc_hits=None):
     """
     ioc_hits = ioc_hits or {}
     records = []
+    try:
+        entry_point = currentProgram.getEntryPoint()  # noqa: F821 (Ghidra)
+    except Exception:
+        entry_point = None
     for func in currentProgram.getFunctionManager().getFunctions(True):  # noqa: F821 (Ghidra)
         try:
             if func.isExternal():
@@ -409,6 +490,10 @@ def collect_records(hits, combo_apis, ioc_hits=None):
             is_library = bool(func.isThunk())
             size = int(func.getBody().getNumAddresses())
             callee_addrs, callee_names = get_callees(func)
+            try:
+                is_entry = bool(entry_point is not None and func.getEntryPoint() == entry_point)
+            except Exception:
+                is_entry = False
 
             records.append({
                 "offset": entry,
@@ -421,6 +506,7 @@ def collect_records(hits, combo_apis, ioc_hits=None):
                 "decompile_warnings": [],
                 "capa_hits": capa_hits,
                 "iocs": iocs,
+                "is_entry": is_entry,
                 "c_code": "",
                 "llm_summary": "",
                 "_func": func,
@@ -465,6 +551,7 @@ def main():
         for record in chosen + stubs:
             record["xrefs"] = get_xrefs(record["_func"])
             del record["_func"]
+            record.pop("is_entry", None)
             results.append(record)
     except Exception as exc:
         printerr("[export_functions] beklenmeyen hata: " + str(exc))  # noqa: F821

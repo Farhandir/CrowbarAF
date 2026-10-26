@@ -797,3 +797,21 @@ def test_analyze_without_ioc_link_still_skips_the_same_function():
     findings = [Finding(source="floss", kind="url", value=C2, address=None)]
     res = analyze([fn], findings, FakeClient(), budget_tokens=1000, min_priority=1)
     assert res.summaries == {} and res.must_include == []
+
+
+def test_must_include_by_iocs():
+    fn = _fn("0x1", "int f(){return 1;}")
+    fn.iocs = ["http://192.0.2.1:4444/gate.php"]
+    f = Finding(source="floss", kind="url",
+                value="http://192.0.2.1:4444/gate.php", address=None)
+    assert must_include_offsets([fn], [f]) == {"0x1"}
+
+
+def test_analyze_must_include_by_iocs():
+    fn = _fn("0x1", "int f(){return 1;}", priority=0)
+    fn.iocs = ["http://192.0.2.1:4444/gate.php"]
+    findings = [Finding(source="floss", kind="url",
+                        value="http://192.0.2.1:4444/gate.php", address=None)]
+    res = analyze([fn], findings, FakeClient(), budget_tokens=1000, min_priority=1)
+    assert "0x1" in res.summaries
+    assert res.must_include == ["0x1"]

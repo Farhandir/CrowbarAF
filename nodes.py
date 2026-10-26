@@ -1146,17 +1146,18 @@ def filter_iocs(strings_list: list[str]) -> list[str]:
 
 
 def _collect_floss_strings(report: dict[str, Any]) -> list[str]:
-    """FLOSS JSON'undan sadece decoded_strings ve stack_strings metinlerini toplar.
+    """FLOSS JSON'undan decoded, stack ve static string metinlerini toplar.
 
-    ``static_strings`` bilinçli olarak alınmaz. Girdiler hem ``{"string": "..."}``
-    nesnesi hem de düz string olabilir (FLOSS sürümüne göre).
+    ``run_floss`` çıktıyı ``filter_iocs`` ile süzdüğü için static string'lerin
+    gürültüsü gelmez; düz metin C2 URL'leri ancak bu yolla bulguya girer.
+    Girdiler hem ``{"string": "..."}`` nesnesi hem de düz string olabilir.
     """
     strings_section = report.get("strings")
     if not isinstance(strings_section, dict):
         strings_section = report  # bazı sürümlerde anahtarlar kök seviyesinde olabilir
 
     pool: list[str] = []
-    for key in ("decoded_strings", "stack_strings"):
+    for key in ("decoded_strings", "stack_strings", "static_strings"):
         entries = strings_section.get(key)
         if not isinstance(entries, list):
             continue

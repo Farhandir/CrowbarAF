@@ -978,3 +978,14 @@ class TestStaticFeatureNode:
             findings=nodes.yara_findings(yara),  # entry_node zaten ekledi
         )
         assert len(static_feature_node(state)["findings"]) == 1
+
+
+def test_collect_floss_strings_includes_static_iocs():
+    report = {"strings": {
+        "static_strings": [{"string": "http://192.0.2.1:4444/gate.php"}],
+        "decoded_strings": [],
+        "stack_strings": [],
+    }}
+    out = nodes._collect_floss_strings(report)
+    assert out == ["http://192.0.2.1:4444/gate.php"]
+    assert nodes.filter_iocs(out) == ["http://192.0.2.1:4444/gate.php"]

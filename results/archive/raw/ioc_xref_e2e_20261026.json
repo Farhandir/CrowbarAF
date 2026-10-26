@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-26",
+  "model": "deepseek-v4.1-flash (opencode-go)",
+  "samples": {
+    "inline": {
+      "path": "/tmp/opencode/inline_url",
+      "source": "int main(void){ puts(\"http://192.0.2.1:4444/gate.php\"); return 0; }",
+      "verdict": "malicious",
+      "findings": ["imphash", "floss/url"],
+      "main": {"priority": 3, "iocs": ["http://192.0.2.1:4444/gate.php"]}
+    },
+    "global_pointer": {
+      "path": "/tmp/opencode/url_sample",
+      "source": "const char *u = \"http://192.0.2.1:4444/gate.php\"; int main(void){ puts(u); return 0; }",
+      "verdict": "needs_review",
+      "findings": ["imphash", "floss/url"],
+      "main": {"priority": 3, "iocs": ["http://192.0.2.1:4444/gate.php"]}
+    }
+  },
+  "before": {
+    "verdict": "no_evidence",
+    "findings": ["imphash"],
+    "main": "not decompiled",
+    "iocs": []
+  },
+  "root_causes": [
+    "FLOSS static_strings excluded from IoC findings",
+    "Ghidra 12.1.4 has no DefinedDataIterator.definedStrings",
+    "global const char * needs pointer-chain reference following",
+    "Linux API substring 'clone' matched deregister_tm_clones/register_tm_clones",
+    "plan_export skipped main when noisy stubs had priority>0"
+  ]
+}

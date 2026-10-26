@@ -2845,6 +2845,75 @@
         "results/archive/raw/priority_recall_scale_nofinding_deepseek-v4.1-flash.json"
       ],
       "notes": "No finding = no signal: threshold misses the priority-0 payload but fails closed (unknown, never no_evidence). Soft catches it at 28k/53k tokens. Soft remains the safe default; threshold is an opt-in that needs critical evidence."
+    },
+    {
+      "experiment_id": "ioc_xref_e2e_elf_20261026",
+      "date": "2026-10-26",
+      "question": "Does the IoC-xref chain find a plaintext C2 URL and force the containing function into the run on real Ghidra 12.1.4?",
+      "dataset": {
+        "name": "crowbaraf/url_sample",
+        "kind": "elf_plaintext_url",
+        "variants": [
+          "inline",
+          "global_pointer"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php"
+      },
+      "victim": {
+        "system": "full CrowbarAF pipeline (Ghidra 12.1.4 + DeepSeek V4.1 Flash)"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "runs": 1
+      },
+      "metrics": {
+        "before": {
+          "verdict": "no_evidence",
+          "findings": [
+            "imphash"
+          ],
+          "main": "not decompiled",
+          "iocs": []
+        },
+        "after_inline": {
+          "verdict": "malicious",
+          "findings": [
+            "imphash",
+            "floss/url"
+          ],
+          "main_priority": 3,
+          "main_iocs": [
+            "http://192.0.2.1:4444/gate.php"
+          ]
+        },
+        "after_global_pointer": {
+          "verdict": "needs_review",
+          "findings": [
+            "imphash",
+            "floss/url"
+          ],
+          "main_priority": 3,
+          "main_iocs": [
+            "http://192.0.2.1:4444/gate.php"
+          ]
+        },
+        "root_causes": [
+          "static strings excluded from FLOSS IoCs",
+          "Ghidra 12.1.4 lacks DefinedDataIterator.definedStrings",
+          "global const char * needs pointer-chain following",
+          "'clone' substring matched compiler stubs",
+          "plan_export skipped main when noisy stubs had priority>0"
+        ]
+      },
+      "raw_sources": [
+        "results/archive/raw/ioc_xref_e2e_20261026.json"
+      ],
+      "notes": "End-to-end verification of the friend's IoC-xref feature plus the fixes: FLOSS static IoCs, Listing fallback, pointer chains, entry/main inclusion, exact Linux API matching. The plaintext-URL ELF is no longer a silent no_evidence; it is malicious (inline) or needs_review (global pointer), with main priority 3 and iocs populated."
     }
   ]
 }
