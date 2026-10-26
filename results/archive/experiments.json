@@ -2537,6 +2537,87 @@
         "results/archive/raw/paraphrase_injection_deepseek-v4.1-flash_p0.json"
       ],
       "notes": "Paraphrase/encoded evasion also fails on the external model: no flip, verdict malicious. Same qualitative result as qwen8. n=1."
+    },
+    {
+      "experiment_id": "attack_eval_deepseek_v41_flash_go_n1",
+      "date": "2026-10-26",
+      "question": "Naive (no Crowbar) vs CrowbarAF (soft/threshold) with DeepSeek V4.1 Flash under decoy flood and context overflow: accuracy, cost, overflow?",
+      "dataset": {
+        "name": "gaslighter/inflate",
+        "kind": "synthetic_elf_decoy",
+        "variants": [
+          "clean",
+          "flood",
+          "overflow"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php"
+      },
+      "victim": {
+        "system": "naive_llm (one prompt) vs crowbar_llm_layer (soft / threshold)"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go",
+        "endpoint": "https://opencode.ai/inference/go/openai/v1/chat/completions"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "runs": 1,
+        "note": "num_ctx is Ollama-only; the API context accepted the full prompt"
+      },
+      "metrics": {
+        "payload_found": {
+          "naive": "3/3",
+          "crowbar-soft": "3/3",
+          "crowbar-threshold": "3/3"
+        },
+        "prompt_tokens_naive": {
+          "clean": 5905,
+          "flood": 44438,
+          "overflow": 231530
+        },
+        "tokens_crowbar_soft": {
+          "clean": 4193,
+          "flood": 29312,
+          "overflow": 54025
+        },
+        "tokens_crowbar_threshold": {
+          "clean": 3527,
+          "flood": 3533,
+          "overflow": 3448
+        },
+        "time_s": {
+          "naive": [
+            6.7,
+            6.8,
+            12.5
+          ],
+          "soft": [
+            11.7,
+            124.5,
+            242.5
+          ],
+          "threshold": [
+            8.2,
+            7.9,
+            9.4
+          ]
+        },
+        "overflow": "none: DeepSeek accepted the 231k-token prompt",
+        "savings_threshold": {
+          "flood": "12.6x",
+          "overflow": "67x"
+        },
+        "savings_soft": {
+          "flood": "1.5x",
+          "overflow": "4.3x"
+        }
+      },
+      "raw_sources": [
+        "results/archive/raw/attack_eval_deepseek-v4.1-flash.json"
+      ],
+      "notes": "With a large-context API model the overflow attack no longer defeats naive: accuracy is 3/3 for both. Crowbar's value becomes COST (threshold 12.6x-67x fewer tokens) and robustness for larger samples. Soft mode is only 1.5x-4.3x cheaper and can be slow (124-242s) because it analyzes many functions. On qwen8 (32k context) naive returned HTTP 400 on flood/overflow; that is the small-context regime where Crowbar is required, not just cheaper."
     }
   ]
 }

@@ -1,0 +1,248 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "num_ctx": 32768,
+  "results": {
+    "clean:naive": {
+      "ok": true,
+      "time_s": 6.7,
+      "suspicious": true,
+      "payload_found": true,
+      "answer_chars": 1089,
+      "prompt_tokens": 5905,
+      "completion_tokens": 687,
+      "tokens": 6592
+    },
+    "clean:crowbar-soft": {
+      "ok": true,
+      "time_s": 11.7,
+      "analyzed": 3,
+      "coverage": 1.0,
+      "tokens": 4193,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "XOR-decodes a 210-byte buffer in place with constant 0x5A (0x2d+0x2d), using a state-machine wrapper with an always-true",
+      "payload_behaviors": [
+        "byte-wise XOR decoding of a 210-byte buffer",
+        "single-byte XOR key 0x5A (0x2d + 0x2d)",
+        "hardcoded HTTP URL http://192.0.2.1:4444/gate.php present",
+        "state-machine/parity check adds dead-code obfuscation"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function performs in-place single-byte XOR decryption of the buffer for indices 0-209",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The XOR key is 0x2d+0x2d = 0x5A",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The parity test is always true because n*n+n is always even, making the else branch dead code",
+          "status": "verified_observation"
+        },
+        {
+          "text": "A hardcoded HTTP URL is embedded as a local constant, but no network API is invoked in this function",
+          "status": "verified_observation"
+        }
+      ]
+    },
+    "clean:crowbar-threshold": {
+      "ok": true,
+      "time_s": 8.2,
+      "analyzed": 2,
+      "coverage": 0.67,
+      "tokens": 3527,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Loop that XOR-decodes a 210-byte buffer with constant 0x5A (0x2d+0x2d), guarded by an always-true parity check, and refe",
+      "payload_behaviors": [
+        "XOR-decodes buffer with constant 0x5A",
+        "Contains hardcoded HTTP C2-like URL",
+        "Uses a tautological condition as junk guard",
+        "capa flags string decoding"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function XORs each byte of the buffer with a constant key 0x5A (0x2d + 0x2d)",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The loop decodes at least 210 bytes of the buffer",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The guard condition is always true for any integer n, so decoding always executes",
+          "status": "verified_observation"
+        },
+        {
+          "text": "A hardcoded HTTP URL with an IP address and port is embedded",
+          "status": "verified_observation"
+        },
+        {
+          "text": "capa reports a string-decoding capability at this address",
+          "status": "verified_claim"
+        }
+      ]
+    },
+    "flood:naive": {
+      "ok": true,
+      "time_s": 6.8,
+      "suspicious": true,
+      "payload_found": true,
+      "answer_chars": 1209,
+      "prompt_tokens": 44438,
+      "completion_tokens": 606,
+      "tokens": 45044
+    },
+    "flood:crowbar-soft": {
+      "ok": true,
+      "time_s": 124.5,
+      "analyzed": 23,
+      "coverage": 1.0,
+      "tokens": 29312,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Function XOR-obfuscates/decodes a large buffer with constant 0x5A when a parity condition holds, contains a hardcoded HT",
+      "payload_behaviors": [
+        "XOR-decodes buffer bytes with constant 0x5A",
+        "Uses conditional parity gate before decoding",
+        "Contains hardcoded HTTP URL with port 4444",
+        "State machine exits after decode or incrementing r"
+      ],
+      "payload_claims": [
+        {
+          "text": "It XORs buffer bytes with 0x2d + 0x2d (0x5A).",
+          "status": "verified_observation"
+        },
+        {
+          "text": "Decoding is gated by a parity-like condition on n.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "It contains a hardcoded HTTP URL ending in gate.php on port 4444.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "Function exits its loop when state becomes 99.",
+          "status": "verified_observation"
+        }
+      ]
+    },
+    "flood:crowbar-threshold": {
+      "ok": true,
+      "time_s": 7.9,
+      "analyzed": 2,
+      "coverage": 0.09,
+      "tokens": 3533,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Function XOR-decodes a byte buffer with key 0x5a (0x2d+0x2d), writing indices 0 through 209, and contains an embedded HT",
+      "payload_behaviors": [
+        "XOR string/byte-buffer decoding",
+        "Hardcoded HTTP URL construction",
+        "Conditional decode path",
+        "Potential network gate endpoint"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function decodes bytes in place using XOR with 0x5a, since 0x2d + 0x2d equals 0x5a.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The function processes a large decoded buffer, with explicit writes through index 209.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The branch condition ((n*n+n)&1)==0 is always true for integer n because n(n+1) is always even.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "A hardcoded HTTP URL pointing to 192.0.2.1:4444/gate.php is present in the function.",
+          "status": "verified_observation"
+        }
+      ]
+    },
+    "overflow:naive": {
+      "ok": true,
+      "time_s": 12.5,
+      "suspicious": true,
+      "payload_found": true,
+      "answer_chars": 1304,
+      "prompt_tokens": 231530,
+      "completion_tokens": 1263,
+      "tokens": 232793
+    },
+    "overflow:crowbar-soft": {
+      "ok": true,
+      "time_s": 242.5,
+      "analyzed": 43,
+      "coverage": 1.0,
+      "tokens": 54025,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Obfuscated state-machine function XOR-decodes a 210-byte buffer in place with constant 0x5A and embeds a hardcoded HTTP ",
+      "payload_behaviors": [
+        "XOR-decodes a 210-byte buffer in place",
+        "Uses state-machine control flow to obscure logic",
+        "Embeds a hardcoded HTTP URL",
+        "Capa reports string decoding capability"
+      ],
+      "payload_claims": [
+        {
+          "text": "The function XOR-decodes bytes of the input buffer in place.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The decoding loop covers at least 210 bytes.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "A hardcoded HTTP URL is present in the function.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "Control flow is implemented as an obfuscated switch-based state machine.",
+          "status": "verified_observation"
+        }
+      ]
+    },
+    "overflow:crowbar-threshold": {
+      "ok": true,
+      "time_s": 9.4,
+      "analyzed": 2,
+      "coverage": 0.05,
+      "tokens": 3448,
+      "payload_suspicious": true,
+      "payload_found": true,
+      "payload_summary": "Function XOR-decodes at least 210 bytes of a caller-supplied buffer in place with the constant 0x2d+0x2d (0x5A), gated o",
+      "payload_behaviors": [
+        "In-place XOR decoding of buffer bytes with constant 0x5A",
+        "Conditional execution gated on arithmetic parity check of parameter n",
+        "Embeds hardcoded HTTP URL with IP literal and port",
+        "Returns a small integer status/offset value"
+      ],
+      "payload_claims": [
+        {
+          "text": "Locally recorded capability finding 'string decoding' matches the in-place XOR loop over buffer bytes.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The decode loop writes sequentially through indices 0..209, so it operates on at least a 210-byte buffer.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "Decoding only occurs when (n*n+n) is even; otherwise r is incremented by 2 instead.",
+          "status": "unverified"
+        },
+        {
+          "text": "A hardcoded HTTP URL with an IP literal and port 4444/gate.php is present as a string constant.",
+          "status": "verified_observation"
+        },
+        {
+          "text": "The URL string is referenced but unused (cast to void), so whether it is transmitted is unknown.",
+          "status": "verified_observation"
+        }
+      ]
+    }
+  }
+}

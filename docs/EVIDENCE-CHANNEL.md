@@ -207,3 +207,23 @@ The qualitative result is the same as qwen8: on these attacks the defense is
 model-agnostic. The remaining frontier question is whether a stronger
 instruction-follower changes the paraphrase result.
 
+### Naive vs Crowbar — DeepSeek V4.1 Flash (decoy/overflow)
+
+| sample | naive prompt tokens | crowbar-soft tokens | crowbar-threshold tokens | payload found |
+|---|---:|---:|---:|---|
+| clean | 5,905 | 4,193 | 3,527 | 3/3 |
+| flood | 44,438 | 29,312 | 3,533 | 3/3 |
+| overflow | 231,530 | 54,025 | 3,448 | 3/3 |
+
+- **Accuracy is equal (3/3)**: the API context is large enough for the 231k-token
+  overflow prompt, so naive does not fail. The qwen8 HTTP 400 result was a
+  **small-context** failure, not a reasoning failure.
+- **Threshold is the win**: 12.6× fewer tokens on flood, 67× on overflow, and
+  ~8–9 s vs 124–242 s for soft.
+- **Soft is weak here**: only 1.5×–4.3× cheaper and much slower, because it
+  analyzes many decoy functions. Threshold is the mode that actually buys the
+  cost reduction.
+- **Implication:** with a large-context API, Crowbar's advantage is **cost and
+  scale headroom**, not better detection. With a small-context local model it is
+  also a hard requirement.
+
