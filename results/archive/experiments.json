@@ -2731,6 +2731,120 @@
         "results/archive/raw/priority_recall_deepseek-v4.1-flash_after_fix.json"
       ],
       "notes": "Fix works: with a critical finding (address or address-less value-in-code) threshold catches the priority-0 payload at ~1.8-2.0x savings instead of 67x. On larger samples the saving grows because only must-include functions are added. Without any critical finding threshold still misses (no signal); soft catches at 2268 tok and remains the safe default. Linux APIs + call-graph priority propagation added to export_functions.py; Ghidra xref population is still a TODO."
+    },
+    {
+      "experiment_id": "priority0_recall_scale_after_fix_deepseek_v41_flash_go_n1",
+      "date": "2026-10-26",
+      "question": "At scale (flood/overflow), does must-include catch a priority-0 payload and how much does threshold save?",
+      "dataset": {
+        "name": "gaslighter/inflate",
+        "kind": "priority_recall_scale",
+        "variants": [
+          "clean",
+          "flood",
+          "overflow"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php in payload @ 0x401000",
+        "note": "payload priority forced to 0; a critical FLOSS C2 finding at the payload address must-includes it"
+      },
+      "victim": {
+        "system": "naive vs crowbar soft/threshold + must-include"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "low_priority_budget": 400,
+        "min_priority": 1,
+        "runs": 1
+      },
+      "metrics": {
+        "clean": {
+          "naive": 6598,
+          "soft": 4321,
+          "threshold": 3676,
+          "saving": "1.8x",
+          "payload": "3/3"
+        },
+        "flood": {
+          "naive": 45097,
+          "soft": 28386,
+          "threshold": 3343,
+          "saving": "13.5x",
+          "payload": "3/3"
+        },
+        "overflow": {
+          "naive": 232122,
+          "soft": 53152,
+          "threshold": 3579,
+          "saving": "64.9x",
+          "payload": "3/3"
+        },
+        "coverage_threshold": {
+          "clean": 0.67,
+          "flood": 0.09,
+          "overflow": 0.05
+        },
+        "verdict": "malicious in every condition"
+      },
+      "raw_sources": [
+        "results/archive/raw/priority_recall_scale_deepseek-v4.1-flash.json"
+      ],
+      "notes": "Must-include fixes the recall hole without losing the scale saving: threshold catches the priority-0 payload and still saves 13.5x (flood) / 64.9x (overflow). Coverage is low (0.05-0.09) but the verdict is malicious; the must-include function is the decisive one."
+    },
+    {
+      "experiment_id": "priority0_recall_scale_nofinding_deepseek_v41_flash_go_n1",
+      "date": "2026-10-26",
+      "question": "Without any critical finding, does threshold catch a priority-0 payload at scale?",
+      "dataset": {
+        "name": "gaslighter/inflate",
+        "kind": "priority_recall_scale",
+        "variants": [
+          "flood",
+          "overflow"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php in payload @ 0x401000",
+        "note": "payload priority 0; findings intentionally empty"
+      },
+      "victim": {
+        "system": "crowbar threshold"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "min_priority": 1,
+        "runs": 1
+      },
+      "metrics": {
+        "flood": {
+          "payload": false,
+          "verdict": "unknown",
+          "coverage": 0.04,
+          "tokens": 653
+        },
+        "overflow": {
+          "payload": false,
+          "verdict": "unknown",
+          "coverage": 0.02,
+          "tokens": 769
+        },
+        "soft_reference": {
+          "flood": 28386,
+          "overflow": 53152,
+          "payload": "true"
+        }
+      },
+      "raw_sources": [
+        "results/archive/raw/priority_recall_scale_nofinding_deepseek-v4.1-flash.json"
+      ],
+      "notes": "No finding = no signal: threshold misses the priority-0 payload but fails closed (unknown, never no_evidence). Soft catches it at 28k/53k tokens. Soft remains the safe default; threshold is an opt-in that needs critical evidence."
     }
   ]
 }

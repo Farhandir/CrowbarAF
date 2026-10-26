@@ -276,3 +276,19 @@ Same synthetic sample, only the payload's priority changes:
   direct callees of high-priority functions by one. Ghidra xref population is
   still a TODO.
 
+#### Scale check (after the fix)
+
+| sample | naive | soft | threshold (must=1) | saving | payload |
+|---|---:|---:|---:|---:|---|
+| clean (3 fn) | 6,598 | 4,321 | 3,676 | 1.8× | ✅ |
+| flood (23 fn) | 45,097 | 28,386 | **3,343** | **13.5×** | ✅ |
+| overflow (43 fn) | 232,122 | 53,152 | **3,579** | **64.9×** | ✅ |
+
+- The must-include adds only the decisive payload; the decoys are still skipped,
+  so the scale saving survives (13.5× / 64.9×).
+- Coverage is low (0.05–0.09) but the verdict is `malicious`; the one included
+  function is the payload.
+- **No finding = no signal:** without a critical finding, threshold misses the
+  priority-0 payload (653 / 769 tokens, `unknown`); soft catches it at
+  28k / 53k. Soft remains the safe default.
+
