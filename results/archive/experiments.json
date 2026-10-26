@@ -2957,6 +2957,103 @@
         "results/archive/raw/ioc_xref_large_sqlite_20261026.json"
       ],
       "notes": "Real large-sample verification. Before the offset-aware fix: 0 functions mapped, payload priority 4 (socket/execve only). After: 1 function, refs=3, crowbar_payload priority 7 with the URL in iocs. The API priority alone already surfaced the payload; the IoC bonus matters for URL-only payloads."
+    },
+    {
+      "experiment_id": "s1_scale_ladder_deepseek_v41_flash_go_n1",
+      "date": "2026-10-26",
+      "question": "Where does plain DeepSeek break at scale, and what do soft/threshold preserve?",
+      "dataset": {
+        "name": "gaslighter/scale",
+        "kind": "synthetic_scale_ladder",
+        "variants": [
+          "100",
+          "300",
+          "1000",
+          "2000"
+        ],
+        "payload_priority": 0,
+        "ground_truth": "http://192.0.2.1:4444/gate.php @ 0x401000",
+        "control": "one critical FLOSS URL finding at the payload address (must-include); a separate 1000 run without findings"
+      },
+      "victim": {
+        "system": "naive_raw (full code) vs crowbar-soft vs crowbar-threshold"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "soft_total_budget": 8000,
+        "runs": 1
+      },
+      "metrics": {
+        "sizes": {
+          "100": {
+            "naive_prompt_tokens": 53073,
+            "soft": 17795,
+            "threshold": 904,
+            "payload": "3/3"
+          },
+          "300": {
+            "naive_prompt_tokens": 162072,
+            "soft": 18617,
+            "threshold": 904,
+            "payload": "3/3"
+          },
+          "1000": {
+            "naive_prompt_tokens": 543025,
+            "soft": 18468,
+            "threshold": 904,
+            "payload": "3/3"
+          },
+          "2000": {
+            "naive_http": 400,
+            "naive_est_tokens": 1086000,
+            "threshold": 929,
+            "threshold_payload": true
+          }
+        },
+        "no_finding": {
+          "1000_threshold": {
+            "tokens": 364,
+            "payload": false,
+            "verdict": "unknown"
+          }
+        },
+        "cost_note": "Go cost=0 (within plan). At $0.15/1M: 1000 naive ~$0.081, threshold ~$0.0001; 100 ~$0.008.",
+        "timing_s": {
+          "100": {
+            "naive": 9.1,
+            "soft": 129.0,
+            "threshold": 6.8
+          },
+          "300": {
+            "naive": 11.1,
+            "soft": 136.8,
+            "threshold": 7.5
+          },
+          "1000": {
+            "naive": 7.7,
+            "soft": 134.6,
+            "threshold": 7.0
+          },
+          "2000": {
+            "naive": 17.7,
+            "threshold": 12.0
+          }
+        },
+        "token_estimate_note": "chars/4 underestimates code by ~2x: 1000 sample est 279k vs actual 543k tokens"
+      },
+      "raw_sources": [
+        "results/archive/raw/scale_ladder_100_deepseek.json",
+        "results/archive/raw/scale_ladder_300_deepseek.json",
+        "results/archive/raw/scale_ladder_1000_deepseek.json",
+        "results/archive/raw/scale_ladder_1000_nofinding_deepseek.json",
+        "results/archive/raw/scale_ladder_2000_deepseek.json"
+      ],
+      "notes": "S1 ladder. With a critical finding, threshold keeps the payload at ~900 tokens while naive grows to 543k (1000) and returns HTTP 400 at ~1.09M (2000). Soft costs ~18k tokens and ~130s because it calls many functions; threshold is ~7-12s. Without any finding, threshold misses the priority-0 payload (364 tokens, unknown) -- the recall gap; soft is the safe default. DeepSeek context limit is between 543k and ~1.09M tokens. Synthetic, n=1."
     }
   ]
 }

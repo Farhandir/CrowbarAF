@@ -1,0 +1,106 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "sample": {
+    "payload_url": "http://192.0.2.1:4444/gate.php",
+    "has_payload": true,
+    "payload_offset": "0x401000",
+    "n_functions": 100,
+    "chars": 108960
+  },
+  "findings": [
+    {
+      "source": "floss",
+      "kind": "url",
+      "value": "http://192.0.2.1:4444/gate.php",
+      "address": "0x401000",
+      "confidence": 1.0
+    }
+  ],
+  "results": {
+    "naive_raw": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 108960,
+        "ok": true,
+        "suspicious": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "prompt_tokens": 53073,
+        "completion_tokens": 954,
+        "cost_usd": 0,
+        "billing_source": "go",
+        "allowance": 0.00594843,
+        "finish_reason": "stop",
+        "truncated": false,
+        "http_status": 200,
+        "time_s": 9.1,
+        "victim": "naive_raw"
+      }
+    ],
+    "crowbar-soft": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 108960,
+        "ok": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_fn_suspicious": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "analyzed": 28,
+        "coverage": 0.28,
+        "must_include": [
+          "0x401000"
+        ],
+        "prompt_tokens": 17795,
+        "completion_tokens": 14449,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.008447540000000002,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 129.0,
+        "victim": "crowbar-soft"
+      }
+    ],
+    "crowbar-threshold": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 108960,
+        "ok": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_fn_suspicious": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "analyzed": 2,
+        "coverage": 0.02,
+        "must_include": [
+          "0x401000"
+        ],
+        "prompt_tokens": 904,
+        "completion_tokens": 682,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.00032393,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 6.8,
+        "victim": "crowbar-threshold"
+      }
+    ]
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "sample": {
+    "payload_url": "http://192.0.2.1:4444/gate.php",
+    "has_payload": true,
+    "payload_offset": "0x401000",
+    "n_functions": 2000,
+    "chars": 2234619
+  },
+  "findings": [
+    {
+      "source": "floss",
+      "kind": "url",
+      "value": "http://192.0.2.1:4444/gate.php",
+      "address": "0x401000",
+      "confidence": 1.0
+    }
+  ],
+  "results": {
+    "naive_raw": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 2000,
+        "chars": 2234619,
+        "ok": false,
+        "http_status": 400,
+        "error": "{\"model\":\"deepseek-v4.1-flash\"}",
+        "verdict": "unknown",
+        "payload_found": false,
+        "payload_in_context": false,
+        "time_s": 17.7,
+        "victim": "naive_raw"
+      }
+    ],
+    "crowbar-threshold": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 2000,
+        "chars": 2234619,
+        "ok": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_fn_suspicious": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "analyzed": 2,
+        "coverage": 0.001,
+        "must_include": [
+          "0x401000"
+        ],
+        "prompt_tokens": 929,
+        "completion_tokens": 552,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.00026824,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 12.0,
+        "victim": "crowbar-threshold"
+      }
+    ]
+  }
+}

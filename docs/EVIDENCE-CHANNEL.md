@@ -348,3 +348,27 @@ Fixes that made this work:
 *Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
 not defined strings in the binary and still cannot be mapped by this path.
 
+## 9. S1 scale ladder — DeepSeek V4.1 Flash (2026-10-26)
+
+Synthetic ladder, payload priority 0, one critical FLOSS URL finding at the
+payload address (must-include). Real API prompt tokens:
+
+| functions | naive (full code) | soft | threshold | payload |
+|---:|---:|---:|---:|---|
+| 100 | 53,073 | 17,795 | **904** | 3/3 |
+| 300 | 162,072 | 18,617 | **904** | 3/3 |
+| 1,000 | **543,025** | 18,468 | **904** | 3/3 |
+| 2,000 | **HTTP 400** (~1.09M est.) | – | **929** | threshold ✅ |
+
+- **The cliff is between 543k and ~1.09M tokens.** Naive survives 1,000
+  functions (543k) and dies at 2,000 (~1.09M). Threshold stays at ~900 tokens.
+- **~600× token saving at 1,000 functions** (543k → 904), and it survives where
+  naive gets HTTP 400.
+- **Soft is not cheap in time:** ~18k tokens but ~130 s, because it calls many
+  functions. Threshold is ~7–12 s.
+- **No finding = no signal:** at 1,000 functions with no critical finding,
+  threshold used 364 tokens, missed the priority-0 payload, and returned
+  `unknown`. Soft remains the safe default; threshold is an opt-in.
+- **Estimator warning:** `chars/4` underestimated by ~2× here (1,000-sample
+  estimate 279k vs actual 543k). Use real `prompt_tokens`.
+
