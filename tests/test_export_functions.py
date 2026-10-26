@@ -282,3 +282,19 @@ class TestDeepInspectionGuard:
     def test_skips_when_route_not_native(self, monkeypatch, route) -> None:
         self._boom(monkeypatch)
         assert nodes.deep_inspection_node(AgentState(file_path="x", route_flag=route)) == {}
+
+
+def test_linux_dangerous_apis_raise_priority():
+    for api in ("socket", "connect", "send", "execve", "system", "dlsym", "ptrace", "mprotect"):
+        assert ef.compute_priority([], [api], 100, False, set()) == 4
+
+
+def test_propagate_priority_raises_direct_callee():
+    records = [
+        {"offset": "0x1", "priority": 5, "callees": ["0x2"], "is_library": False},
+        {"offset": "0x2", "priority": 0, "callees": [], "is_library": False},
+        {"offset": "0x3", "priority": 0, "callees": [], "is_library": True},
+    ]
+    ef.propagate_priority(records)
+    assert records[1]["priority"] == 4
+    assert records[2]["priority"] == 0

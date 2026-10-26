@@ -56,17 +56,32 @@ def neutralize_value(value: str, max_chars: int = 240) -> tuple[str, bool]:
 
 def select_with_reasons(
     functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True,
-    min_priority: int = 0,
+    min_priority: int = 0, must_include: set[str] | None = None,
 ) -> tuple[list[FunctionInfo], list[tuple[FunctionInfo, str]]]:
     """Select by budget; return skipped functions **with their reason**.
 
     min_priority: functions below this threshold are never analyzed ("priority").
+    must_include: offsets that are always analyzed (critical evidence), even if
+    they are library, below min_priority, or over budget.
     """
+    must = {normalize_address(x) for x in (must_include or set())}
     remaining = budget_tokens
     selected: list[FunctionInfo] = []
+    selected_offsets: set[str] = set()
     skipped: list[tuple[FunctionInfo, str]] = []
     ranked = sorted(functions, key=lambda f: (-f.priority, estimate_tokens(f.c_code)))
+
+    # Must-include first: recall over budget.
     for fn in ranked:
+        if normalize_address(fn.offset) not in must:
+            continue
+        selected.append(fn)
+        selected_offsets.add(fn.offset)
+        remaining -= estimate_tokens(fn.c_code) + 32
+
+    for fn in ranked:
+        if fn.offset in selected_offsets:
+            continue
         if skip_library and fn.is_library:
             skipped.append((fn, "library"))
             continue
@@ -78,16 +93,18 @@ def select_with_reasons(
             skipped.append((fn, "budget"))
             continue
         selected.append(fn)
+        selected_offsets.add(fn.offset)
         remaining -= cost
     return selected, skipped
 
 
 def select_functions(
     functions: list[FunctionInfo], budget_tokens: int, skip_library: bool = True,
-    min_priority: int = 0,
+    min_priority: int = 0, must_include: set[str] | None = None,
 ) -> list[FunctionInfo]:
     """Select functions by budget (highest priority first, then smallest)."""
-    return select_with_reasons(functions, budget_tokens, skip_library, min_priority)[0]
+    return select_with_reasons(functions, budget_tokens, skip_library, min_priority,
+                               must_include)[0]
 
 
 def findings_for(fn: FunctionInfo, findings: list[Finding]) -> list[Finding]:
@@ -97,6 +114,52 @@ def findings_for(fn: FunctionInfo, findings: list[Finding]) -> list[Finding]:
         if f.address is None or f.address == fn.offset:
             out.append(f)
     return out
+
+
+def normalize_address(addr) -> str | None:
+    if addr is None:
+        return None
+    s = str(addr).strip().lower()
+    if s.startswith("0x"):
+        s = s[2:]
+    return s.lstrip("0") or "0"
+
+
+def finding_matches_function(f: Finding, fn: FunctionInfo) -> bool:
+    """Address match, or the finding value appears in the function's code."""
+    if f.address and normalize_address(f.address) == normalize_address(fn.offset):
+        return True
+    value = (f.value or "").strip()
+    return bool(len(value) >= 8 and value.lower() in (fn.c_code or "").lower())
+
+
+def must_include_offsets(
+    functions: list[FunctionInfo], findings: list[Finding], include_callees: bool = True,
+) -> set[str]:
+    """Functions that must be analyzed because a critical finding points at them.
+
+    Address match first; value-in-code fallback for address-less decoded strings.
+    Direct callees are included one hop so a wrapper's payload is not skipped.
+    """
+    critical = [f for f in findings if is_critical_finding(f)]
+    if not critical:
+        return set()
+    by_norm = {normalize_address(fn.offset): fn for fn in functions}
+    hit: set[str] = set()
+    for f in critical:
+        for fn in functions:
+            if finding_matches_function(f, fn):
+                hit.add(fn.offset)
+    if include_callees:
+        for off in list(hit):
+            fn = by_norm.get(normalize_address(off))
+            if not fn:
+                continue
+            for callee in fn.callees:
+                target = by_norm.get(normalize_address(callee))
+                if target:
+                    hit.add(target.offset)
+    return hit
 
 
 def _dedupe_key(f: Finding) -> tuple:

@@ -252,3 +252,27 @@ Same synthetic sample, only the payload's priority changes:
   use Ghidra xrefs to map the string to a function, otherwise fall back to soft or
   a file-level evidence pass.
 
+#### After the fix (must-include + Linux/call-graph priority)
+
+| condition | naive | soft | threshold (must-include) |
+|---|---|---|---|
+| prio 0 + critical finding @ payload | 6,923 tok | 4,249 tok | ✅ **3,903 tok** (1.77×) |
+| prio 0 + address-less critical finding | 6,929 tok | 4,480 tok | ✅ **3,542 tok** (1.96×) |
+| prio 0, no finding | 6,572 tok | ✅ 2,268 tok | ❌ MISS, 572 tok, unknown |
+
+- **Selection-level must-include** now forces a function into the run when a
+  critical finding matches by address, by value-in-code (address-less decoded
+  strings), or as a direct callee. It bypasses `min_priority` and the budget, and
+  gets the full per-function budget.
+- **Savings drop from 67× to ~1.8–2× on this 3-function sample.** That is the
+  intended trade: recall over the last drop of cost. On a real sample with
+  hundreds of functions, must-include adds one or two functions while threshold
+  still skips the rest, so the saving grows again.
+- **No finding = no signal.** Without a critical finding, threshold still misses
+  the payload; the verdict is `unknown` (fail-closed) and soft catches it at
+  2,268 tokens. **Soft remains the safe default**; threshold is an opt-in.
+- **Priority fixes:** Linux APIs (`socket`, `connect`, `execve`, `system`,
+  `dlsym`, `ptrace`, `mprotect`, ...) now score +4; `propagate_priority` raises
+  direct callees of high-priority functions by one. Ghidra xref population is
+  still a TODO.
+

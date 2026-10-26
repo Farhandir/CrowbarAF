@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from llm_layer.cache import SummaryCache
 from llm_layer.client import LLMClient, LLMResult
-from llm_layer.context import (build_function_context, select_findings,
+from llm_layer.context import (build_function_context, must_include_offsets,
+                               normalize_address, select_findings,
                                select_functions, select_with_reasons)
 from llm_layer.pipeline import AnalysisResult, analyze
 from llm_layer.summarize import summarize_function
@@ -635,3 +636,60 @@ def test_openai_falls_back_without_response_format():
         client.chat([{"role": "user", "content": "x"}], json_mode=True)
         assert len(calls) == 3
         assert "response_format" not in calls[2]
+
+
+# --- selection-level must-include ---
+def test_must_include_by_address():
+    fn = _fn("0x401000", "code")
+    f = Finding(source="yara", kind="rule", value="X", address="0x401000")
+    assert must_include_offsets([fn], [f]) == {"0x401000"}
+
+
+def test_must_include_by_value_in_code():
+    fn = _fn("0x401000", 'const char *u = "http://192.0.2.1:4444/gate.php";')
+    f = Finding(source="floss", kind="string",
+                value="http://192.0.2.1:4444/gate.php", address=None)
+    assert must_include_offsets([fn], [f]) == {"0x401000"}
+
+
+def test_must_include_includes_direct_callees():
+    parent = _fn("0x1", "wrapper()", callees=["0x2"])
+    child = _fn("0x2", "decoder()")
+    f = Finding(source="yara", kind="rule", value="X", address="0x1")
+    assert must_include_offsets([parent, child], [f]) == {"0x1", "0x2"}
+
+
+def test_noncritical_finding_is_not_must_include():
+    fn = _fn("0x1", "int f(){return 1;}")
+    f = Finding(source="floss", kind="string", value="hello world", address=None)
+    assert must_include_offsets([fn], [f]) == set()
+
+
+def test_address_normalization():
+    assert normalize_address("0x00401000") == normalize_address("401000")
+    assert normalize_address("001012a6") == normalize_address("0x1012a6")
+
+
+def test_select_with_reasons_includes_must_below_priority():
+    low = _fn("0x1", "code", priority=0)
+    high = _fn("0x2", "code", priority=5)
+    selected, _ = select_with_reasons([low, high], 100, min_priority=1,
+                                      must_include={"0x1"})
+    assert "0x1" in [f.offset for f in selected]
+
+
+def test_analyze_must_include_low_priority_payload():
+    fn = _fn("0x401000", 'const char *u = "http://192.0.2.1:4444/gate.php";', priority=0)
+    findings = [Finding(source="floss", kind="string",
+                        value="http://192.0.2.1:4444/gate.php", address=None)]
+    res = analyze([fn], findings, FakeClient(), budget_tokens=1000, min_priority=1)
+    assert "0x401000" in res.summaries
+    assert res.must_include == ["0x401000"]
+    assert res.summaries["0x401000"].fail_closed is True
+
+
+def test_analyze_without_critical_still_skips_low_priority():
+    fn = _fn("0x401000", "int f(){return 1;}", priority=0)
+    res = analyze([fn], [], FakeClient(), budget_tokens=1000, min_priority=1)
+    assert res.summaries == {}
+    assert res.must_include == []

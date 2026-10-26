@@ -2677,6 +2677,60 @@
         "results/archive/raw/priority_recall_deepseek-v4.1-flash.json"
       ],
       "notes": "Threshold is not decision-preserving for a low-priority payload: it skips it entirely (coverage 0.33) but fails closed (unknown/needs_review). Soft catches the payload at ~2.4k tokens and is the safer trade-off. Selection-level must-include (critical finding address/xref -> force function) is the missing fix."
+    },
+    {
+      "experiment_id": "priority0_recall_after_must_include_deepseek_v41_flash_go_n1",
+      "date": "2026-10-26",
+      "question": "After selection-level must-include and Linux/call-graph priority fixes, does threshold catch a priority-0 payload?",
+      "dataset": {
+        "name": "gaslighter/inflate",
+        "kind": "priority_recall",
+        "variants": [
+          "prio5",
+          "prio0",
+          "prio0_finding",
+          "prio0_finding_na"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php in payload @ 0x401000"
+      },
+      "victim": {
+        "system": "naive vs crowbar soft/threshold + must-include"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "low_priority_budget": 400,
+        "min_priority": 1,
+        "runs": 1
+      },
+      "metrics": {
+        "prio0_finding": {
+          "threshold": "payload true, must=1, 3903 tok, malicious",
+          "naive": 6923,
+          "saving": "1.77x"
+        },
+        "prio0_finding_na": {
+          "threshold": "payload true, must=1, 3542 tok, malicious",
+          "naive": 6929,
+          "saving": "1.96x"
+        },
+        "prio0_no_finding": {
+          "threshold": "MISS, unknown, 572 tok",
+          "soft": "payload true, 2268 tok"
+        },
+        "prio5": {
+          "threshold": "payload true, 3640 tok, malicious"
+        },
+        "must_include": "critical finding address / value-in-code / direct callees; bypasses priority and budget"
+      },
+      "raw_sources": [
+        "results/archive/raw/priority_recall_deepseek-v4.1-flash_after_fix.json"
+      ],
+      "notes": "Fix works: with a critical finding (address or address-less value-in-code) threshold catches the priority-0 payload at ~1.8-2.0x savings instead of 67x. On larger samples the saving grows because only must-include functions are added. Without any critical finding threshold still misses (no signal); soft catches at 2268 tok and remains the safe default. Linux APIs + call-graph priority propagation added to export_functions.py; Ghidra xref population is still a TODO."
     }
   ]
 }

@@ -64,6 +64,32 @@ DANGEROUS_APIS = (
     "regsetvalue",
     "regcreatekey",
     "createservice",
+    # Linux / cross-platform (ELF malware in scope)
+    "socket",
+    "connect",
+    "bind",
+    "listen",
+    "accept",
+    "sendto",
+    "recvfrom",
+    "send",
+    "recv",
+    "execve",
+    "execvp",
+    "execl",
+    "system",
+    "popen",
+    "fork",
+    "clone",
+    "dlopen",
+    "dlsym",
+    "ptrace",
+    "mprotect",
+    "mmap",
+    "munmap",
+    "prctl",
+    "setuid",
+    "setgid",
 )
 
 
@@ -103,6 +129,26 @@ def compute_priority(capa_hits, callee_names, size, is_library, combo_apis):
     if size > LARGE_FUNCTION_BYTES:
         priority -= LARGE_FUNCTION_PENALTY
     return max(priority, 0)
+
+
+def propagate_priority(records, hops=2):
+    """Raise callees of high-priority functions (a wrapper may hide the payload)."""
+    by_offset = {r["offset"]: r for r in records}
+    for _ in range(max(1, hops)):
+        changed = False
+        for r in records:
+            if (r.get("priority") or 0) <= 0:
+                continue
+            for callee in r.get("callees") or []:
+                target = by_offset.get(callee)
+                if target is None or target.get("is_library"):
+                    continue
+                new = max(target.get("priority") or 0, (r.get("priority") or 0) - 1)
+                if new > (target.get("priority") or 0):
+                    target["priority"] = new
+                    changed = True
+        if not changed:
+            break
 
 
 def plan_export(records):
@@ -301,6 +347,7 @@ def main():
         combo_set = active_combo_apis(findings, combo_apis)
 
         records = collect_records(hits, combo_set)
+        propagate_priority(records)
         chosen, stubs = plan_export(records)
         println("[export_functions] %d fonksiyon tarandi, %d decompile edilecek, %d stub" % (  # noqa: F821
             len(records), len(chosen), len(stubs)))

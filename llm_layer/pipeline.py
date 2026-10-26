@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 
 from .cache import SummaryCache
 from .client import LLMClient, LLMResult
-from .context import findings_for, select_with_reasons
+from .context import (findings_for, must_include_offsets, normalize_address,
+                      select_with_reasons)
 from .summarize import summarize_function
 from .trace import Tracer
 from .traverse import scc_levels
@@ -25,6 +26,7 @@ class AnalysisResult:
     cache_hits: int = 0
     failures: list[str] = field(default_factory=list)
     per_function: dict[str, dict] = field(default_factory=dict)
+    must_include: list[str] = field(default_factory=list)
     trace: Tracer | None = None
 
     def token_total(self) -> int:
@@ -60,22 +62,29 @@ def analyze(
         budget_tokens=budget_tokens, skip_library=skip_library,
     )
 
+    must = must_include_offsets(functions, findings)
+    must_norm = {normalize_address(x) for x in must}
+    if must:
+        tracer.event("must_include", offsets=sorted(must))
+
     if total_budget_tokens is not None:
-        fns, skipped = select_with_reasons(functions, total_budget_tokens, skip_library, min_priority)
+        fns, skipped = select_with_reasons(functions, total_budget_tokens, skip_library,
+                                           min_priority, must)
         for fn, reason in skipped:
             tracer.skipped(fn, reason)
     else:
         fns = []
         for f in functions:
-            if skip_library and f.is_library:
+            is_must = normalize_address(f.offset) in must_norm
+            if skip_library and f.is_library and not is_must:
                 tracer.skipped(f, "library")
-            elif (f.priority or 0) < min_priority:
+            elif (f.priority or 0) < min_priority and not is_must:
                 tracer.skipped(f, "priority")
             else:
                 fns.append(f)
 
     by_offset = {f.offset: f for f in fns}
-    result = AnalysisResult()
+    result = AnalysisResult(must_include=sorted(must))
 
     levels = scc_levels(fns)
 
@@ -94,6 +103,8 @@ def analyze(
             fn_budget = budget_tokens
             if low_priority_budget is not None and (fn.priority or 0) < low_priority_threshold:
                 fn_budget = low_priority_budget
+            if normalize_address(fn.offset) in must_norm:
+                fn_budget = budget_tokens  # must-include gets the full budget
             t0 = time.monotonic()
             try:
                 summary, res, stats = summarize_function(
