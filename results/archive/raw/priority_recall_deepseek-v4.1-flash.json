@@ -1,0 +1,141 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "results": {
+    "prio5": {
+      "naive": {
+        "ok": true,
+        "payload": true,
+        "suspicious": null,
+        "tokens": 6618,
+        "prompt_tokens": 5905,
+        "time_s": 8.3
+      },
+      "soft": {
+        "ok": true,
+        "payload": true,
+        "payload_suspicious": true,
+        "analyzed": 3,
+        "coverage": 1.0,
+        "verdict": "malicious",
+        "tokens": 4303,
+        "prompt_tokens": 3296,
+        "fail_closed": 0,
+        "time_s": 11.6
+      },
+      "threshold": {
+        "ok": true,
+        "payload": true,
+        "payload_suspicious": true,
+        "analyzed": 2,
+        "coverage": 0.67,
+        "verdict": "malicious",
+        "tokens": 3634,
+        "prompt_tokens": 2793,
+        "fail_closed": 0,
+        "time_s": 9.3
+      }
+    },
+    "prio0": {
+      "naive": {
+        "ok": true,
+        "payload": true,
+        "suspicious": null,
+        "tokens": 6666,
+        "prompt_tokens": 5905,
+        "time_s": 7.1
+      },
+      "soft": {
+        "ok": true,
+        "payload": true,
+        "payload_suspicious": true,
+        "analyzed": 3,
+        "coverage": 1.0,
+        "verdict": "malicious",
+        "tokens": 2424,
+        "prompt_tokens": 1398,
+        "fail_closed": 0,
+        "time_s": 12.5
+      },
+      "threshold": {
+        "ok": true,
+        "payload": false,
+        "payload_suspicious": null,
+        "analyzed": 1,
+        "coverage": 0.33,
+        "verdict": "unknown",
+        "tokens": 739,
+        "prompt_tokens": 364,
+        "fail_closed": 0,
+        "time_s": 3.9
+      }
+    },
+    "prio0_finding": {
+      "naive": {
+        "ok": true,
+        "payload": true,
+        "suspicious": null,
+        "tokens": 6491,
+        "prompt_tokens": 5905,
+        "time_s": 5.6
+      },
+      "soft": {
+        "ok": true,
+        "payload": true,
+        "payload_suspicious": true,
+        "analyzed": 3,
+        "coverage": 1.0,
+        "verdict": "malicious",
+        "tokens": 2307,
+        "prompt_tokens": 1421,
+        "fail_closed": 0,
+        "time_s": 11.9
+      },
+      "threshold": {
+        "ok": true,
+        "payload": false,
+        "payload_suspicious": null,
+        "analyzed": 1,
+        "coverage": 0.33,
+        "verdict": "needs_review",
+        "tokens": 695,
+        "prompt_tokens": 364,
+        "fail_closed": 0,
+        "time_s": 4.3
+      }
+    },
+    "prio0_finding_na": {
+      "naive": {
+        "ok": true,
+        "payload": true,
+        "suspicious": null,
+        "tokens": 6414,
+        "prompt_tokens": 5905,
+        "time_s": 5.3
+      },
+      "soft": {
+        "ok": true,
+        "payload": true,
+        "payload_suspicious": true,
+        "analyzed": 3,
+        "coverage": 1.0,
+        "verdict": "malicious",
+        "tokens": 2736,
+        "prompt_tokens": 1514,
+        "fail_closed": 2,
+        "time_s": 15.1
+      },
+      "threshold": {
+        "ok": true,
+        "payload": false,
+        "payload_suspicious": null,
+        "analyzed": 1,
+        "coverage": 0.33,
+        "verdict": "needs_review",
+        "tokens": 790,
+        "prompt_tokens": 412,
+        "fail_closed": 1,
+        "time_s": 4.4
+      }
+    }
+  }
+}

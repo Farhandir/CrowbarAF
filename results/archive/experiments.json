@@ -2618,6 +2618,65 @@
         "results/archive/raw/attack_eval_deepseek-v4.1-flash.json"
       ],
       "notes": "With a large-context API model the overflow attack no longer defeats naive: accuracy is 3/3 for both. Crowbar's value becomes COST (threshold 12.6x-67x fewer tokens) and robustness for larger samples. Soft mode is only 1.5x-4.3x cheaper and can be slow (124-242s) because it analyzes many functions. On qwen8 (32k context) naive returned HTTP 400 on flood/overflow; that is the small-context regime where Crowbar is required, not just cheaper."
+    },
+    {
+      "experiment_id": "priority0_payload_recall_deepseek_v41_flash_go_n1",
+      "date": "2026-10-26",
+      "question": "Does threshold/soft still find a payload whose priority is 0?",
+      "dataset": {
+        "name": "gaslighter/inflate",
+        "kind": "priority_recall",
+        "variants": [
+          "prio5",
+          "prio0",
+          "prio0_finding",
+          "prio0_finding_na"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php in payload @ 0x401000",
+        "note": "payload priority is set to 5 (control) or 0; findings are a critical FLOSS C2, with or without the payload address"
+      },
+      "victim": {
+        "system": "naive_llm vs crowbar_llm_layer (soft / threshold)"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "temperature": 0,
+        "budget": 1500,
+        "low_priority_budget": 400,
+        "min_priority": 1,
+        "runs": 1
+      },
+      "metrics": {
+        "prio5": {
+          "naive": "payload true, 6618 tok",
+          "soft": "true, 4303 tok, malicious",
+          "threshold": "true, 3634 tok, malicious"
+        },
+        "prio0": {
+          "naive": "true, 6666 tok",
+          "soft": "true, 2424 tok, malicious",
+          "threshold": "MISS, unknown, 739 tok, coverage 0.33"
+        },
+        "prio0_finding": {
+          "naive": "true",
+          "soft": "true, 2307 tok, malicious",
+          "threshold": "MISS, needs_review, 695 tok"
+        },
+        "prio0_finding_na": {
+          "naive": "true",
+          "soft": "true, 2736 tok, malicious",
+          "threshold": "MISS, needs_review, 790 tok"
+        },
+        "fail_closed": "unknown / needs_review, never no_evidence",
+        "rescue": "a critical finding at the payload address does NOT rescue selection; findings are applied after function selection"
+      },
+      "raw_sources": [
+        "results/archive/raw/priority_recall_deepseek-v4.1-flash.json"
+      ],
+      "notes": "Threshold is not decision-preserving for a low-priority payload: it skips it entirely (coverage 0.33) but fails closed (unknown/needs_review). Soft catches the payload at ~2.4k tokens and is the safer trade-off. Selection-level must-include (critical finding address/xref -> force function) is the missing fix."
     }
   ]
 }

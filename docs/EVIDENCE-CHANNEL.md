@@ -227,3 +227,28 @@ instruction-follower changes the paraphrase result.
   scale headroom**, not better detection. With a small-context local model it is
   also a hard requirement.
 
+### Priority-0 payload recall (2026-10-26)
+
+Same synthetic sample, only the payload's priority changes:
+
+| condition | naive | soft | threshold |
+|---|---|---|---|
+| prio 5 | payload ✅ 6,618 tok | ✅ 4,303 tok, malicious | ✅ 3,634 tok, malicious |
+| **prio 0** | ✅ 6,666 tok | ✅ **2,424 tok**, malicious | ❌ **MISS**, unknown, 739 tok |
+| prio 0 + critical finding @ payload | ✅ | ✅ 2,307 tok | ❌ MISS, needs_review, 695 tok |
+| prio 0 + address-less finding | ✅ | ✅ 2,736 tok | ❌ MISS, needs_review, 790 tok |
+
+- **Threshold is not decision-preserving for a low-priority payload.** It analyzes
+  only the priority-3 function (coverage 0.33) and the payload function is never
+  summarized.
+- **It fails closed:** the verdict is `unknown` (no findings) or `needs_review`
+  (critical finding), never `no_evidence`.
+- **Soft is the safer trade-off** here: ~2.4k tokens, payload found.
+- **A critical finding does not rescue selection.** Findings are applied inside
+  the context of selected functions; selection happens before findings. A finding
+  at the payload address cannot force the function into the run.
+- **Fix:** selection-level must-include — if a critical finding has an address,
+  force that function into the analyzed set; for address-less critical findings,
+  use Ghidra xrefs to map the string to a function, otherwise fall back to soft or
+  a file-level evidence pass.
+
