@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 from llm_layer.cache import SummaryCache
-from llm_layer.client import LLMResult
+from llm_layer.client import LLMClient, LLMResult
 from llm_layer.context import (build_function_context, select_findings,
                                select_functions, select_with_reasons)
 from llm_layer.pipeline import AnalysisResult, analyze
 from llm_layer.summarize import summarize_function
+import io
+import json
+import urllib.error
+from unittest.mock import patch
+
 import pytest
 
 from llm_layer.tokens import (DEFAULT_COUNTER, TokenCounter, estimate_tokens,
@@ -590,3 +595,43 @@ def test_fail_closed_keeps_benign_without_critical():
     out = apply_fail_closed(s, fn, findings)
     assert out.suspicious is False
     assert out.fail_closed is False
+
+
+def test_openai_falls_back_without_response_format():
+    calls = []
+
+    class Resp:
+        def __init__(self, data):
+            self.data = data
+
+        def read(self):
+            return self.data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(req, timeout=0):
+        body = json.loads(req.data.decode())
+        calls.append(body)
+        if "response_format" in body:
+            raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {},
+                                         io.BytesIO(b'{"model":"x"}'))
+        return Resp(json.dumps({
+            "choices": [{"message": {"content": '{"ok": true}'}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        }).encode())
+
+    client = LLMClient(provider="openai", model="m", base_url="https://x", api_key="k")
+    with patch("urllib.request.urlopen", fake_urlopen):
+        r = client.chat([{"role": "user", "content": "x"}], json_mode=True)
+        assert r.content == '{"ok": true}'
+        assert client.json_mode_supported is False
+        assert len(calls) == 2
+        assert "response_format" in calls[0]
+        assert "response_format" not in calls[1]
+        client.chat([{"role": "user", "content": "x"}], json_mode=True)
+        assert len(calls) == 3
+        assert "response_format" not in calls[2]

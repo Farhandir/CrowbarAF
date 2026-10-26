@@ -22,7 +22,7 @@ DIE + YARA triage
 - **Evidence-grounded:** every AI claim is classified as
   `verified_claim` / `verified_observation` / `file_level` / `unverified`.
 - **Honest uncertainty:** with no evidence the verdict is `unknown`, never `clean`.
-- **Model-agnostic:** Ollama, vLLM or any OpenAI-compatible endpoint.
+- **Model-agnostic:** Ollama, vLLM, OpenCode Go or any OpenAI-compatible endpoint.
 - **Traceable:** every run writes a JSON trace (functions selected/skipped, token
   usage, claims and their verification status).
 - **Reports:** Markdown / HTML / JSON; SQLite storage; FastAPI UI.

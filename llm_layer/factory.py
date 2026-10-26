@@ -13,6 +13,8 @@ def from_env() -> LLMClient:
     api_key = os.getenv("CROWBAR_LLM_API_KEY")
     num_ctx = int(os.getenv("CROWBAR_LLM_NUM_CTX", "32768"))
     num_predict = int(os.getenv("CROWBAR_LLM_NUM_PREDICT", "1200"))
+    user_agent = os.getenv("CROWBAR_LLM_USER_AGENT", "crowbaraf/0.1")
+    session_id = os.getenv("CROWBAR_LLM_SESSION_ID") or None
     return LLMClient(
         provider=provider,
         model=model,
@@ -20,4 +22,6 @@ def from_env() -> LLMClient:
         api_key=api_key,
         num_ctx=num_ctx,
         num_predict=num_predict,
+        user_agent=user_agent,
+        session_id=session_id,
     )

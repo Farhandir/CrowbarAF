@@ -29,6 +29,9 @@ class LLMClient:
         num_ctx: int = 32768,
         num_predict: int = 1200,
         timeout: int = 1200,
+        user_agent: str = "crowbaraf/0.1",
+        session_id: str | None = None,
+        json_mode_supported: bool | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -37,6 +40,10 @@ class LLMClient:
         self.num_ctx = num_ctx
         self.num_predict = num_predict
         self.timeout = timeout
+        self.user_agent = user_agent
+        self.session_id = session_id
+        # None = unknown; True/False after the first attempt.
+        self.json_mode_supported = json_mode_supported
 
     # --- ortak ---
     def chat(self, messages: list[dict], json_mode: bool = True, temperature: float = 0.0) -> LLMResult:
@@ -73,34 +80,67 @@ class LLMClient:
             raw=data,
         )
 
-    # --- OpenAI-uyumlu /v1/chat/completions (vLLM, OpenAI, Anthropic proxy) ---
-    def _openai(self, messages, json_mode, temperature) -> LLMResult:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": self.num_predict,
+    def _openai_headers(self) -> dict:
+        """Headers for OpenAI-compatible endpoints (incl. OpenCode Go)."""
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            # Go asks clients to identify themselves; generic SDK names are discouraged.
+            "User-Agent": self.user_agent,
         }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
-        headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        req = urllib.request.Request(
-            self.base_url + "/v1/chat/completions",
-            data=json.dumps(payload).encode(),
-            headers=headers,
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                data = json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")[:500]
-            raise RuntimeError(f"LLM HTTP {e.code}: {body}") from e
-        usage = data.get("usage", {}) or {}
-        return LLMResult(
-            content=data["choices"][0]["message"]["content"],
-            prompt_tokens=usage.get("prompt_tokens"),
-            completion_tokens=usage.get("completion_tokens"),
-            raw=data,
-        )
+        if self.session_id:
+            headers["x-opencode-session"] = self.session_id
+        return headers
+
+    # --- OpenAI-uyumlu /v1/chat/completions (vLLM, OpenAI, OpenCode Go) ---
+    def _json_attempts(self, json_mode: bool) -> list[bool]:
+        """Try response_format, but fall back to prompt-only JSON on HTTP 400."""
+        if not json_mode:
+            return [False]
+        if self.json_mode_supported is False:
+            return [False]
+        if self.json_mode_supported is True:
+            return [True]
+        return [True, False]
+
+    def _openai(self, messages, json_mode, temperature) -> LLMResult:
+        last_error: Exception | None = None
+        for use_json in self._json_attempts(json_mode):
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": self.num_predict,
+            }
+            if use_json:
+                payload["response_format"] = {"type": "json_object"}
+            req = urllib.request.Request(
+                self.base_url + "/v1/chat/completions",
+                data=json.dumps(payload).encode(),
+                headers=self._openai_headers(),
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    data = json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", "replace")[:500]
+                last_error = RuntimeError(f"LLM HTTP {e.code}: {body}")
+                if e.code == 400 and use_json:
+                    continue  # retry without response_format
+                raise last_error from e
+
+            if use_json:
+                self.json_mode_supported = True
+            elif json_mode:
+                self.json_mode_supported = False
+
+            usage = data.get("usage", {}) or {}
+            return LLMResult(
+                content=data["choices"][0]["message"]["content"],
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                raw=data,
+            )
+        raise last_error or RuntimeError("LLM request failed")
