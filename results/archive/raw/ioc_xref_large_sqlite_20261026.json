@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-26",
+  "sample": "samples/real/sqlite_inj",
+  "size_mb": 1.9,
+  "functions_scanned": 3441,
+  "max_decompile": 100,
+  "payload_function": "crowbar_payload",
+  "before": {
+    "priority": 4,
+    "iocs": [],
+    "ioc_functions": 0,
+    "note": "priority from socket/execve only"
+  },
+  "after": {
+    "priority": 7,
+    "iocs": ["http://192.0.2.1:4444/gate.php"],
+    "ioc_functions": 1,
+    "refs": 3
+  },
+  "fix": [
+    "check references at the string start and at the IoC offset inside the defined string (Ghidra kept a leading '?')",
+    "MAX_DEFINED_DATA raised to 2,000,000 and configurable"
+  ],
+  "note": "The payload is selected by API priority even without the IoC; the IoC +3 is the decisive signal for a URL-only payload."
+}

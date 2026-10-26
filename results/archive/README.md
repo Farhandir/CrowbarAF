@@ -150,3 +150,21 @@ Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
   **P0 (aynı gün):** dört durumlu dosya verdict'i (`malicious/needs_review/unknown/no_evidence`),
   fail-closed backstop ve iki katmanlı kanıt (yerel + global digest). Bu tarihten önceki ve
   sonraki kayıtlar doğrudan kıyaslanmamalı; gerekirse yeniden koşun.
+
+# 5. Scale / API kayıtları (v1 genişletmesi)
+Büyük ölçek ve API koşularında `metrics` / `config` şu ek alanları taşır:
+
+- `functions`, `bytes`, `max_decompile`, `payload_priority`
+- `prompt_tokens`, `completion_tokens`, `cost_usd`, `allowance`, `billing_source`
+- `http_status`, `truncated`, `n_runs`
+- `coverage`, `payload_found`, `payload_in_context`, `false_positive`
+- `naive_mode` (`raw` / `hardened`), `crowbar_mode` (`soft` / `threshold`)
+
+Kurallar:
+- Düz ve Crowbar **aynı decompile kümesini/finding'leri** almalı (`--from-state`
+  veya aynı scale JSON).
+- `cost_usd` Go yanıtındaki `usage.cost`; `cost=0` Go limiti içinde.
+- HTTP 400 / context taşması `verdict=unknown` + `http_status=400` olarak kaydedilir;
+  harness çökmez.
+- `naive_raw` ham tool çıktısı, `naive_hardened` `DATA:`/karantina; ayrı kayıtlar.
+- `n_runs>1` sadece API'nin nondeterminizmini ölçmek için; lokal `temperature=0` n=1.

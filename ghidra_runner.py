@@ -23,7 +23,7 @@ from state import DecompiledFunction
 
 logger = logging.getLogger(__name__)
 
-GHIDRA_TIMEOUT_SECONDS = 600  # 10 dakika
+GHIDRA_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_GHIDRA_TIMEOUT", "600"))
 GHIDRA_PROJECT_NAME = "TempGhidraProject"
 SCRIPT_NAME = "export_functions.py"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from llm_layer.cache import SummaryCache
-from llm_layer.client import LLMClient, LLMResult
+from llm_layer.client import LLMClient, LLMHTTPError, LLMResult
 from llm_layer.context import (build_function_context, must_include_offsets,
                                normalize_address, select_findings,
                                select_functions, select_with_reasons)
@@ -815,3 +815,58 @@ def test_analyze_must_include_by_iocs():
     res = analyze([fn], findings, FakeClient(), budget_tokens=1000, min_priority=1)
     assert "0x1" in res.summaries
     assert res.must_include == ["0x1"]
+
+
+def test_openai_usage_cost_and_finish_reason():
+    class Resp:
+        def read(self):
+            return json.dumps({
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.001,
+                          "opencode": {"billing_source": "go", "allowance": 0.002}},
+            }).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    client = LLMClient(provider="openai", model="m", base_url="https://x", api_key="k")
+    with patch("urllib.request.urlopen", lambda *a, **k: Resp()):
+        r = client.chat([{"role": "user", "content": "x"}], json_mode=False)
+    assert r.cost_usd == 0.001
+    assert r.billing_source == "go"
+    assert r.allowance == 0.002
+    assert r.finish_reason == "stop"
+
+
+def test_openai_context_error_keeps_status():
+    def fail(req, timeout=0):
+        raise urllib.error.HTTPError(req.full_url, 400, "Bad Request", {},
+                                     io.BytesIO(b"context length exceeded"))
+
+    client = LLMClient(provider="openai", model="m", base_url="https://x", api_key="k")
+    with patch("urllib.request.urlopen", fail):
+        with pytest.raises(LLMHTTPError) as ei:
+            client.chat([{"role": "user", "content": "x"}], json_mode=False)
+    assert ei.value.status == 400
+
+
+class CostClient:
+    def chat(self, messages, json_mode=True, temperature=0.0):
+        return LLMResult(
+            content='{"summary":"s","suspicious":false,"confidence":"low",'
+                    '"behaviors":[],"claims":[],"suggested_name":""}',
+            prompt_tokens=10, completion_tokens=5, cost_usd=0.01,
+            billing_source="go", allowance=0.02, finish_reason="length",
+        )
+
+
+def test_analyze_aggregates_cost_and_truncation():
+    fn = _fn("0x1", "int f(){return 1;}")
+    res = analyze([fn], [], CostClient(), budget_tokens=1000)
+    assert res.total_cost_usd == 0.01
+    assert res.total_allowance == 0.02
+    assert res.billing_source == "go"
+    assert res.truncated_calls == 1

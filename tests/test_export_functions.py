@@ -391,6 +391,9 @@ class _Addr:
     def isMemoryAddress(self):
         return self.memory
 
+    def add(self, delta):
+        return _Addr(self.offset + delta, self.memory)
+
 
 class _Data:
     def __init__(self, offset, value):
@@ -624,3 +627,17 @@ def test_entry_flag_is_chosen():
     records[1]["is_entry"] = True
     chosen, _ = ef.plan_export(records)
     assert "0xe" in [r["offset"] for r in chosen]
+
+
+def test_ioc_offset_inside_defined_string(fake_ghidra):
+    # Ghidra may keep a leading byte (e.g. "?http://..."); the code reference can
+    # point at the URL start, one byte into the defined data.
+    prog = _Program(
+        [_Data(0x500000, "?http://evil.example/gate.php")],
+        {0x500001: [_Ref(_Addr(0x401010))]},
+        [_Func(0x401000)],
+    )
+    fake_ghidra(prog)
+    assert ef.map_iocs_to_functions({"http://evil.example/gate.php"}) == {
+        "0x401000": ["http://evil.example/gate.php"]
+    }

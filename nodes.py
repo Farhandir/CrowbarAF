@@ -31,10 +31,10 @@ from state import AgentState, DecompiledFunction, Finding, RouteFlag
 
 logger = logging.getLogger(__name__)
 
-CAPA_TIMEOUT_SECONDS = 300  # 5 dakika
-FLOSS_TIMEOUT_SECONDS = 300  # 5 dakika
-DIE_TIMEOUT_SECONDS = 60
-UPX_TIMEOUT_SECONDS = 60
+CAPA_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_CAPA_TIMEOUT", "300"))
+FLOSS_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_FLOSS_TIMEOUT", "300"))
+DIE_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_DIE_TIMEOUT", "60"))
+UPX_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_UPX_TIMEOUT", "60"))
 UNPACKED_SUFFIX = ".unpacked"
 CLEAN_SUFFIX = ".clean"  # de4dot çıktısı
 PYTHON_TOOL_TIMEOUT_SECONDS = 60  # pyinstxtractor, pycdc/decompyle3
@@ -565,7 +565,7 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 HIGH_ENTROPY_THRESHOLD = 7.0
 ELF_MAGIC = b"\x7fELF"
-READELF_TIMEOUT_SECONDS = 30
+READELF_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_READELF_TIMEOUT", "30"))
 
 # `readelf --wide --dyn-syms` satırı:
 #   "    12: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND ptrace@GLIBC_2.2.5 (2)"

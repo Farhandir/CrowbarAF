@@ -2914,6 +2914,49 @@
         "results/archive/raw/ioc_xref_e2e_20261026.json"
       ],
       "notes": "End-to-end verification of the friend's IoC-xref feature plus the fixes: FLOSS static IoCs, Listing fallback, pointer chains, entry/main inclusion, exact Linux API matching. The plaintext-URL ELF is no longer a silent no_evidence; it is malicious (inline) or needs_review (global pointer), with main priority 3 and iocs populated."
+    },
+    {
+      "experiment_id": "ioc_xref_large_sqlite_20261026",
+      "date": "2026-10-26",
+      "question": "Does the IoC-xref mapping work on a real 1.9 MB binary with 3,441 functions?",
+      "dataset": {
+        "name": "sqlite-amalgamation",
+        "kind": "real_elf_injected",
+        "variants": [
+          "sqlite_inj"
+        ],
+        "ground_truth": "http://192.0.2.1:4444/gate.php in crowbar_payload constructor",
+        "size_mb": 1.9,
+        "functions": 3441
+      },
+      "victim": {
+        "system": "Ghidra 12.1.4 producer side (no LLM)"
+      },
+      "config": {
+        "max_decompile": 100,
+        "ghidra_timeout_s": 1200,
+        "max_defined_data": 2000000
+      },
+      "metrics": {
+        "before": {
+          "payload_priority": 4,
+          "iocs": [],
+          "ioc_functions": 0
+        },
+        "after": {
+          "payload_priority": 7,
+          "iocs": [
+            "http://192.0.2.1:4444/gate.php"
+          ],
+          "ioc_functions": 1,
+          "refs": 3
+        },
+        "fix": "IoC offset inside the defined string (leading '?') + configurable 2M cap"
+      },
+      "raw_sources": [
+        "results/archive/raw/ioc_xref_large_sqlite_20261026.json"
+      ],
+      "notes": "Real large-sample verification. Before the offset-aware fix: 0 functions mapped, payload priority 4 (socket/execve only). After: 1 function, refs=3, crowbar_payload priority 7 with the URL in iocs. The API priority alone already surfaced the payload; the IoC bonus matters for URL-only payloads."
     }
   ]
 }

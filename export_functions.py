@@ -28,8 +28,9 @@ Not: Saf mantık (puanlama/seçim) Ghidra olmadan da import edilip test edilebil
 """
 
 import json
+import os
 
-DECOMPILE_TIMEOUT_SECONDS = 60
+DECOMPILE_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_DECOMPILE_TIMEOUT", "60"))
 
 CAPA_HIT_BONUS = 5
 DANGEROUS_API_BONUS = 4
@@ -43,10 +44,10 @@ IOC_KINDS = ("ip", "url", "domain", "registry", "file", "email")
 MIN_IOC_LENGTH = 4  # "a.b" gibi çok kısa değerler rastgele string'lerle eşleşmesin
 MAX_TARGET_IOCS = 2000  # aranacak IoC üst sınırı (string sayısı x IoC sayısı patlamasın)
 MAX_IOCS_PER_FUNCTION = 20
-MAX_DEFINED_DATA = 200000  # Listing fallback tarama üst sınırı
+MAX_DEFINED_DATA = int(os.environ.get("CROWBAR_MAX_DEFINED_DATA", "2000000"))  # Listing fallback cap
 
-MAX_DECOMPILE = 100  # Top-N: decompile edilecek en fazla fonksiyon
-FALLBACK_DECOMPILE = 20  # hiç puanlı fonksiyon yoksa denenecek en büyük fonksiyon sayısı
+MAX_DECOMPILE = int(os.environ.get("CROWBAR_MAX_DECOMPILE", "100"))  # Top-N
+FALLBACK_DECOMPILE = int(os.environ.get("CROWBAR_FALLBACK_DECOMPILE", "20"))
 MAX_STUBS = 500  # c_code'suz callee kayıtlarının üst sınırı
 MAX_CALLEES = 50
 MAX_XREFS = 50
@@ -384,26 +385,45 @@ def map_iocs_to_functions(target_iocs):
     hits = {}
     if not target_iocs:
         return hits
+    seen = matched_data = refs_seen = 0
     try:
         ioc_index = build_ioc_index(target_iocs)
         ref_manager = currentProgram.getReferenceManager()  # noqa: F821 (Ghidra)
         func_manager = currentProgram.getFunctionManager()  # noqa: F821 (Ghidra)
         for data in _iter_defined_data():
+            seen += 1
             try:
                 value = data.getValue()
                 text = str(value) if value is not None else str(data.getDefaultValueRepresentation())
                 matched = match_iocs(text, ioc_index)
                 if not matched:
                     continue
-                for ref in ref_manager.getReferencesTo(data.getAddress()):
-                    func = _function_for_ref(ref, ref_manager, func_manager)
-                    if func is None:
-                        continue
-                    add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), matched)
+                matched_data += 1
+                # The IoC may start at an offset inside the defined string (Ghidra
+                # sometimes keeps a leading length/format byte, e.g. "?http://...").
+                addrs = [data.getAddress()]
+                low = str(text).lower()
+                for ioc in matched:
+                    pos = low.find(str(ioc).lower())
+                    if pos > 0:
+                        try:
+                            addrs.append(data.getAddress().add(pos))
+                        except Exception:
+                            pass
+                for addr in addrs:
+                    for ref in ref_manager.getReferencesTo(addr):
+                        refs_seen += 1
+                        func = _function_for_ref(ref, ref_manager, func_manager)
+                        if func is None:
+                            continue
+                        add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), matched)
             except Exception as exc:
                 printerr("[export_functions] string islenemedi: " + str(exc))  # noqa: F821
     except Exception as exc:
         printerr("[export_functions] IoC eslemesi basarisiz: " + str(exc))  # noqa: F821
+    if os.environ.get("CROWBAR_IOC_DEBUG"):
+        printerr(f"[export_functions] ioc debug: seen={seen} matched_data={matched_data} "
+                 f"refs={refs_seen} hits={len(hits)}")  # noqa: F821
     return hits
 
 def get_callees(func):

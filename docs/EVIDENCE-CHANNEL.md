@@ -294,6 +294,12 @@ Same synthetic sample, only the payload's priority changes:
   containment (a short IoC inside a longer finding) is deliberately not matched.
   Unit-tested, including an `analyze(..., min_priority=1)` run; **verified end-to-end
   on real Ghidra 12.1.4 (2026-10-26)**.
+  **Large-sample verification (2026-10-26):** `sqlite_inj`, 1.9 MB, 3,441
+  functions, `MAX_DECOMPILE=100`. Ghidra kept a leading byte in the defined string
+  (`?http://...`); references at the string start alone were 0. Checking the IoC
+  offset inside the string found 3 references and mapped `crowbar_payload`
+  (`priority 4 → 7`, `iocs=[URL]`). `CROWBAR_MAX_DEFINED_DATA` is configurable
+  (default 2M).
   *Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
   not defined strings in the binary and still cannot be mapped.
 

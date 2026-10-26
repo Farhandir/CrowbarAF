@@ -222,6 +222,19 @@ export CROWBAR_LLM_SESSION_ID="crowbaraf-run-1"
 `LLMClient` sends the Go-required user agent/session headers and falls back to
 prompt-only JSON if `response_format` is rejected.
 
+### Scale knobs
+
+For large samples, raise the decompile cap and tool timeouts instead of guessing:
+
+```bash
+export CROWBAR_MAX_DECOMPILE=100          # Ghidra top-N (default 100)
+export CROWBAR_FALLBACK_DECOMPILE=20
+export CROWBAR_GHIDRA_TIMEOUT=1200        # seconds
+export CROWBAR_CAPA_TIMEOUT=600
+export CROWBAR_FLOSS_TIMEOUT=600
+export CROWBAR_READELF_TIMEOUT=60
+```
+
 Full setup: [`docs/SETUP.md`](docs/SETUP.md).
 
 ---

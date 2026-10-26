@@ -24,6 +24,10 @@ class AnalysisResult:
     total_completion_tokens: int = 0
     calls: int = 0
     cache_hits: int = 0
+    total_cost_usd: float = 0.0
+    total_allowance: float = 0.0
+    billing_source: str = ""
+    truncated_calls: int = 0
     failures: list[str] = field(default_factory=list)
     per_function: dict[str, dict] = field(default_factory=dict)
     must_include: list[str] = field(default_factory=list)
@@ -137,6 +141,12 @@ def analyze(
                 result.calls += 1
                 result.total_prompt_tokens += (res.prompt_tokens or 0)
                 result.total_completion_tokens += (res.completion_tokens or 0)
+                result.total_cost_usd += (res.cost_usd or 0)
+                result.total_allowance += (res.allowance or 0)
+                if res.billing_source:
+                    result.billing_source = res.billing_source
+                if res.finish_reason == "length":
+                    result.truncated_calls += 1
                 if cache is not None:
                     cache.put(fn, summary)
             result.per_function[offset] = {

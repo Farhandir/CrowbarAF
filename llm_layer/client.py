@@ -11,12 +11,25 @@ import urllib.request
 from dataclasses import dataclass
 
 
+class LLMHTTPError(RuntimeError):
+    """HTTP error with the status/body kept for the harness (context overflow etc.)."""
+
+    def __init__(self, status: int, body: str) -> None:
+        super().__init__(f"LLM HTTP {status}: {body[:500]}")
+        self.status = status
+        self.body = body
+
+
 @dataclass
 class LLMResult:
     content: str
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     raw: dict | None = None
+    cost_usd: float | None = None
+    billing_source: str | None = None
+    allowance: float | None = None
+    finish_reason: str | None = None
 
 
 class LLMClient:
@@ -78,6 +91,7 @@ class LLMClient:
             prompt_tokens=data.get("prompt_eval_count"),
             completion_tokens=data.get("eval_count"),
             raw=data,
+            finish_reason=data.get("done_reason"),
         )
 
     def _openai_headers(self) -> dict:
@@ -126,7 +140,7 @@ class LLMClient:
                     data = json.loads(r.read())
             except urllib.error.HTTPError as e:
                 body = e.read().decode("utf-8", "replace")[:500]
-                last_error = RuntimeError(f"LLM HTTP {e.code}: {body}")
+                last_error = LLMHTTPError(e.code, body)
                 if e.code == 400 and use_json:
                     continue  # retry without response_format
                 raise last_error from e
@@ -137,10 +151,16 @@ class LLMClient:
                 self.json_mode_supported = False
 
             usage = data.get("usage", {}) or {}
+            oc = usage.get("opencode", {}) or {}
+            choice = (data.get("choices") or [{}])[0]
             return LLMResult(
-                content=data["choices"][0]["message"]["content"],
+                content=choice.get("message", {}).get("content", ""),
                 prompt_tokens=usage.get("prompt_tokens"),
                 completion_tokens=usage.get("completion_tokens"),
                 raw=data,
+                cost_usd=usage.get("cost"),
+                billing_source=oc.get("billing_source"),
+                allowance=oc.get("allowance"),
+                finish_reason=choice.get("finish_reason"),
             )
         raise last_error or RuntimeError("LLM request failed")
