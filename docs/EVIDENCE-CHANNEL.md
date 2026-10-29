@@ -372,3 +372,39 @@ payload address (must-include). Real API prompt tokens:
 - **Estimator warning:** `chars/4` underestimated by ~2× here (1,000-sample
   estimate 279k vs actual 543k). Use real `prompt_tokens`.
 
+## 10. Authority tiers + SQLite false-positive fix (2026-10-29)
+
+**Before:** every capa rule was high-authority. Benign SQLite produced **1,166
+critical findings** (1,141 of them the generic capa rule `contain loop`) and the
+verdict was `malicious` — a false positive, with no LLM involvement.
+
+**After A (authority tiers):**
+
+| Source | Authority | Verdict contribution |
+|---|---|---|
+| YARA | high | `malicious` |
+| capa / import combo / high-confidence IoC | medium | `needs_review` |
+| FLOSS URL/IP (C2-like) | low | `needs_review` |
+| LLM suspicious function | — | `malicious` |
+
+- Trivial capa rules (`contain loop`) are filtered from findings **and** priority
+  hints; capa rules are deduped for the verdict.
+- `is_critical_finding` (must-include/fail-closed) is now YARA + high IoC + C2;
+  capa no longer forces functions into the run.
+
+### S2/S3 real SQLite (1.9 MB, 100 decompiled functions)
+
+| sample | naive | crowbar-threshold |
+|---|---|---|
+| benign | `no_evidence` · 53,505 tok · 23 s | **`needs_review`** · 19,329 tok · 196 s · **FP=false** |
+| injected | `malicious` · payload ✅ · 53,940 tok · 16 s | **`malicious`** · payload ✅ · 19,381 tok · 218 s |
+
+- **No malicious FP** on benign; the injected payload stays malicious and is
+  caught.
+- Threshold is **2.8× cheaper in tokens** but **~13× slower** on 100 functions
+  (many per-function calls). Parallelize `CROWBAR_LLM_MAX_WORKERS` before drawing
+  latency conclusions.
+- Benign is still `needs_review` (56 medium capa/import/IoC signals), not
+  `no_evidence`. If that alert load is too high, move to option C (two-signal
+  corroboration for `malicious`).
+

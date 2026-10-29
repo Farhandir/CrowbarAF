@@ -518,6 +518,7 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
     floss_iocs = run_floss(state.file_path)  # hata durumunda []
     # Hata/timeout durumunda: ({"error": ...}, [])
     capabilities, ghidra_hints = run_capa(state.file_path)
+    capabilities, ghidra_hints = _filter_trivial_capa(capabilities, ghidra_hints)
 
     # Ham import listesi findings'e GİRMEZ (gürültü); yalnızca combo eşleşmesi ve imphash için kullanılır.
     imports = extract_imports(state.file_path)  # PE: pefile, ELF: readelf; aksi halde []
@@ -1049,6 +1050,21 @@ def yara_findings(yara_results: list[dict[str, Any]]) -> list[Finding]:
     ]
 
 
+TRIVIAL_CAPA_RULES = {"contain loop"}
+
+
+def _capa_is_trivial(rule) -> bool:
+    return str(rule).strip().lower() in TRIVIAL_CAPA_RULES
+
+
+def _filter_trivial_capa(capabilities, hints):
+    caps = dict(capabilities or {})
+    caps["matched_rules"] = [r for r in (caps.get("matched_rules") or [])
+                             if not _capa_is_trivial(r)]
+    kept = [h for h in (hints or []) if not _capa_is_trivial(h.get("rule", ""))]
+    return caps, kept
+
+
 def build_findings(
     *,
     yara_results: list[dict[str, Any]],
@@ -1071,15 +1087,17 @@ def build_findings(
     findings: list[Finding] = yara_findings(yara_results)
 
     # capa: adresli eşleşmeler (ghidra_hints) + adresi olmayan kurallar + ATT&CK/MBC
-    hints = [h for h in ghidra_hints if isinstance(h, dict) and h.get("rule")]
+    hints = [h for h in ghidra_hints
+             if isinstance(h, dict) and h.get("rule") and not _capa_is_trivial(h["rule"])]
     hinted_rules = {str(h["rule"]) for h in hints}
     for hint in hints:
         findings.append(
             Finding(source="capa", kind="rule", value=str(hint["rule"]), address=str(hint.get("offset") or ""))
         )
     for rule in capabilities.get("matched_rules", []) or []:
-        if str(rule) not in hinted_rules:
-            findings.append(Finding(source="capa", kind="rule", value=str(rule)))
+        if str(rule) in hinted_rules or _capa_is_trivial(rule):
+            continue
+        findings.append(Finding(source="capa", kind="rule", value=str(rule)))
     for tech in capabilities.get("mitre_attack", []) or []:
         findings.append(Finding(source="capa", kind="attack", value=str(tech)))
     for behavior in capabilities.get("malware_behavior", []) or []:

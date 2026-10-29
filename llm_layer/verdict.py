@@ -1,8 +1,9 @@
 """Deterministic file-level verdict and fail-closed policy.
 
 Four states (never "clean"):
-  malicious     : suspicious function(s) or high-authority critical finding
-  needs_review  : conflict, or only a low-authority C2-like string
+  malicious     : suspicious function(s) or a high-authority (YARA) finding
+  needs_review  : medium-authority evidence (capa/import combo/IoC), C2-like
+                  string, or a conflict
   unknown       : coverage too low, packed, tool failure, no functions
   no_evidence   : covered surface analyzed, no malicious evidence found
 """
@@ -22,7 +23,10 @@ _URL_RE = re.compile(r"https?://|(?:\d{1,3}\.){3}\d{1,3}")
 _BENIGN_CLAIM = ("benign", "clean", "not malicious", "no malicious", "signed",
                  "harmless", "no threat", "0/70", "safe")
 
-HIGH_AUTHORITY = {"yara", "capa", "ioc"}
+# YARA is the only source that can stand alone as "malicious".
+HIGH_AUTHORITY = {"yara"}
+# Dual-use / supporting signals: they can require review, not a malicious verdict.
+MEDIUM_AUTHORITY = {"capa", "import_combo", "ioc"}
 CONFIDENCE_FLOOR = 0.7
 
 
@@ -32,14 +36,11 @@ def finding_id(f: Finding) -> str:
 
 
 def is_critical_finding(f: Finding) -> bool:
-    """A finding that can stand on its own against a benign LLM verdict."""
+    """Findings that force must-include / fail-closed (YARA, high IOC, C2-like)."""
     src = (f.source or "").lower()
     if src == "yara":
         return True
-    if src in HIGH_AUTHORITY and (f.confidence or 0) >= CONFIDENCE_FLOOR:
-        return True
-    if src in ("import", "import_combo") and f.kind == "import_combo" \
-            and (f.confidence or 0) >= CONFIDENCE_FLOOR:
+    if src == "ioc" and (f.confidence or 0) >= CONFIDENCE_FLOOR:
         return True
     # C2-like strings are critical even from FLOSS: a URL/IP in a finding value.
     if src in ("floss", "ioc") and _URL_RE.search(f.value or ""):
@@ -48,20 +49,30 @@ def is_critical_finding(f: Finding) -> bool:
 
 
 def is_high_authority(f: Finding) -> bool:
+    return (f.source or "").lower() in HIGH_AUTHORITY
+
+
+def is_medium_authority(f: Finding) -> bool:
     src = (f.source or "").lower()
-    if src == "yara":
-        return True
-    if src in HIGH_AUTHORITY and (f.confidence or 0) >= CONFIDENCE_FLOOR:
-        return True
-    if src in ("import", "import_combo") and f.kind == "import_combo" \
-            and (f.confidence or 0) >= CONFIDENCE_FLOOR:
-        return True
-    return False
+    return src in MEDIUM_AUTHORITY and (f.confidence or 0) >= CONFIDENCE_FLOOR
 
 
 def _claims_benign(value: str) -> bool:
     low = (value or "").lower()
     return any(m in low for m in _BENIGN_CLAIM)
+
+
+def _unique_findings(findings: list[Finding]) -> list[Finding]:
+    seen: set[tuple] = set()
+    out: list[Finding] = []
+    for f in findings:
+        key = ((f.source or "").lower(), (f.kind or "").lower(),
+               re.sub(r"\s+", " ", (f.value or "").strip().lower()))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
 
 
 def apply_fail_closed(summary: FunctionSummary, fn: FunctionInfo,
@@ -102,9 +113,12 @@ def compute_verdict(
     unknown_fns = [f for f in analyzed if summaries[f.offset].suspicious is None]
     fail_closed = [f for f in analyzed if summaries[f.offset].fail_closed]
 
-    critical = [f for f in findings if is_critical_finding(f)]
+    critical = _unique_findings([f for f in findings if is_critical_finding(f)])
     high = [f for f in critical if is_high_authority(f)]
     low = [f for f in critical if not is_high_authority(f)]
+    medium = [f for f in _unique_findings([f for f in findings if is_medium_authority(f)])
+              if not is_critical_finding(f)]
+
     conflicts = []
     if high or susp:
         conflicts = [
@@ -121,10 +135,13 @@ def compute_verdict(
         reasons.append(f"{len(susp)} suspicious function(s)")
     elif high:
         verdict = MALICIOUS
-        reasons.append(f"{len(high)} high-authority critical finding(s)")
+        reasons.append(f"{len(high)} high-authority (YARA) finding(s)")
     elif conflicts:
         verdict = NEEDS_REVIEW
-        reasons.append(f"{len(conflicts)} benign claim(s) conflict with critical evidence")
+        reasons.append(f"{len(conflicts)} benign claim(s) conflict with evidence")
+    elif medium:
+        verdict = NEEDS_REVIEW
+        reasons.append(f"{len(medium)} medium-authority finding(s) (capa/import/IoC)")
     elif low:
         verdict = NEEDS_REVIEW
         reasons.append(f"{len(low)} C2-like string(s) without corroborating code evidence")
@@ -182,6 +199,7 @@ def compute_verdict(
             "fail_closed": len(fail_closed),
             "critical_findings": len(critical),
             "high_authority": len(high),
+            "medium_findings": len(medium),
             "c2_like": len(low),
             "conflicts": len(conflicts),
         },
@@ -190,6 +208,11 @@ def compute_verdict(
              "value": (f.value or "")[:160], "address": f.address,
              "tier": "high" if is_high_authority(f) else "c2_like"}
             for f in critical[:20]
+        ],
+        "medium_findings": [
+            {"id": finding_id(f), "source": f.source, "kind": f.kind,
+             "value": (f.value or "")[:160], "address": f.address, "tier": "medium"}
+            for f in medium[:20]
         ],
         "conflicts": conflicts[:20],
         "tool_failures": tool_failures[:20],

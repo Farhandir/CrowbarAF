@@ -989,3 +989,16 @@ def test_collect_floss_strings_includes_static_iocs():
     out = nodes._collect_floss_strings(report)
     assert out == ["http://192.0.2.1:4444/gate.php"]
     assert nodes.filter_iocs(out) == ["http://192.0.2.1:4444/gate.php"]
+
+
+def test_build_findings_filters_trivial_capa_rules():
+    fs = build_findings(
+        yara_results=[],
+        capabilities={"matched_rules": ["contain loop", "encrypt data"]},
+        ghidra_hints=[{"rule": "contain loop", "offset": "0x1"},
+                      {"rule": "encrypt data", "offset": "0x2"}],
+        import_combos=[], entropy={}, ioc_strings=[],
+    )
+    vals = [f.value for f in fs if f.source == "capa"]
+    assert "contain loop" not in vals
+    assert "encrypt data" in vals

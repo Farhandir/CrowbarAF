@@ -127,8 +127,8 @@ Deep dive: [`docs/EVIDENCE-CHANNEL.md`](docs/EVIDENCE-CHANNEL.md).
 
 | Verdict | Meaning |
 |---|---|
-| `malicious` | Suspicious function(s) or high-authority critical evidence. |
-| `needs_review` | Conflict, or a C2-like string without corroborating code evidence. |
+| `malicious` | Suspicious function(s) or a YARA hit. |
+| `needs_review` | Medium-authority evidence (capa/import/IoC), a C2-like string, or a conflict. |
 | `unknown` | Coverage too low, packed sample, tool/analysis failure. |
 | `no_evidence` | Covered surface analyzed; no malicious evidence found. |
 
@@ -185,6 +185,7 @@ Synthetic, harmless samples. Numbers are real; scale is not production malware.
 | Packing (UPX) | tools blind, 8.6× cost; `upx -d` restores the payload |
 | Semantic evidence attacks | no flip on fake reputation/conflict |
 | S1 scale ladder (DeepSeek) | naive 543k tokens at 1,000 fn and **HTTP 400 at 2,000**; threshold **904–929 tokens**, payload held |
+| S2/S3 real SQLite (A policy) | benign **needs_review** (no malicious FP); injected **malicious**, payload caught; threshold 2.8× cheaper but ~13× slower at 100 fn |
 
 Full records, metrics and caveats:
 [`results/archive/README.md`](results/archive/README.md).

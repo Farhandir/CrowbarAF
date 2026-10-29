@@ -3054,6 +3054,79 @@
         "results/archive/raw/scale_ladder_2000_deepseek.json"
       ],
       "notes": "S1 ladder. With a critical finding, threshold keeps the payload at ~900 tokens while naive grows to 543k (1000) and returns HTTP 400 at ~1.09M (2000). Soft costs ~18k tokens and ~130s because it calls many functions; threshold is ~7-12s. Without any finding, threshold misses the priority-0 payload (364 tokens, unknown) -- the recall gap; soft is the safe default. DeepSeek context limit is between 543k and ~1.09M tokens. Synthetic, n=1."
+    },
+    {
+      "experiment_id": "verdict_policy_a_sqlite_20261029",
+      "date": "2026-10-29",
+      "question": "Does authority tiering (YARA high; capa/import/IoC medium) remove the benign SQLite malicious FP while keeping the injected payload malicious?",
+      "dataset": {
+        "name": "sqlite-amalgamation",
+        "kind": "real_elf_payload_vs_benign",
+        "variants": [
+          "sqlite_benign",
+          "sqlite_inj"
+        ],
+        "size_mb": 1.9,
+        "functions_decompiled": 100
+      },
+      "victim": {
+        "system": "naive_raw vs crowbar-threshold + A policy"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "max_decompile": 100,
+        "threshold_total_budget": 12000,
+        "runs": 1
+      },
+      "metrics": {
+        "before_A": {
+          "benign_verdict": "malicious",
+          "critical_findings": 1166,
+          "root_cause": "1141 capa 'contain loop' rules treated as high-authority"
+        },
+        "after_A": {
+          "benign": {
+            "verdict": "needs_review",
+            "critical": 0,
+            "medium": 56,
+            "payload": false,
+            "tokens": 19329,
+            "time_s": 195.5
+          },
+          "injected": {
+            "verdict": "malicious",
+            "critical": 3,
+            "high_yara": 1,
+            "c2_like": 2,
+            "medium": 61,
+            "payload": true,
+            "tokens": 19381,
+            "time_s": 218.0
+          }
+        },
+        "naive": {
+          "benign": {
+            "verdict": "no_evidence",
+            "tokens": 53505,
+            "time_s": 23.4
+          },
+          "injected": {
+            "verdict": "malicious",
+            "payload": true,
+            "tokens": 53940,
+            "time_s": 15.9
+          }
+        },
+        "false_positive": "0 malicious FP; benign is needs_review"
+      },
+      "raw_sources": [
+        "results/archive/raw/scale_sqlite_inj_deepseek_A2.json",
+        "results/archive/raw/scale_sqlite_benign_deepseek_A2.json"
+      ],
+      "notes": "A fixes the malicious FP: benign SQLite -> needs_review (56 medium capa/import/IoC, 0 critical); injected -> malicious (YARA + C2 + 1 suspicious function) and the payload is caught. Trivial capa 'contain loop' filtered from findings and priority hints; capa deduped for the verdict. Threshold is 2.8x cheaper but ~13x slower than naive on 100 functions (many per-function calls); parallelize CROWBAR_LLM_MAX_WORKERS next."
     }
   ]
 }

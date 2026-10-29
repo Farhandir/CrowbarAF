@@ -870,3 +870,31 @@ def test_analyze_aggregates_cost_and_truncation():
     assert res.total_allowance == 0.02
     assert res.billing_source == "go"
     assert res.truncated_calls == 1
+
+
+def test_verdict_needs_review_on_capa():
+    fn = _fn("0x1", "code")
+    s = _summary("0x1", False)
+    v = compute_verdict([fn], [Finding(source="capa", kind="rule", value="encrypt data")],
+                        {"0x1": s})
+    assert v["verdict"] == "needs_review"
+    assert v["counts"]["high_authority"] == 0
+    assert v["counts"]["medium_findings"] == 1
+
+
+def test_capa_does_not_fail_close():
+    fn = _fn("0x1", "code")
+    s = _summary("0x1", False)
+    out = apply_fail_closed(s, fn, [Finding(source="capa", kind="rule", value="encrypt data")])
+    assert out.suspicious is False
+    assert out.fail_closed is False
+
+
+def test_verdict_dedupes_capa_medium():
+    fn = _fn("0x1", "code")
+    s = _summary("0x1", False)
+    fs = [Finding(source="capa", kind="rule", value="encrypt data", address="0x1"),
+          Finding(source="capa", kind="rule", value="encrypt data", address="0x2")]
+    v = compute_verdict([fn], fs, {"0x1": s})
+    assert v["counts"]["medium_findings"] == 1
+    assert v["verdict"] == "needs_review"
