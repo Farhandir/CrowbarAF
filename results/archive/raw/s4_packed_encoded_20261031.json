@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-31",
+  "packed": {
+    "file": "samples/real/sqlite_inj.upx",
+    "size_kb": 628,
+    "packer": "UPX",
+    "pipeline_unpacked": true,
+    "functions_decompiled": 100,
+    "findings": 186,
+    "payload_present": true,
+    "verdict": "malicious",
+    "note": "the pipeline's unpack_native_node detected UPX, ran upx -d, and analyzed the unpacked binary"
+  },
+  "encoded": {
+    "sample": "scale.py 100 functions, payload priority 0, IP+URL XOR-encoded",
+    "floss_recovers": ["192.0.2.1", "http://192.0.2.1:/gate.php"],
+    "naive": {"verdict": "malicious", "payload": true, "tokens": 53255, "time_s": 17.6},
+    "soft": {"verdict": "malicious", "payload": true, "tokens": 20172, "time_s": 74.6},
+    "threshold": {"verdict": "needs_review", "payload": false, "tokens": 390,
+                   "time_s": 5.8, "analyzed": 1, "coverage": 0.01, "must_include": []},
+    "note": "must_include cannot map decoded-only strings: they are not defined strings, iocs is empty, and value-in-code is false"
+  }
+}

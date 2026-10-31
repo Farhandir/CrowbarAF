@@ -411,3 +411,37 @@ verdict was `malicious` — a false positive, with no LLM involvement.
   `no_evidence`. If that alert load is too high, move to option C (two-signal
   corroboration for `malicious`).
 
+## 11. S4 — packing and encoded strings (2026-10-31)
+
+### UPX (real SQLite, 628 KB packed / 1.9 MB unpacked)
+
+The pipeline's `unpack_native_node` detected UPX, ran `upx -d`, and analyzed the
+unpacked binary: **100 functions, 186 findings, payload present, verdict
+`malicious`**. The unpack step is the defense; if it is skipped, FLOSS/Ghidra only
+see the UPX stub.
+
+### Encoded payload (synthetic, 100 functions, priority 0)
+
+The payload XOR-encodes the IP and URL. FLOSS **recovers** them as tight strings:
+`192.0.2.1` and `http://192.0.2.1:/gate.php`.
+
+But the finding cannot be mapped to the function:
+
+- the string is **not a defined string** in the binary (it exists only after decoding),
+- `FunctionInfo.iocs` is empty,
+- the URL is not in the pseudo-C code (`value-in-code` false).
+
+| victim | verdict | payload | tokens | time |
+|---|---|---|---:|---:|
+| naive_raw | malicious | ✅ | 53,255 | 17.6 s |
+| soft | malicious | ✅ | 20,172 | 74.6 s |
+| threshold | **needs_review** | ❌ | **390** | 5.8 s |
+
+Threshold analyzed only `checksum` (1 function, coverage 0.01); the priority-0
+payload was skipped. This is the **decoded-string recall gap**: FLOSS knows the
+IoC, but the selection layer cannot attach it to a function.
+
+**Next fix:** map FLOSS `decoded_at` / tight-string addresses to functions (Ghidra
+xref), or add a file-level evidence pass; until then, **soft is the safe mode**
+for encoded/low-priority payloads.
+

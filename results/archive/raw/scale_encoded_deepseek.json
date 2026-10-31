@@ -1,0 +1,104 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "sample": {
+    "payload_url": "http://192.0.2.1:4444/gate.php",
+    "has_payload": true,
+    "payload_offset": "0x401000",
+    "n_functions": 100,
+    "chars": 109353
+  },
+  "findings": [
+    {
+      "source": "floss",
+      "kind": "url",
+      "value": "http://192.0.2.1:4444/gate.php",
+      "address": null,
+      "confidence": 1.0
+    }
+  ],
+  "results": {
+    "naive_raw": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 109353,
+        "ok": true,
+        "suspicious": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_in_context": false,
+        "false_positive": false,
+        "prompt_tokens": 53255,
+        "completion_tokens": 1254,
+        "cost_usd": 0,
+        "billing_source": "go",
+        "allowance": 0.00524439,
+        "finish_reason": "stop",
+        "truncated": false,
+        "http_status": 200,
+        "time_s": 17.6,
+        "victim": "naive_raw"
+      }
+    ],
+    "crowbar-soft": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 109353,
+        "ok": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_fn_suspicious": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "analyzed": 28,
+        "coverage": 0.28,
+        "must_include": [],
+        "prompt_tokens": 20172,
+        "completion_tokens": 17858,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.00766857,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 74.6,
+        "victim": "crowbar-soft"
+      }
+    ],
+    "crowbar-threshold": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 109353,
+        "ok": true,
+        "verdict": "needs_review",
+        "payload_found": false,
+        "payload_fn_suspicious": null,
+        "payload_in_context": false,
+        "false_positive": false,
+        "analyzed": 1,
+        "coverage": 0.01,
+        "must_include": [],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost_usd": 0.0,
+        "billing_source": "",
+        "allowance": 0.0,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [
+          "0x401100: URLError: <urlopen error [Errno -2] Name or service not known>"
+        ],
+        "time_s": 0.0,
+        "victim": "crowbar-threshold"
+      }
+    ]
+  }
+}

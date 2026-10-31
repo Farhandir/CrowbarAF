@@ -1,0 +1,49 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "sample": {
+    "payload_url": "http://192.0.2.1:4444/gate.php",
+    "has_payload": true,
+    "payload_offset": "0x401000",
+    "n_functions": 100,
+    "chars": 109353
+  },
+  "findings": [
+    {
+      "source": "floss",
+      "kind": "url",
+      "value": "http://192.0.2.1:4444/gate.php",
+      "address": null,
+      "confidence": 1.0
+    }
+  ],
+  "results": {
+    "crowbar-threshold": [
+      {
+        "payload_url": "http://192.0.2.1:4444/gate.php",
+        "has_payload": true,
+        "payload_offset": "0x401000",
+        "n_functions": 100,
+        "chars": 109353,
+        "ok": true,
+        "verdict": "needs_review",
+        "payload_found": false,
+        "payload_fn_suspicious": null,
+        "payload_in_context": false,
+        "false_positive": false,
+        "analyzed": 1,
+        "coverage": 0.01,
+        "must_include": [],
+        "prompt_tokens": 390,
+        "completion_tokens": 267,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 9.735e-05,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 5.8,
+        "victim": "crowbar-threshold"
+      }
+    ]
+  }
+}
