@@ -193,6 +193,99 @@ Full records, metrics and caveats:
 
 ---
 
+## Split VM / host usage (real malware)
+
+For real malware, keep the API key, payment card and network **out of the
+malware-analysis VM**. Run the deterministic tools offline; run the LLM stage on
+the host.
+
+```mermaid
+flowchart LR
+    S["Malware sample"] --> V["Offline analysis VM<br/>Ghidra / capa / FLOSS / YARA / UPX<br/>no key · no card · no network"]
+    V -->|"state.json<br/>functions + findings"| H["Host / LLM side<br/>llm_layer + policy C + verdict<br/>key only here"]
+    H --> O["state.llm.json<br/>verdict + report"]
+```
+
+### 1. VM side: deterministic state, no LLM
+
+```bash
+# Required tools: Ghidra, capa, FLOSS, YARA, UPX, pefile...
+python main.py /samples/sample.bin --no-llm --no-db --out /out/state.json
+
+# or use the sandbox wrapper:
+./sandbox/run_offline_analysis.sh /samples/sample.bin /out/state.json
+```
+
+- `--no-llm` sets `CROWBAR_SKIP_LLM=1`: the LLM node is skipped and **no LLM
+  client is created**.
+- `--no-db` sets `CROWBAR_SKIP_DB=1`: no SQLite write.
+- No `CROWBAR_LLM_API_KEY` is needed or read in this mode.
+- The sample is never executed; only static parsers read it.
+- `state.json` contains decompiled code and findings. It may contain C2 strings:
+  keep it `600`, encrypted/temporary, and **out of git**.
+
+### 2. Transfer the state (one way)
+
+Copy only `state.json` from the VM to the host (shared folder, `scp`, USB).
+Do not send files, keys or network configuration from the host back into the
+analysis VM. On the host:
+
+```bash
+chmod 600 state.json
+```
+
+### 3. Host side: LLM + verdict + report
+
+Local model (recommended first for real malware; no cloud key):
+
+```bash
+CROWBAR_LLM_PROVIDER=ollama \
+CROWBAR_LLM_MODEL=qwen2.5-coder:7b \
+python host_analyze.py --state state.json --out state.llm.json
+
+# or:
+./sandbox/run_host_analysis.sh state.json state.llm.json
+
+# render the report:
+python report.py state.llm.json --format md --out reports/
+```
+
+Cloud/OpenAI-compatible provider (only for synthetic, benign or approved
+samples — sending real-malware code to a cloud API is a separate ToS/privacy
+decision):
+
+```bash
+export CROWBAR_LLM_PROVIDER=openai
+export CROWBAR_LLM_BASE_URL=https://opencode.ai/inference/go/openai/v1
+export CROWBAR_LLM_MODEL=deepseek-v4.1-flash
+export CROWBAR_LLM_API_KEY=...        # host environment only; never CLI/VM
+python host_analyze.py --state state.json --out state.llm.json --max-workers 8
+```
+
+`host_analyze.py`:
+
+- validates the state (Pydantic + size limit), never executes the sample;
+- runs the LLM layer, recomputes the verdict with policy C (two-signal
+  `malicious`), and builds the deterministic report;
+- reads the API key only from the environment, never from a CLI flag;
+- writes the output atomically with `600` permissions.
+
+### 4. Security model
+
+| Location | API key | Payment card | Network | Sample execution |
+|---|---|---|---|---|
+| Offline analysis VM | **no** | **no** | **no** | **no** (static only) |
+| Host / LLM side | yes (env only) | provider-side | yes | no |
+| `state.json` | no | no | — | — |
+
+- A parser exploit in the VM cannot steal the host API key.
+- The VM cannot exfiltrate samples because it is offline.
+- If you must run the host script inside another VM, keep it separate from the
+  malware VM and do not put a card inside either VM.
+- Full threat model and transfer rules: [`sandbox/README.md`](sandbox/README.md).
+
+---
+
 ## Quick start
 
 ```bash
@@ -209,26 +302,10 @@ python main.py --serve                     # UI/API at http://127.0.0.1:8000
 python report.py <state.json> --format md --out reports/
 ```
 
-### Split VM / host mode (recommended for real malware)
+### Split VM / host mode
 
-Keep the API key and network out of the malware-analysis VM:
-
-```bash
-# Offline analysis VM: deterministic tools only, no LLM, no DB, no key
-python main.py sample.bin --no-llm --no-db --out state.json
-# or: ./sandbox/run_offline_analysis.sh sample.bin /out/state.json
-
-# Host: LLM + policy C + verdict; key only in the host environment
-CROWBAR_LLM_PROVIDER=ollama CROWBAR_LLM_MODEL=qwen2.5-coder:7b \
-  python host_analyze.py --state state.json --out state.llm.json
-```
-
-- The VM never sees `CROWBAR_LLM_API_KEY`, a card, or the network.
-- `host_analyze.py` validates the state, runs the LLM layer, recomputes the
-  verdict, writes the report, and never executes the sample.
-- Real malware: use a local model first. Sending real-malware code to a cloud
-  API is a separate ToS/privacy decision.
-- Full threat model and transfer rules: [`sandbox/README.md`](sandbox/README.md).
+See [Split VM / host usage](#split-vm--host-usage-real-malware) above for the
+offline-VM + host-LLM workflow, state transfer and key rules.
 
 ### Using OpenCode Go (OpenAI-compatible)
 
