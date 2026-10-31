@@ -363,6 +363,8 @@ CrowbarAF/
 - [`docs/EVIDENCE-CHANNEL.md`](docs/EVIDENCE-CHANNEL.md) — evidence hardening,
   fail-closed verdicts, injection/recall notes
 - [`docs/PIPELINE-HANDOFF.md`](docs/PIPELINE-HANDOFF.md) — data contract and TODOs
+- [`docs/HANDOFF-VM-SMOKE.md`](docs/HANDOFF-VM-SMOKE.md) — split-mode VM smoke
+  handoff for a teammate (benign samples, no keys)
 - [`docs/TOOL-ADDITIONS.md`](docs/TOOL-ADDITIONS.md) — how to add analysis tools
 - [`results/archive/README.md`](results/archive/README.md) — experiment setup,
   records, metrics and pitfalls
