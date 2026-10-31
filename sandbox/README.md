@@ -1,6 +1,6 @@
 # Split VM / Host Mode
 
-> Amaç: gerçek malware’e **dokunan** deterministik araçları, **API key/card
+> Amaç: gerçek malware’e **dokunan** deterministik araçları, **API key
 > bulunmayan offline** bir VM’de çalıştırmak; LLM çağrılarını host’ta yapmak.
 
 ```text
@@ -11,7 +11,7 @@
 │ UPX / pefile                       │
 │                                    │
 │ main.py --no-llm --no-db           │
-│ key YOK, kart YOK, ağ YOK          │
+│ key YOK, ağ YOK                    │
 │ malware ÇALIŞMAZ                   │
 └──────────────┬─────────────────────┘
                │ sadece state.json
@@ -28,7 +28,7 @@
 ## 1. Offline VM
 
 - Ağ kapalı; mümkünse snapshot temiz.
-- `.env`, API key, SSH key, tarayıcı hesabı, kart bilgisi **yok**.
+- `.env`, API key, SSH key, tarayıcı hesabı **yok**.
 - Paylaşılan pano/klasör kapalı; sadece örnek ve çıktı için ayrı dizin.
 - Örneği **çalıştırma**; sadece statik araçlara oku.
 - Örnek kasası ayrı ve şifreli; `chmod 600`.
@@ -88,8 +88,7 @@ değişkeninden okur. `--out` dosyası `600` izinle atomik yazılır.
 | Risk | VM’de anahtar varsa | Ayrık modda |
 |---|---|---|
 | Parser exploit → VM ele geçer | key çalınabilir | VM’de key yok |
-| Malware ağa çıkar | API/card erişimi | VM offline |
-| Kart bilgisi | VM’de olabilir | sadece provider/host |
+| Malware ağa çıkar | API erişimi | VM offline |
 | LLM maliyeti | VM’den kontrolsüz | host’ta limitlenebilir |
 | Gerçek malware kodu buluta gider | riskli | lokal 9B / onaylı politika |
 

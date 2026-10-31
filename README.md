@@ -195,13 +195,12 @@ Full records, metrics and caveats:
 
 ## Split VM / host usage (real malware)
 
-For real malware, keep the API key, payment card and network **out of the
-malware-analysis VM**. Run the deterministic tools offline; run the LLM stage on
-the host.
+For real malware, keep the API key and network **out of the malware-analysis
+VM**. Run the deterministic tools offline; run the LLM stage on the host.
 
 ```mermaid
 flowchart LR
-    S["Malware sample"] --> V["Offline analysis VM<br/>Ghidra / capa / FLOSS / YARA / UPX<br/>no key · no card · no network"]
+    S["Malware sample"] --> V["Offline analysis VM<br/>Ghidra / capa / FLOSS / YARA / UPX<br/>no key · no network"]
     V -->|"state.json<br/>functions + findings"| H["Host / LLM side<br/>llm_layer + policy C + verdict<br/>key only here"]
     H --> O["state.llm.json<br/>verdict + report"]
 ```
@@ -272,16 +271,16 @@ python host_analyze.py --state state.json --out state.llm.json --max-workers 8
 
 ### 4. Security model
 
-| Location | API key | Payment card | Network | Sample execution |
-|---|---|---|---|---|
-| Offline analysis VM | **no** | **no** | **no** | **no** (static only) |
-| Host / LLM side | yes (env only) | provider-side | yes | no |
-| `state.json` | no | no | — | — |
+| Location | API key | Network | Sample execution |
+|---|---|---|---|
+| Offline analysis VM | **no** | **no** | **no** (static only) |
+| Host / LLM side | yes (env only) | yes | no |
+| `state.json` | no | — | — |
 
 - A parser exploit in the VM cannot steal the host API key.
 - The VM cannot exfiltrate samples because it is offline.
 - If you must run the host script inside another VM, keep it separate from the
-  malware VM and do not put a card inside either VM.
+  malware VM; API and network isolation are what matter.
 - Full threat model and transfer rules: [`sandbox/README.md`](sandbox/README.md).
 
 ---
