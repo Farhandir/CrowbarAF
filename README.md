@@ -209,6 +209,27 @@ python main.py --serve                     # UI/API at http://127.0.0.1:8000
 python report.py <state.json> --format md --out reports/
 ```
 
+### Split VM / host mode (recommended for real malware)
+
+Keep the API key and network out of the malware-analysis VM:
+
+```bash
+# Offline analysis VM: deterministic tools only, no LLM, no DB, no key
+python main.py sample.bin --no-llm --no-db --out state.json
+# or: ./sandbox/run_offline_analysis.sh sample.bin /out/state.json
+
+# Host: LLM + policy C + verdict; key only in the host environment
+CROWBAR_LLM_PROVIDER=ollama CROWBAR_LLM_MODEL=qwen2.5-coder:7b \
+  python host_analyze.py --state state.json --out state.llm.json
+```
+
+- The VM never sees `CROWBAR_LLM_API_KEY`, a card, or the network.
+- `host_analyze.py` validates the state, runs the LLM layer, recomputes the
+  verdict, writes the report, and never executes the sample.
+- Real malware: use a local model first. Sending real-malware code to a cloud
+  API is a separate ToS/privacy decision.
+- Full threat model and transfer rules: [`sandbox/README.md`](sandbox/README.md).
+
 ### Using OpenCode Go (OpenAI-compatible)
 
 ```bash
@@ -246,6 +267,8 @@ Full setup: [`docs/SETUP.md`](docs/SETUP.md).
 ```text
 CrowbarAF/
 ├── main.py / graph.py / nodes.py    # LangGraph pipeline
+├── host_analyze.py                  # host-side LLM stage (split mode)
+├── sandbox/                         # offline VM scripts + threat model
 ├── llm_layer/                       # context, prompts, verifier, verdict
 ├── export_functions.py              # Ghidra: priority + IoC xref
 ├── db.py / report.py                # SQLite + MD/HTML/JSON

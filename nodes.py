@@ -49,6 +49,10 @@ KNOWN_MALWARE_META_KEY = "classification"
 KNOWN_MALWARE_META_VALUE = "known_malware"
 
 
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 # --------------------------------------------------------------------------- #
 # Yardımcı (saf) mantık: dış araç gerektirmez, test edilebilir.
 # --------------------------------------------------------------------------- #
@@ -1540,8 +1544,15 @@ def ai_extractor_agent(state: AgentState) -> dict[str, Any]:
 
 
 def ai_reverser_agent(state: AgentState) -> dict[str, Any]:
-    """Decompile edilmiş kodu okuyup niyet tespiti yapar (LLM katmanı)."""
+    """Decompile edilmiş kodu okuyup niyet tespiti yapar (LLM katmanı).
+
+    ``CROWBAR_SKIP_LLM=1`` (veya ``main.py --no-llm``) ile hiçbir LLM
+    istemcisi oluşturulmaz; offline VM deterministik state üretir.
+    """
     logger.info("[ai_reverser_agent]")
+    if _env_flag("CROWBAR_SKIP_LLM"):
+        logger.info("[ai_reverser_agent] atlandı (CROWBAR_SKIP_LLM=1)")
+        return {}
     from llm_layer.nodes import run_reverser
     return run_reverser(state)
 
@@ -1563,6 +1574,9 @@ def db_writer_node(state: AgentState) -> dict[str, Any]:
     hataları akışı çökertmez; loglanır. State değiştirilmez (``{}``).
     """
     logger.info("[db_writer_node]")
+    if _env_flag("CROWBAR_SKIP_DB"):
+        logger.info("[db_writer_node] atlandı (CROWBAR_SKIP_DB=1)")
+        return {}
     sha256 = state.sample.sha256
     if not sha256:
         logger.warning("[db_writer_node] sha256 boş; veritabanına yazılmadı")

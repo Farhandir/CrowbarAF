@@ -446,9 +446,17 @@ def main() -> None:
     parser.add_argument("--serve", action="store_true", help="Web arayüzünü ve API'yi başlat")
     parser.add_argument("--host", default="127.0.0.1", help="--serve için adres (varsayılan: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="--serve için port (varsayılan: 8000)")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="LLM çağrısı yapmadan deterministik state üret (offline VM)")
+    parser.add_argument("--no-db", action="store_true", help="SQLite yazmayı atla (offline VM)")
+    parser.add_argument("--out", help="State JSON dosyası (verilmezse stdout)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if args.no_llm:
+        os.environ["CROWBAR_SKIP_LLM"] = "1"
+    if args.no_db:
+        os.environ["CROWBAR_SKIP_DB"] = "1"
 
     if args.serve:
         import uvicorn
@@ -465,7 +473,17 @@ def main() -> None:
         parser.error("file_path gerekli")
 
     result = compiled.invoke(AgentState(file_path=args.file_path))
-    print(AgentState(**result).model_dump_json(indent=2))
+    text = AgentState(**result).model_dump_json(indent=2)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        try:
+            os.chmod(args.out, 0o600)
+        except OSError:
+            pass
+        logger.info("[main] state yazıldı: %s", args.out)
+    else:
+        print(text)
 
 
 if __name__ == "__main__":

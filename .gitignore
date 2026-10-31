@@ -5,3 +5,10 @@ __pycache__/
 runs/
 *.db
 reports/
+
+# Split VM/host artifacts: may contain real-malware strings/code
+state_real_*.json
+*.llm.json
+sandbox/out/
+sandbox/samples/
+sandbox/state*.json
