@@ -401,9 +401,12 @@ verdict was `malicious` — a false positive, with no LLM involvement.
 
 - **No malicious FP** on benign; the injected payload stays malicious and is
   caught.
-- Threshold is **2.8× cheaper in tokens** but **~13× slower** on 100 functions
-  (many per-function calls). Parallelize `CROWBAR_LLM_MAX_WORKERS` before drawing
-  latency conclusions.
+- Threshold is **2.8× cheaper in tokens** but **~13× slower** at 1 worker on 100
+  functions (many per-function calls).
+- **Parallelization (2026-10-31):** 8 workers cut latency **218 → 66 s**
+  (injected) and **195.5 → 54.3 s** (benign), with the same verdicts, payload
+  result and ~19k tokens. Still 3–4× slower than naive at 100 functions, but the
+  gap is now latency, not a blocker.
 - Benign is still `needs_review` (56 medium capa/import/IoC signals), not
   `no_evidence`. If that alert load is too high, move to option C (two-signal
   corroboration for `malicious`).

@@ -1,0 +1,1306 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "sample": {
+    "payload_url": null,
+    "has_payload": false,
+    "payload_offset": null,
+    "n_functions": 100,
+    "chars": 164354
+  },
+  "findings": [
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encrypt data using Salsa20 or ChaCha",
+      "address": "0x201b81e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create thread",
+      "address": "0x201bc6b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "calculate modulo 256 via x86 assembly",
+      "address": "0x201ce30",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encrypt data using RC4 PRGA",
+      "address": "0x202003d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "set file attributes",
+      "address": "0x20223b3",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get system information on Linux",
+      "address": "0x202333b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get current PID on Linux",
+      "address": "0x2025589",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get current PID on Linux",
+      "address": "0x20255ae",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get current PID on Linux",
+      "address": "0x20262f4",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "calculate modulo 256 via x86 assembly",
+      "address": "0x2053ac5",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encrypt data using RC4 PRGA",
+      "address": "0x206a65f",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2082064",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x20826eb",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x20883e1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2088730",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x20cc840",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encrypt data using RC4 PRGA",
+      "address": "0x20d6fc0",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "calculate modulo 256 via x86 assembly",
+      "address": "0x20f9a5a",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "parse credit card information",
+      "address": "0x20fb372",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21140a4",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114107",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21141a7",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114361",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21143a2",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21143e5",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114440",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114495",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21144dc",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114532",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114573",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21145c2",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x211461a",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x211466c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21146df",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x211473e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2114794",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21147e5",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encrypt data using speck",
+      "address": "0x21148d8",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "hash data using SHA1",
+      "address": "0x211925c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encrypt data using RC4 PRGA",
+      "address": "0x211b815",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "encode data using Base64",
+      "address": "0x211c678",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x2121b9c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2121bc1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create directory",
+      "address": "0x2121eb5",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create directory",
+      "address": "0x212205d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "delete file on Linux",
+      "address": "0x21220ed",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "change file permission on Linux",
+      "address": "0x21221b0",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2122209",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2122271",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "change file permission on Linux",
+      "address": "0x21222d0",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "set file attributes",
+      "address": "0x2122344",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2123df7",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2126790",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212758e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x21282ab",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2128745",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x21288fd",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2129196",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2129915",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212a010",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212a29c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212b0aa",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212b646",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212be30",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x212beb6",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x21308b1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x213106e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2132a0c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2132aa4",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2132b16",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "terminate process",
+      "address": "0x2132b1d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2132b5c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2132db7",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x2132dd9",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x2132f3e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x21330ce",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get hostname",
+      "address": "0x2133257",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x21332c1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "calculate modulo 256 via x86 assembly",
+      "address": "0x2133447",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "calculate modulo 256 via x86 assembly",
+      "address": "0x2133462",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "calculate modulo 256 via x86 assembly",
+      "address": "0x213346e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "parse credit card information",
+      "address": "0x213368c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x213368c",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "execute command",
+      "address": "0x21365a3",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x21365a3",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x21365a3",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write and execute a file",
+      "address": "0x21365a3",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2136770",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21367e9",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x213685e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x213693b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "delete file on Linux",
+      "address": "0x2136b3b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2138079",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get current PID on Linux",
+      "address": "0x2138701",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x2138701",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2138763",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x21396fa",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x213a99e",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x213c07b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x213c0a0",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "check file permission on Linux",
+      "address": "0x213c366",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x213c366",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x213c409",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x213c6cb",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x213c763",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "check file permission on Linux",
+      "address": "0x213ce77",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x213ce77",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x213de47",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x213e0f6",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x213ec7b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "check file permission on Linux",
+      "address": "0x213f0f2",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "execute command",
+      "address": "0x213f31f",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "check file permission on Linux",
+      "address": "0x21404f6",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "delete file on Linux",
+      "address": "0x214050a",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2140ccb",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x214184d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2141cc1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x214216b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x214216b",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create process on Linux",
+      "address": "0x21429b8",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2142cb8",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write and execute a file",
+      "address": "0x2146bca",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2146e09",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create process on Linux",
+      "address": "0x214729d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x21474b6",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2147661",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2147c8d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2147ccf",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2147cf4",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "execute command",
+      "address": "0x2148850",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference SQL statements",
+      "address": "0x2148850",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "set current directory",
+      "address": "0x2148850",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "set registry value",
+      "address": "0x2148850",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create process on Linux",
+      "address": "0x214e737",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get current user on Linux",
+      "address": "0x2154981",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x2154981",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get password database entry on Linux",
+      "address": "0x21549df",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "check file permission on Linux",
+      "address": "0x2154a88",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x2154a88",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create or open file",
+      "address": "0x2154c8d",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "terminate process",
+      "address": "0x2154d87",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "check file permission on Linux",
+      "address": "0x2155061",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x2155061",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "read file on Linux",
+      "address": "0x2155061",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "terminate process",
+      "address": "0x2155061",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "get current PID on Linux",
+      "address": "0x21551ac",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x215569a",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x2156047",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "write file on Linux",
+      "address": "0x21579c7",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "linked against sqlite3",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "reference Base64 string",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1222 - File and Directory Permissions Modification (Defense Evasion)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1027 - Obfuscated Files or Information (Defense Evasion)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1082 - System Information Discovery (Discovery)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1213 - Data from Information Repositories (Collection)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1033 - System Owner/User Discovery (Discovery)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0058 - Modulo (Data)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0052 - Writes File (File System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0016 - Create File (File System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0038 - Create Thread (Process)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0050 - Set File Attributes (File System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0047 - Delete File (File System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0017 - Create Process (Process)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0027.009 - Encrypt Data::RC4 (Cryptography)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0021.004 - Generate Pseudo-random Sequence::RC4 PRGA (Cryptography)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0019 - Check String (Data)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "E1027.m05 - Obfuscated Files or Information::Encryption-Standard Algorithm (Defense Evasion)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0029.002 - Cryptographic Hash::SHA1 (Cryptography)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "E1027.m02 - Obfuscated Files or Information::Encoding-Standard Algorithm (Defense Evasion)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0026.001 - Encode Data::Base64 (Data)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0051 - Read File (File System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0046 - Create Directory (File System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0018 - Terminate Process (Process)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "E1082 - System Information Discovery (Discovery)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "B0023 - Install Additional Program (Execution)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0036.001 - Registry::Set Registry Key (Operating System)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "imphash",
+      "kind": "grouping_key",
+      "value": "6c1ae700a5c3a1b4ecd6a67859f53ab9",
+      "address": "",
+      "confidence": 1.0
+    }
+  ],
+  "results": {
+    "naive_raw": [
+      {
+        "payload_url": null,
+        "has_payload": false,
+        "payload_offset": null,
+        "n_functions": 100,
+        "chars": 164354,
+        "ok": true,
+        "suspicious": false,
+        "verdict": "no_evidence",
+        "payload_found": false,
+        "payload_in_context": false,
+        "false_positive": false,
+        "prompt_tokens": 53505,
+        "completion_tokens": 1398,
+        "cost_usd": 0,
+        "billing_source": "go",
+        "allowance": 0.00531873,
+        "finish_reason": "stop",
+        "truncated": false,
+        "http_status": 200,
+        "time_s": 21.6,
+        "victim": "naive_raw"
+      }
+    ],
+    "crowbar-threshold": [
+      {
+        "payload_url": null,
+        "has_payload": false,
+        "payload_offset": null,
+        "n_functions": 100,
+        "chars": 164354,
+        "ok": true,
+        "verdict": "needs_review",
+        "payload_found": false,
+        "payload_fn_suspicious": null,
+        "payload_in_context": false,
+        "false_positive": false,
+        "analyzed": 32,
+        "coverage": 0.32,
+        "must_include": [],
+        "prompt_tokens": 19374,
+        "completion_tokens": 13448,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.006460749999999999,
+        "truncated": false,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 54.3,
+        "victim": "crowbar-threshold"
+      }
+    ]
+  }
+}

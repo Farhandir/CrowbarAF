@@ -3127,6 +3127,77 @@
         "results/archive/raw/scale_sqlite_benign_deepseek_A2.json"
       ],
       "notes": "A fixes the malicious FP: benign SQLite -> needs_review (56 medium capa/import/IoC, 0 critical); injected -> malicious (YARA + C2 + 1 suspicious function) and the payload is caught. Trivial capa 'contain loop' filtered from findings and priority hints; capa deduped for the verdict. Threshold is 2.8x cheaper but ~13x slower than naive on 100 functions (many per-function calls); parallelize CROWBAR_LLM_MAX_WORKERS next."
+    },
+    {
+      "experiment_id": "parallel_workers_sqlite_20261031",
+      "date": "2026-10-31",
+      "question": "Does per-level parallelism reduce Crowbar latency without changing verdicts?",
+      "dataset": {
+        "name": "sqlite-amalgamation",
+        "kind": "real_elf_payload_vs_benign",
+        "variants": [
+          "sqlite_benign",
+          "sqlite_inj"
+        ],
+        "functions_decompiled": 100
+      },
+      "victim": {
+        "system": "naive_raw vs crowbar-threshold"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "max_decompile": 100,
+        "threshold_total_budget": 12000,
+        "max_workers_1": 1,
+        "max_workers_8": 8,
+        "runs": 1
+      },
+      "metrics": {
+        "injected": {
+          "1_worker": {
+            "tokens": 19381,
+            "time_s": 218.0,
+            "verdict": "malicious",
+            "payload": true
+          },
+          "8_workers": {
+            "tokens": 19014,
+            "time_s": 66.0,
+            "verdict": "malicious",
+            "payload": true,
+            "speedup": "3.3x"
+          }
+        },
+        "benign": {
+          "1_worker": {
+            "tokens": 19329,
+            "time_s": 195.5,
+            "verdict": "needs_review",
+            "fp": false
+          },
+          "8_workers": {
+            "tokens": 19374,
+            "time_s": 54.3,
+            "verdict": "needs_review",
+            "fp": false,
+            "speedup": "3.6x"
+          }
+        },
+        "naive": {
+          "injected_time_s": 17.0,
+          "benign_time_s": 21.6,
+          "injected_tokens": 53940,
+          "benign_tokens": 53505
+        }
+      },
+      "raw_sources": [
+        "results/archive/raw/scale_sqlite_inj_deepseek_A_w8.json",
+        "results/archive/raw/scale_sqlite_benign_deepseek_A_w8.json"
+      ],
+      "notes": "8 workers cut Crowbar latency from 218s to 66s (injected) and 195.5s to 54.3s (benign), with the same verdicts, payload result and ~19k tokens. Naive is still faster at 100 functions (17-22s) but uses 53.5-53.9k tokens. Parallelism is per SCC level; 8 concurrent Go requests were stable."
     }
   ]
 }
