@@ -113,7 +113,7 @@ priority_threshold   fonk=5  coverage=0.38  GT-P=1.00  GT-R=1.00  token=7129
 ```
 
 # 2. Kayıtlar
-Tam liste: `experiments.json` (44 kayıt). Öne çıkanlar:
+Tam liste: `experiments.json` (45 kayıt). Öne çıkanlar:
 
 | experiment_id | Veri | Model | Ana metrik |
 |---|---|---|---|
@@ -127,10 +127,11 @@ Tam liste: `experiments.json` (44 kayıt). Öne çıkanlar:
 | `budget_sweep_strong_obf_qwen8_n1` | güçlü obf | qwen8 | tasarruf ~%87'de doyuyor, recall 1.0 |
 | `s1_scale_ladder_deepseek_v41_flash_go_n1` | sentetik 100–2000 fn | deepseek-v4.1-flash | naive 543k, 2000'de HTTP 400; threshold 904–929 tok |
 | `verdict_policy_a_sqlite_20261029` | gerçek SQLite | deepseek-v4.1-flash | benign `needs_review`, FP yok (token sayıları §11.1 nedeniyle eski) |
-| `parallel_workers_sqlite_20261031` | gerçek SQLite | deepseek-v4.1-flash | 8 worker hızlanma; **token/süre `evidence_channel…` ile güncel** |
+| `parallel_workers_sqlite_20261031` | gerçek SQLite | deepseek-v4.1-flash | 8 worker hızlanma; **token/süre `s3_two_signal…` ile güncel** |
 | `s4_packed_encoded_20261031` | UPX + encoded | deepseek-v4.1-flash | UPX unpack ✅; encoded threshold eski sürümde ❌ |
 | `s4_encoded_decoded_xref_20261031` | encoded pipeline state | deepseek-v4.1-flash | decoded-string xref: payload prio 4→7, iocs, must-include; threshold 2.1k ✅ |
 | `evidence_channel_empty_address_20261031` | gerçek SQLite benign/injected | deepseek-v4.1-flash | `address=""` global bulguları düşürüyordu; düzeltildi; threshold 36.6k, FP yok |
+| `s3_two_signal_global_digest_20261031` | S3 + S4 | deepseek-v4.1-flash | global digest + iki sinyal: threshold 30.8k benign / 34.4k injected, FP yok; encoded 2.0k ✅ |
 
 `superseded_by` alanı, eski bir kaydın hangi düzeltilmiş kayıtla değiştirildiğini
 gösterir; eski kayıtlar silinmez, böylece hata ve düzeltme birlikte görülür.

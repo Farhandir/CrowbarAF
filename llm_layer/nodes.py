@@ -107,8 +107,11 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     packer = (getattr(getattr(state, "sample", None), "packer", "") or "").lower()
     packed = packer not in ("", "none", "unknown") and (
         not functions or all(f.is_library for f in functions))
+    two_signal = os.getenv("CROWBAR_TWO_SIGNAL_MALICIOUS", "1").strip().lower() \
+        not in ("0", "false", "no", "off")
     verdict = compute_verdict(functions, findings, result.summaries,
-                              packed=packed, analysis_failures=result.failures)
+                              packed=packed, analysis_failures=result.failures,
+                              require_two_signals=two_signal)
     return {"source_code": updated, "intent_analysis": intent, "verdict": verdict}
 
 

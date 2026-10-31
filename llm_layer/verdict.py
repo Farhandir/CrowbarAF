@@ -99,6 +99,7 @@ def compute_verdict(
     tool_failures: list[str] | None = None,
     analysis_failures: list[str] | None = None,
     min_coverage: float = 0.8,
+    require_two_signals: bool = True,
 ) -> dict:
     """Compute the file-level verdict with explicit coverage and reasons."""
     summaries = summaries or {}
@@ -119,6 +120,25 @@ def compute_verdict(
     medium = [f for f in _unique_findings([f for f in findings if is_medium_authority(f)])
               if not is_critical_finding(f)]
 
+    # Independent evidence classes. A malicious verdict needs at least one
+    # strong signal (LLM-suspicious function, YARA, or C2-like string) plus a
+    # second independent class. A single strong signal is escalated to review.
+    signals: set[str] = set()
+    if susp:
+        signals.add("llm")
+    if high:
+        signals.add("yara")
+    if low:
+        signals.add("c2")
+    if any((f.source or "").lower() == "capa" for f in medium):
+        signals.add("capa")
+    if any((f.source or "").lower() == "import_combo" for f in medium):
+        signals.add("import_combo")
+    if any((f.source or "").lower() == "ioc" for f in medium):
+        signals.add("ioc")
+    strong = signals & {"llm", "yara", "c2"}
+    two_signal = len(signals) >= 2 and bool(strong)
+
     conflicts = []
     if high or susp:
         conflicts = [
@@ -130,10 +150,17 @@ def compute_verdict(
     unknown_reasons: list[str] = []
     next_actions: list[str] = []
 
-    if susp:
+    if require_two_signals and two_signal:
+        verdict = MALICIOUS
+        reasons.append("corroborated signals: " + ", ".join(sorted(signals)))
+    elif require_two_signals and strong:
+        verdict = NEEDS_REVIEW
+        reasons.append("single strong signal (" + ", ".join(sorted(strong))
+                       + "); corroboration required")
+    elif not require_two_signals and susp:
         verdict = MALICIOUS
         reasons.append(f"{len(susp)} suspicious function(s)")
-    elif high:
+    elif not require_two_signals and high:
         verdict = MALICIOUS
         reasons.append(f"{len(high)} high-authority (YARA) finding(s)")
     elif conflicts:
@@ -202,6 +229,9 @@ def compute_verdict(
             "medium_findings": len(medium),
             "c2_like": len(low),
             "conflicts": len(conflicts),
+            "signals": sorted(signals),
+            "two_signal": two_signal,
+            "single_strong_signal": bool(strong) and not two_signal,
         },
         "critical_findings": [
             {"id": finding_id(f), "source": f.source, "kind": f.kind,

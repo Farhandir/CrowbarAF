@@ -3497,7 +3497,169 @@
         "results/archive/raw/scale_sqlite_benign_deepseek_A_w8.json",
         "results/archive/raw/scale_sqlite_inj_deepseek_A_w8.json"
       ],
-      "notes": "This invalidates only the LLM-prompt/token side of earlier scale_eval --from-state runs that loaded address='' findings; file verdicts came from compute_verdict with the full findings and are unchanged. S1 synthetic ladder had no global findings, so it is unaffected. The benign threshold now analyzes 54/100 functions (global findings boost relevance) and returns needs_review, not malicious: no FP, but higher alert load. Global evidence is repeated per function; a shared file-level digest is the next efficiency target."
+      "notes": "This invalidates only the LLM-prompt/token side of earlier scale_eval --from-state runs that loaded address='' findings; file verdicts came from compute_verdict with the full findings and are unchanged. S1 synthetic ladder had no global findings, so it is unaffected. The benign threshold now analyzes 54/100 functions (global findings boost relevance) and returns needs_review, not malicious: no FP, but higher alert load. Global evidence is repeated per function; a shared file-level digest is the next efficiency target.",
+      "followed_by": "s3_two_signal_global_digest_20261031"
+    },
+    {
+      "experiment_id": "s3_two_signal_global_digest_20261031",
+      "date": "2026-10-31",
+      "question": "Does a compact global digest plus a two-signal malicious policy cut tokens/alert load without losing the payload or adding benign FP?",
+      "dataset": {
+        "name": "gaslighter/s3_sqlite + s4_encoded",
+        "kind": "real_elf_benign_injected + synthetic_encoded_state",
+        "variants": [
+          "sqlite benign",
+          "sqlite injected",
+          "bin_scale_100_0_1_enc"
+        ],
+        "ground_truth": "benign: none; injected/encoded: 192.0.2.1 / http://192.0.2.1:4444/gate.php"
+      },
+      "victim": {
+        "system": "scale_eval --from-state; Crowbar soft/threshold with global-digest and policy C"
+      },
+      "model": {
+        "name": "deepseek-v4.1-flash",
+        "provider": "opencode-go"
+      },
+      "config": {
+        "max_workers": 8,
+        "soft_total_budget": 8000,
+        "threshold_total_budget": 12000,
+        "require_two_signals": true,
+        "global_digest": "critical global lines + medium count; local includes address/value/iocs matches",
+        "runs": 1
+      },
+      "metrics": {
+        "before_corrected_evidence": {
+          "benign": {
+            "soft": {
+              "verdict": "needs_review",
+              "tokens": 27504,
+              "time_s": 72.8
+            },
+            "threshold": {
+              "verdict": "needs_review",
+              "tokens": 36758,
+              "time_s": 103.5
+            }
+          },
+          "injected": {
+            "soft": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 28217,
+              "time_s": 82.6
+            },
+            "threshold": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 36570,
+              "time_s": 91.9
+            }
+          },
+          "encoded": {
+            "soft": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 2518,
+              "time_s": 31.6
+            },
+            "threshold": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 2107,
+              "time_s": 46.2
+            }
+          }
+        },
+        "after_global_digest_two_signal": {
+          "benign": {
+            "naive": {
+              "verdict": "no_evidence",
+              "tokens": 53505,
+              "time_s": 17.4
+            },
+            "soft": {
+              "verdict": "needs_review",
+              "tokens": 22698,
+              "time_s": 83.7,
+              "fp": false
+            },
+            "threshold": {
+              "verdict": "needs_review",
+              "tokens": 30786,
+              "time_s": 107.7,
+              "fp": false
+            }
+          },
+          "injected": {
+            "naive": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 53940,
+              "time_s": 14.2
+            },
+            "soft": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 25822,
+              "time_s": 112.3
+            },
+            "threshold": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 34412,
+              "time_s": 109.8
+            }
+          },
+          "encoded": {
+            "naive": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 1504,
+              "time_s": 18.3
+            },
+            "soft": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 2444,
+              "time_s": 35.6
+            },
+            "threshold": {
+              "verdict": "malicious",
+              "payload": true,
+              "tokens": 2034,
+              "time_s": 50.8
+            }
+          }
+        },
+        "token_reduction": {
+          "benign_threshold_pct": 16.2,
+          "benign_soft_pct": 17.5,
+          "injected_threshold_pct": 5.9,
+          "injected_soft_pct": 8.5,
+          "encoded_threshold_pct": 3.5,
+          "note": "The 19k target was measured while global findings were missing; with evidence present, 30.8k is the current truthful benign threshold."
+        },
+        "policy_c": {
+          "malicious_requires": ">=2 independent signals and >=1 strong signal (llm/yara/c2)",
+          "single_strong_result": "needs_review",
+          "s3_verdicts_unchanged": true,
+          "s3_signals": {
+            "injected": "yara,c2,llm",
+            "benign": "medium only"
+          },
+          "unit_tests": "single YARA / single LLM downgraded to needs_review; YARA+C2 and LLM+capa malicious"
+        }
+      },
+      "raw_sources": [
+        "results/archive/raw/scale_sqlite_benign_deepseek_two_signal.json",
+        "results/archive/raw/scale_sqlite_inj_deepseek_two_signal.json",
+        "results/archive/raw/scale_encoded_two_signal.json",
+        "results/archive/raw/scale_sqlite_benign_deepseek_A_fix.json",
+        "results/archive/raw/scale_sqlite_inj_deepseek_A_fix.json"
+      ],
+      "notes": "Global digest now shows only critical global findings (YARA/C2) plus one medium count; local tier includes address, value-in-code and Ghidra-iocs matches, so the payload URL/IP is local rather than repeated as a global digest. Policy C requires two independent signals for malicious; single YARA or single LLM becomes needs_review. S3 verdicts were already multi-signal, so they did not change; benign has no malicious FP. Token reduction is real but modest: the earlier 19k was missing global evidence, not a valid target. Further reduction requires fewer analyzed functions or local-evidence pruning, not just global-digest compression. Escape hatch: CROWBAR_TWO_SIGNAL_MALICIOUS=0 (or compute_verdict(require_two_signals=False))."
     }
   ]
 }

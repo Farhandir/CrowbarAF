@@ -410,12 +410,15 @@ verdict was `malicious` — a false positive, with no LLM involvement.
   gap is now latency, not a blocker.
   **Evidence correction (same day, §11.1):** those 19k / 54.3 s numbers were
   measured while address-less findings (`address=""`) were silently dropped from
-  the LLM prompt. Corrected runs are **36.6k / 91.9 s** (injected) and
-  **36.8k / 103.5 s** (benign). The 8-worker speedup remains, but the truthful
-  token advantage is **1.47×**, not 2.8×.
+  the LLM prompt. Corrected runs were **36.6k / 91.9 s** (injected) and
+  **36.8k / 103.5 s** (benign); after the shared global digest + policy C
+  (§11.2) the final numbers are **34.4k / 109.8 s** (injected) and
+  **30.8k / 107.7 s** (benign). Truthful token advantage: **1.57× / 1.74×**,
+  not 2.8×.
 - Benign is still `needs_review` (56 medium capa/import/IoC signals; 54/100
-  functions analyzed), not `no_evidence`. If that alert load is too high, move
-  to option C (two-signal corroboration for `malicious`).
+  functions analyzed), not `no_evidence`. Policy C now prevents a single
+  YARA/LLM/C2 signal from producing `malicious`; benign alert load remains a
+  review-policy decision.
 
 ## 11. S4 — packing and encoded strings (2026-10-31)
 
@@ -517,13 +520,62 @@ Corrected S3 real-SQLite runs (same states, 8 workers):
 No benign false positive (`needs_review`, not `malicious`), payload caught in
 both modes. The truthful threshold/naive ratio is **1.47×**, not the previously
 reported 2.8×; earlier 19k numbers were missing global evidence. S1 is
-unaffected (the synthetic ladder had no global findings). Global evidence is
-currently repeated per function; a shared file-level digest is the next
-efficiency target.
+unaffected (the synthetic ladder had no global findings). Global evidence was
+previously repeated per function; §11.2 replaces it with a compact shared digest.
 
 Raw records: `results/archive/raw/scale_encoded_fixed_deepseek.json`,
 `scale_sqlite_benign_deepseek_A_fix.json`,
 `scale_sqlite_inj_deepseek_A_fix.json`; archive IDs
 `s4_encoded_decoded_xref_20261031` and
 `evidence_channel_empty_address_20261031`.
+
+### 11.2 Shared global digest + two-signal policy (2026-10-31)
+
+**Global digest.** Per-function context now uses:
+
+- a **local** tier: findings whose address matches, whose value appears in the
+  code, or whose value matches the function's Ghidra `iocs`;
+- a **compact global** tier: only critical address-less findings (YARA/C2) plus a
+  single `"N more global findings (medium, not repeated per function)"` line.
+
+This removes the 177/187 medium global findings from every prompt while keeping
+the payload URL/IP local and the critical YARA/C2 evidence visible. The file
+verdict still evaluates every finding.
+
+**Policy C (two signals).** `malicious` now requires at least **two independent
+signal classes** and at least one strong class:
+
+| signals | verdict |
+|---|---|
+| `yara` + `c2` / `llm` / `capa` / `import_combo` | `malicious` |
+| `llm` + `c2` / `capa` / `import_combo` | `malicious` |
+| `c2` + `capa` / `import_combo` | `malicious` |
+| only `yara`, only `llm`, or only `c2` | `needs_review` |
+| only medium (`capa` + `import_combo`) | `needs_review` |
+
+`CROWBAR_TWO_SIGNAL_MALICIOUS=0` (or `compute_verdict(require_two_signals=False)`)
+restores the old single-signal A behaviour for comparisons.
+
+Corrected S3/S4 runs (8 workers, same states):
+
+| case | victim | verdict | payload | tokens | time |
+|---|---|---|---:|---:|---:|
+| benign | naive | no_evidence | — | 53,505 | 17.4 s |
+| benign | soft | needs_review | — | 22,698 | 83.7 s |
+| benign | threshold | needs_review | — | 30,786 | 107.7 s |
+| injected | naive | malicious | ✅ | 53,940 | 14.2 s |
+| injected | soft | malicious | ✅ | 25,822 | 112.3 s |
+| injected | threshold | malicious | ✅ | 34,412 | 109.8 s |
+| encoded state | threshold | malicious | ✅ | 2,034 | 50.8 s |
+
+- Threshold/naive: **benign 1.74×**, **injected 1.57×** cheaper.
+- Benign has **no malicious FP**; injected and encoded keep the payload.
+- S3 verdicts were already multi-signal, so C did not change them; unit tests
+  cover the single-signal downgrade (single YARA / single LLM → `needs_review`).
+- Token target was **not** 19k: that number came from dropping global evidence.
+  With evidence present, 30.8k is the truthful benign threshold. Further
+  reduction requires fewer analyzed functions or local-evidence pruning, not
+  merely global-digest compression.
+- Global digest still shows critical YARA/C2 in every prompt (a few tokens); the
+  bulk saving comes from collapsing medium findings to one count line.
 

@@ -246,11 +246,12 @@ def select_findings_sections(
     local_share: float = 0.15,
     global_share: float = 0.10,
 ) -> tuple[list[str], list[str], dict]:
-    """Two-tier evidence: address-local findings + a global digest.
+    """Function-local evidence + one compact file-level digest.
 
-    Critical findings bypass the budget (decision recall first). Non-critical
-    findings are ranked and budgeted; the global list is shown once per function
-    as a compact digest, not repeated in full.
+    Any finding that matches this function (address, value-in-code, or Ghidra
+    iocs) is local. Address-less findings that do not match are **not repeated**:
+    critical ones (YARA/C2) are shown once as a short global line; medium ones
+    are collapsed to a count. The file verdict still evaluates every finding.
     """
     candidates = findings_for(fn, findings)
     seen: set[tuple] = set()
@@ -262,21 +263,35 @@ def select_findings_sections(
         seen.add(key)
         deduped.append(f)
 
-    local = [f for f in deduped if f.address and str(f.address) == str(fn.offset)]
-    global_ = [f for f in deduped if not f.address]
+    local = [f for f in deduped if finding_matches_function(f, fn)]
+    global_ = [f for f in deduped if not f.address and not finding_matches_function(f, fn)]
     local_budget = max(64, int(budget_tokens * local_share))
     global_budget = max(64, int(budget_tokens * global_share))
 
     local_lines, local_used, local_tokens, local_flagged, local_crit = _select_one(
         local, fn, local_budget)
-    global_lines, global_used, global_tokens, global_flagged, global_crit = _select_one(
-        global_, fn, global_budget)
 
-    global_dropped = len(global_) - len(global_used)
-    if global_dropped > 0:
-        global_lines = global_lines + [
-            f'DATA: {{"note": "{global_dropped} more global findings in the report"}}'
-        ]
+    global_lines: list[str] = []
+    global_used: list[Finding] = []
+    global_tokens = 0
+    global_flagged = 0
+    global_crit = 0
+    for f in global_:
+        if not is_critical_finding(f):
+            continue
+        line, flagged, tokens = _render_line(f)
+        global_lines.append(line)
+        global_used.append(f)
+        global_tokens += tokens
+        global_flagged += int(flagged)
+        global_crit += 1
+
+    medium_global = [f for f in global_ if not is_critical_finding(f)]
+    if medium_global:
+        note = (f'DATA: {{"note": "{len(medium_global)} more global findings '
+                '(medium, not repeated per function)"}')
+        global_lines.append(note)
+        global_tokens += estimate_tokens(note)
 
     used = local_used + global_used
     dropped = len(deduped) - len(used)
@@ -290,13 +305,15 @@ def select_findings_sections(
         "findings_quarantined": local_flagged + global_flagged,
         "findings_tokens": local_tokens + global_tokens,
         "findings_budget": local_budget + global_budget,
-        "drop_reason": "budget" if dropped else None,
+        "drop_reason": ("global-digest" if medium_global else
+                        ("budget" if dropped else None)),
         "local_total": len(local),
         "local_used": len(local_used),
         "local_dropped": len(local) - len(local_used),
         "global_total": len(global_),
         "global_used": len(global_used),
-        "global_dropped": global_dropped,
+        "global_dropped": len(medium_global),
+        "global_medium_not_repeated": len(medium_global),
         "critical_total": total_critical,
         "critical_used": local_crit + global_crit,
         "critical_over_budget": max(0, total_critical - (local_crit + global_crit)),
