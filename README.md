@@ -365,6 +365,8 @@ CrowbarAF/
 - [`docs/PIPELINE-HANDOFF.md`](docs/PIPELINE-HANDOFF.md) — data contract and TODOs
 - [`docs/HANDOFF-VM-SMOKE.md`](docs/HANDOFF-VM-SMOKE.md) — split-mode VM smoke
   handoff for a teammate (benign samples, no keys)
+- [`docs/HANDOFF-FULL-STUDY.md`](docs/HANDOFF-FULL-STUDY.md) — full remaining
+  study package (items 1–5) with ownership and safety gates
 - [`docs/TOOL-ADDITIONS.md`](docs/TOOL-ADDITIONS.md) — how to add analysis tools
 - [`results/archive/README.md`](results/archive/README.md) — experiment setup,
   records, metrics and pitfalls
