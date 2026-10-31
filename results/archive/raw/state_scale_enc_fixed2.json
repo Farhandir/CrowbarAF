@@ -1,0 +1,524 @@
+{
+  "file_path": "samples/bin_scale_100_0_1_enc",
+  "sample": {
+    "sha256": "911183d75777b489614bf40f6917b656b15ec8ca4faa3cd75792b314511393d3",
+    "file_type": "ELF",
+    "route": "native",
+    "packer": "none",
+    "arch": "x86-64"
+  },
+  "yara_results": [
+    {
+      "rule": "Crowbar_Test_Connecting",
+      "tags": [],
+      "meta": {
+        "description": "Test: baglanti kurma metni"
+      }
+    }
+  ],
+  "extracted_strings": [
+    "192.0.2.1",
+    "http://192.0.2.1:/gate.php"
+  ],
+  "capabilities": {
+    "matched_rules": [
+      "communicate with kernel module via Netlink socket on Linux",
+      "create TCP socket",
+      "create process on Linux",
+      "query environment variable"
+    ],
+    "mitre_attack": [
+      "T1082 - System Information Discovery (Discovery)"
+    ],
+    "malware_behavior": [
+      "C0001.011 - Socket Communication::Create TCP Socket (Communication)",
+      "C0017 - Create Process (Process)",
+      "E1082 - System Information Discovery (Discovery)"
+    ]
+  },
+  "findings": [
+    {
+      "source": "yara",
+      "kind": "rule",
+      "value": "Crowbar_Test_Connecting",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x2001229",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "communicate with kernel module via Netlink socket on Linux",
+      "address": "0x2001327",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create TCP socket",
+      "address": "0x2001327",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create process on Linux",
+      "address": "0x20013a1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1082 - System Information Discovery (Discovery)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0001.011 - Socket Communication::Create TCP Socket (Communication)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0017 - Create Process (Process)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "E1082 - System Information Discovery (Discovery)",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "imphash",
+      "kind": "grouping_key",
+      "value": "fff986af9385fbef59750390714bf228",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "floss",
+      "kind": "ip",
+      "value": "192.0.2.1",
+      "address": "",
+      "confidence": 1.0
+    },
+    {
+      "source": "floss",
+      "kind": "url",
+      "value": "http://192.0.2.1:/gate.php",
+      "address": "",
+      "confidence": 1.0
+    }
+  ],
+  "ghidra_hints": [
+    {
+      "offset": "0x2001229",
+      "rule": "query environment variable"
+    },
+    {
+      "offset": "0x2001327",
+      "rule": "communicate with kernel module via Netlink socket on Linux"
+    },
+    {
+      "offset": "0x2001327",
+      "rule": "create TCP socket"
+    },
+    {
+      "offset": "0x20013a1",
+      "rule": "create process on Linux"
+    }
+  ],
+  "floss_hints": [
+    {
+      "value": "192.0.2.1",
+      "function": 33559081,
+      "program_counter": 33559258
+    },
+    {
+      "value": "http://192.0.2.1:/gate.php",
+      "function": 33559081,
+      "program_counter": 33559326
+    }
+  ],
+  "source_code": [
+    {
+      "offset": "0x101140",
+      "size": 38,
+      "is_library": false,
+      "callees": [
+        "0x113008"
+      ],
+      "xrefs": [
+        "0x410",
+        "0x100018",
+        "0x10f058",
+        "0x10f3a0"
+      ],
+      "decompile_warnings": [],
+      "name": "_start",
+      "priority": 0,
+      "c_code": "\nvoid processEntry _start(undefined8 param_1,undefined8 param_2)\n\n{\n  undefined1 auStack_8 [8];\n  \n  (*(code *)PTR___libc_start_main_00111fd8)(main,param_2,&stack0x00000008,0,0,param_1,auStack_8);\n  do {\n                    /* WARNING: Do nothing block with infinite loop */\n  } while( true );\n}\n\n",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x10144a",
+      "size": 20,
+      "is_library": false,
+      "callees": [
+        "0x101229"
+      ],
+      "xrefs": [
+        "0x10f070",
+        "0x10f450",
+        "0x101158"
+      ],
+      "decompile_warnings": [],
+      "name": "main",
+      "priority": 3,
+      "c_code": "\nundefined8 main(void)\n\n{\n  payload();\n  return 0;\n}\n\n",
+      "capa_hits": [],
+      "iocs": [
+        "192.0.2.1",
+        "http://192.0.2.1:/gate.php"
+      ],
+      "llm_summary": "main simply calls payload() and returns 0; all malicious behavior resides in the callee, which decodes XOR-obfuscated C2 strings, opens a TCP socket, and may spawn /bin/sh."
+    },
+    {
+      "offset": "0x101229",
+      "size": 461,
+      "is_library": false,
+      "callees": [
+        "0x101120",
+        "0x101130",
+        "0x101100",
+        "0x1010f0",
+        "0x101110",
+        "0x1010d0",
+        "0x1010c0",
+        "0x1010e0"
+      ],
+      "xrefs": [
+        "0x10f060",
+        "0x10f410",
+        "0x101452"
+      ],
+      "decompile_warnings": [],
+      "name": "payload",
+      "priority": 7,
+      "c_code": "\nvoid payload(void)\n\n{\n  char *pcVar1;\n  long in_FS_OFFSET;\n  int local_e0;\n  undefined2 local_d8;\n  uint16_t local_d6;\n  in_addr_t local_d4;\n  byte local_c1 [41];\n  byte local_98 [9];\n  undefined1 local_8f;\n  byte local_78 [30];\n  undefined1 local_5a;\n  long local_10;\n  \n  local_10 = *(long *)(in_FS_OFFSET + 0x28);\n  local_c1[0] = 0x6b;\n  local_c1[1] = 99;\n  local_c1[2] = 0x68;\n  local_c1[3] = 0x74;\n  local_c1[4] = 0x6a;\n  local_c1[5] = 0x74;\n  local_c1[6] = 0x68;\n  local_c1[7] = 0x74;\n  local_c1[8] = 0x6b;\n  local_c1[9] = 0x32;\n  local_c1[10] = 0x2e;\n  local_c1[0xb] = 0x2e;\n  local_c1[0xc] = 0x2a;\n  local_c1[0xd] = 0x60;\n  local_c1[0xe] = 0x75;\n  local_c1[0xf] = 0x75;\n  local_c1[0x10] = 0x6b;\n  local_c1[0x11] = 99;\n  local_c1[0x12] = 0x68;\n  local_c1[0x13] = 0x74;\n  local_c1[0x14] = 0x6a;\n  local_c1[0x15] = 0x74;\n  local_c1[0x16] = 0x68;\n  local_c1[0x17] = 0x74;\n  local_c1[0x18] = 0x6b;\n  local_c1[0x19] = 0x60;\n  local_c1[0x1a] = 0x6e;\n  local_c1[0x1b] = 0x6e;\n  local_c1[0x1c] = 0x6e;\n  local_c1[0x1d] = 0x6e;\n  local_c1[0x1e] = 0x75;\n  local_c1[0x1f] = 0x3d;\n  local_c1[0x20] = 0x3b;\n  local_c1[0x21] = 0x2e;\n  local_c1[0x22] = 0x3f;\n  local_c1[0x23] = 0x74;\n  local_c1[0x24] = 0x2a;\n  local_c1[0x25] = 0x32;\n  local_c1[0x26] = 0x2a;\n  for (local_e0 = 0; local_e0 < 9; local_e0 = local_e0 + 1) {\n    local_98[local_e0] = local_c1[local_e0] ^ 0x5a;\n  }\n  local_8f = 0;\n  for (local_e0 = 0; local_e0 < 0x1e; local_e0 = local_e0 + 1) {\n    local_78[local_e0] = local_c1[(long)local_e0 + 9] ^ 0x5a;\n  }\n  local_5a = 0;\n  socket(2,1,0);\n  memset(&local_d8,0,0x10);\n  local_d8 = 2;\n  local_d6 = htons(0x115c);\n  local_d4 = inet_addr((char *)local_98);\n  pcVar1 = getenv(\"CROWBAR_NEVER_SET\");\n  if (pcVar1 != (char *)0x0) {\n    execl(\"/bin/sh\",\"sh\",0);\n  }\n  printf(\"connecting to %s\\n\",local_78);\n  if (local_10 != *(long *)(in_FS_OFFSET + 0x28)) {\n                    /* WARNING: Subroutine does not return */\n    __stack_chk_fail();\n  }\n  return;\n}\n\n",
+      "capa_hits": [],
+      "iocs": [
+        "192.0.2.1",
+        "http://192.0.2.1:/gate.php"
+      ],
+      "llm_summary": "Decodes embedded IP and URL strings using XOR 0x5a, creates an IPv4 TCP socket, configures port 4444 and C2 address, and conditionally executes /bin/sh if an environment variable is present."
+    },
+    {
+      "offset": "0x113008",
+      "size": 1,
+      "is_library": true,
+      "callees": [],
+      "xrefs": [
+        "0x111fd8",
+        "0x10115f"
+      ],
+      "decompile_warnings": [],
+      "name": "__libc_start_main",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x101120",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113050"
+      ],
+      "xrefs": [
+        "0x1013bf"
+      ],
+      "decompile_warnings": [],
+      "name": "execl",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x101130",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113058"
+      ],
+      "xrefs": [
+        "0x10133a"
+      ],
+      "decompile_warnings": [],
+      "name": "socket",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x101100",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113030"
+      ],
+      "xrefs": [
+        "0x101359"
+      ],
+      "decompile_warnings": [],
+      "name": "memset",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x1010f0",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113028"
+      ],
+      "xrefs": [
+        "0x1013da"
+      ],
+      "decompile_warnings": [],
+      "name": "printf",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x101110",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113038"
+      ],
+      "xrefs": [
+        "0x101382"
+      ],
+      "decompile_warnings": [],
+      "name": "inet_addr",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x1010d0",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113018"
+      ],
+      "xrefs": [
+        "0x1013ef"
+      ],
+      "decompile_warnings": [],
+      "name": "__stack_chk_fail",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x1010c0",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113000"
+      ],
+      "xrefs": [
+        "0x3d0",
+        "0x10f050",
+        "0x10f3f8",
+        "0x101397"
+      ],
+      "decompile_warnings": [],
+      "name": "getenv",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    },
+    {
+      "offset": "0x1010e0",
+      "size": 10,
+      "is_library": true,
+      "callees": [
+        "0x113020"
+      ],
+      "xrefs": [
+        "0x10136c"
+      ],
+      "decompile_warnings": [],
+      "name": "htons",
+      "priority": 0,
+      "c_code": "",
+      "capa_hits": [],
+      "iocs": [],
+      "llm_summary": ""
+    }
+  ],
+  "iocs": {
+    "ioc": [
+      "192.0.2.1",
+      "http://192.0.2.1:/gate.php"
+    ]
+  },
+  "intent_analysis": "2 functions summarized; suspicious=2; verified claims=6, unverified=2; tokens=3162. Trace: runs/llm_trace_20261031-223324.json\n- xor_c2_socket_payload (0x101229): Decodes embedded IP and URL strings using XOR 0x5a, creates an IPv4 TCP socket, configures port 4444 and C2 address, and conditionally executes /bin/sh if an en\n- main_calls_payload (0x10144a): main simply calls payload() and returns 0; all malicious behavior resides in the callee, which decodes XOR-obfuscated C2 strings, opens a TCP socket, and may sp",
+  "verdict": {
+    "verdict": "malicious",
+    "reasons": [
+      "2 suspicious function(s)"
+    ],
+    "unknown_reasons": [],
+    "next_actions": [],
+    "coverage": {
+      "total": 3,
+      "analyzed": 2,
+      "skipped": 1,
+      "ratio": 0.667,
+      "min_required": 0.8
+    },
+    "counts": {
+      "suspicious_functions": 2,
+      "unknown_functions": 0,
+      "fail_closed": 0,
+      "critical_findings": 3,
+      "high_authority": 1,
+      "medium_findings": 8,
+      "c2_like": 2,
+      "conflicts": 0
+    },
+    "critical_findings": [
+      {
+        "id": "f_234bdd0caf73",
+        "source": "yara",
+        "kind": "rule",
+        "value": "Crowbar_Test_Connecting",
+        "address": null,
+        "tier": "high"
+      },
+      {
+        "id": "f_3a0a5cb2352a",
+        "source": "floss",
+        "kind": "ip",
+        "value": "192.0.2.1",
+        "address": null,
+        "tier": "c2_like"
+      },
+      {
+        "id": "f_0a7f7c2e2fc8",
+        "source": "floss",
+        "kind": "url",
+        "value": "http://192.0.2.1:/gate.php",
+        "address": null,
+        "tier": "c2_like"
+      }
+    ],
+    "medium_findings": [
+      {
+        "id": "f_c8b19f9e40b8",
+        "source": "capa",
+        "kind": "rule",
+        "value": "query environment variable",
+        "address": "0x2001229",
+        "tier": "medium"
+      },
+      {
+        "id": "f_bae5d3eaea51",
+        "source": "capa",
+        "kind": "rule",
+        "value": "communicate with kernel module via Netlink socket on Linux",
+        "address": "0x2001327",
+        "tier": "medium"
+      },
+      {
+        "id": "f_f7788a61c25e",
+        "source": "capa",
+        "kind": "rule",
+        "value": "create TCP socket",
+        "address": "0x2001327",
+        "tier": "medium"
+      },
+      {
+        "id": "f_d2380a8aa51b",
+        "source": "capa",
+        "kind": "rule",
+        "value": "create process on Linux",
+        "address": "0x20013a1",
+        "tier": "medium"
+      },
+      {
+        "id": "f_b0618918df1f",
+        "source": "capa",
+        "kind": "attack",
+        "value": "T1082 - System Information Discovery (Discovery)",
+        "address": null,
+        "tier": "medium"
+      },
+      {
+        "id": "f_1d8f4590b143",
+        "source": "capa",
+        "kind": "behavior",
+        "value": "C0001.011 - Socket Communication::Create TCP Socket (Communication)",
+        "address": null,
+        "tier": "medium"
+      },
+      {
+        "id": "f_32731e86aa4f",
+        "source": "capa",
+        "kind": "behavior",
+        "value": "C0017 - Create Process (Process)",
+        "address": null,
+        "tier": "medium"
+      },
+      {
+        "id": "f_d1e41049a9bb",
+        "source": "capa",
+        "kind": "behavior",
+        "value": "E1082 - System Information Discovery (Discovery)",
+        "address": null,
+        "tier": "medium"
+      }
+    ],
+    "conflicts": [],
+    "tool_failures": [],
+    "analysis_failures": []
+  },
+  "analysis_report": "# CrowbarAF Analysis Report\n\n- **Verdict:** `malicious`\n- **Coverage:** 2/3 functions (67%)\n- **Evidence items:** 12\n- **Summarized functions:** 2\n- **Overall confidence:** high\n- **Reasons:** 2 suspicious function(s)\n\n## Deterministic evidence\n- yara/rule: Crowbar_Test_Connecting\n- capa/rule: query environment variable @ 0x2001229\n- capa/rule: communicate with kernel module via Netlink socket on Linux @ 0x2001327\n- capa/rule: create TCP socket @ 0x2001327\n- capa/rule: create process on Linux @ 0x20013a1\n- capa/attack: T1082 - System Information Discovery (Discovery)\n- capa/behavior: C0001.011 - Socket Communication::Create TCP Socket (Communication)\n- capa/behavior: C0017 - Create Process (Process)\n- capa/behavior: E1082 - System Information Discovery (Discovery)\n- imphash/grouping_key: fff986af9385fbef59750390714bf228\n- floss/ip: 192.0.2.1\n- floss/url: http://192.0.2.1:/gate.php\n\n## Function summaries\n- `0x10144a` main: main simply calls payload() and returns 0; all malicious behavior resides in the callee, which decodes XOR-obfuscated C2 strings, opens a TCP socket, and may sp\n- `0x101229` payload: Decodes embedded IP and URL strings using XOR 0x5a, creates an IPv4 TCP socket, configures port 4444 and C2 address, and conditionally executes /bin/sh if an en",
+  "route_flag": "native"
+}

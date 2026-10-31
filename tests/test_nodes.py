@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nodes import _collect_floss_strings, filter_iocs, summarize_capa
+from nodes import _collect_floss_hints, _collect_floss_strings, filter_iocs, summarize_capa
 
 
 # --------------------------------------------------------------------------- #
@@ -84,9 +84,8 @@ class TestCollectFlossStrings:
             }
         }
         pool = _collect_floss_strings(report)
-        # static is included (run_floss filters it with filter_iocs); tight is not.
-        assert pool == ["10.0.0.1", "a.exe", "http://static.com"]
-        assert "tight.dll" not in pool
+        # static and tight are included; run_floss filters them with filter_iocs.
+        assert pool == ["10.0.0.1", "a.exe", "tight.dll", "http://static.com"]
 
     def test_accepts_plain_strings_and_dicts(self) -> None:
         report = {"strings": {"decoded_strings": ["plain.bat"], "stack_strings": [{"string": "b.exe"}]}}
@@ -227,3 +226,15 @@ class TestSummarizeCapa:
         ]
         assert result["mitre_attack"] == ["T1055.012 - Process Injection::Process Hollowing (Defense Evasion)"]
         assert result["malware_behavior"] == []
+
+
+def test_collect_floss_hints_keeps_function_metadata():
+    report = {"strings": {
+        "tight_strings": [{"string": "http://x", "function": 0x401000, "program_counter": 0x401010}],
+        "decoded_strings": [{"string": "10.0.0.1", "decoded_at": 0x402000}],
+        "static_strings": [{"string": "http://static"}],
+    }}
+    hints = _collect_floss_hints(report)
+    assert any(h["value"] == "http://x" and h.get("function") == 0x401000 for h in hints)
+    assert any(h["value"] == "10.0.0.1" and h.get("decoded_at") == 0x402000 for h in hints)
+    assert all(h["value"] != "http://static" for h in hints)

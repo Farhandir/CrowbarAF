@@ -111,7 +111,7 @@ def findings_for(fn: FunctionInfo, findings: list[Finding]) -> list[Finding]:
     """Findings that match this function's address (or are address-less/global)."""
     out = []
     for f in findings:
-        if f.address is None or f.address == fn.offset:
+        if not f.address or f.address == fn.offset:
             out.append(f)
     return out
 

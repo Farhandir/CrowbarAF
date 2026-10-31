@@ -135,6 +135,11 @@ class AgentState(BaseModel):
         description="Capa düğümünün Ghidra'ya decompile için aktardığı hedef adresler.",
     )
 
+    floss_hints: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="FLOSS decoded/tight string -> fonksiyon/adres metadata'sı (Ghidra xref için).",
+    )
+
     # Decompile edilmiş fonksiyonlar (Ghidra; fonksiyon bazlı Pseudo-C + LLM özeti)
     source_code: list[DecompiledFunction] = Field(
         default_factory=list,

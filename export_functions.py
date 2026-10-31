@@ -282,23 +282,25 @@ def write_results(path, results):
 
 
 def read_input(path):
-    """(hints, findings, combo_apis) döndürür; hata durumunda boş değerler."""
+    """(hints, findings, combo_apis, decoded_hints) döndürür; hata: boş değerler."""
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except Exception as exc:
         printerr("[export_functions] girdi okunamadi: " + str(exc))  # noqa: F821 (Ghidra)
-        return [], [], {}
+        return [], [], {}, []
     if not isinstance(data, dict):
-        return [], [], {}
+        return [], [], {}, []
 
     hints = data.get("hints")
     findings = data.get("findings")
     combo_apis = data.get("combo_apis")
+    decoded_hints = data.get("decoded_hints")
     return (
         hints if isinstance(hints, list) else [],
         findings if isinstance(findings, list) else [],
         combo_apis if isinstance(combo_apis, dict) else {},
+        decoded_hints if isinstance(decoded_hints, list) else [],
     )
 
 
@@ -426,6 +428,81 @@ def map_iocs_to_functions(target_iocs):
                  f"refs={refs_seen} hits={len(hits)}")  # noqa: F821
     return hits
 
+
+FLOSS_PIE_BASE = 0x2000000  # FLOSS/PyVivisect emulation base for PIE samples
+
+
+def _ghidra_candidates(raw):
+    """Address candidates: raw, and (for PIE) FLOSS base 0x2000000 -> Ghidra image base."""
+    if raw is None:
+        return []
+    try:
+        n = int(raw, 16) if isinstance(raw, str) and raw.lower().startswith("0x") else int(raw)
+    except Exception:
+        return []
+    out = []
+    try:
+        a = toAddr(n)  # noqa: F821
+        if a is not None:
+            out.append(a)
+    except Exception:
+        pass
+    if n >= FLOSS_PIE_BASE:
+        try:
+            base = currentProgram.getImageBase().getOffset()  # noqa: F821
+            a = toAddr(n - FLOSS_PIE_BASE + base)  # noqa: F821
+            if a is not None:
+                out.append(a)
+        except Exception:
+            pass
+    return out
+
+
+def map_decoded_hints_to_functions(decoded_hints):
+    """FLOSS decoded/tight/stack metadata'sını fonksiyonlara bağlar.
+
+    ``function`` / ``decoded_at`` / ``program_counter`` adreslerini içeren
+    fonksiyonu bulur; decoder helper ise doğrudan çağıranları da (1 hop) ekler.
+    ``address`` verilmişse string referanslarını da izler.
+    """
+    hits = {}
+    if not decoded_hints:
+        return hits
+    try:
+        from ghidra.util.task import TaskMonitor  # noqa: F401
+
+        ref_manager = currentProgram.getReferenceManager()  # noqa: F821
+        func_manager = currentProgram.getFunctionManager()  # noqa: F821
+        for hint in decoded_hints:
+            if not isinstance(hint, dict):
+                continue
+            value = str(hint.get("value", "")).strip()
+            if not value:
+                continue
+            funcs = []
+            for key in ("function", "decoded_at", "program_counter"):
+                for addr in _ghidra_candidates(hint.get(key)):
+                    func = func_manager.getFunctionContaining(addr)
+                    if func is not None:
+                        funcs.append(func)
+            for addr in _ghidra_candidates(hint.get("address")):
+                for ref in ref_manager.getReferencesTo(addr):
+                    f = _function_for_ref(ref, ref_manager, func_manager)
+                    if f is not None:
+                        funcs.append(f)
+            for func in list(funcs):
+                try:
+                    for caller in func.getCallingFunctions(TaskMonitor.DUMMY):
+                        funcs.append(caller)
+                except Exception:
+                    pass
+            for func in funcs:
+                add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), [value])
+    except Exception as exc:
+        printerr("[export_functions] decoded hint eslemesi basarisiz: " + str(exc))  # noqa: F821
+    return hits
+
+
 def get_callees(func):
     """Çağrılan fonksiyonlar: (hex adresler, isimler). JSON'a sadece adresler yazılır."""
     from ghidra.util.task import TaskMonitor
@@ -547,12 +624,15 @@ def main():
 
     results = []
     try:
-        hints, findings, combo_apis = read_input(input_json_path)
+        hints, findings, combo_apis, decoded_hints = read_input(input_json_path)
         hits = map_hints_to_functions(hints)
         combo_set = active_combo_apis(findings, combo_apis)
 
         ioc_hits = map_iocs_to_functions(collect_target_iocs(findings))
-        println("[export_functions] %d fonksiyon IoC string'ine referans veriyor" % len(ioc_hits))  # noqa: F821
+        decoded_hits = map_decoded_hints_to_functions(decoded_hints)
+        for entry, values in decoded_hits.items():
+            add_ioc_hits(ioc_hits, entry, values)
+        println("[export_functions] %d fonksiyon IoC/decoded string'ine referans veriyor" % len(ioc_hits))  # noqa: F821
 
         records = collect_records(hits, combo_set, ioc_hits)
         propagate_priority(records)

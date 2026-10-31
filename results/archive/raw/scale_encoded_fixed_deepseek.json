@@ -1,0 +1,185 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "sample": {
+    "payload_url": "192.0.2.1",
+    "has_payload": true,
+    "payload_offset": "0x10144a",
+    "n_functions": 3,
+    "chars": 2390
+  },
+  "findings": [
+    {
+      "source": "yara",
+      "kind": "rule",
+      "value": "Crowbar_Test_Connecting",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "query environment variable",
+      "address": "0x2001229",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "communicate with kernel module via Netlink socket on Linux",
+      "address": "0x2001327",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create TCP socket",
+      "address": "0x2001327",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "rule",
+      "value": "create process on Linux",
+      "address": "0x20013a1",
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "attack",
+      "value": "T1082 - System Information Discovery (Discovery)",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0001.011 - Socket Communication::Create TCP Socket (Communication)",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "C0017 - Create Process (Process)",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "capa",
+      "kind": "behavior",
+      "value": "E1082 - System Information Discovery (Discovery)",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "imphash",
+      "kind": "grouping_key",
+      "value": "fff986af9385fbef59750390714bf228",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "floss",
+      "kind": "ip",
+      "value": "192.0.2.1",
+      "address": null,
+      "confidence": 1.0
+    },
+    {
+      "source": "floss",
+      "kind": "url",
+      "value": "http://192.0.2.1:/gate.php",
+      "address": null,
+      "confidence": 1.0
+    }
+  ],
+  "results": {
+    "naive_raw": [
+      {
+        "payload_url": "192.0.2.1",
+        "has_payload": true,
+        "payload_offset": "0x10144a",
+        "n_functions": 3,
+        "chars": 2390,
+        "ok": true,
+        "suspicious": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_in_context": false,
+        "false_positive": false,
+        "prompt_tokens": 1504,
+        "completion_tokens": 1215,
+        "cost_usd": 0,
+        "billing_source": "go",
+        "allowance": 0.00044857,
+        "finish_reason": "stop",
+        "truncated": false,
+        "http_status": 200,
+        "time_s": 12.8,
+        "victim": "naive_raw"
+      }
+    ],
+    "crowbar-soft": [
+      {
+        "payload_url": "192.0.2.1",
+        "has_payload": true,
+        "payload_offset": "0x10144a",
+        "n_functions": 3,
+        "chars": 2390,
+        "ok": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_fn_suspicious": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "analyzed": 3,
+        "coverage": 1.0,
+        "must_include": [
+          "0x101229",
+          "0x10144a"
+        ],
+        "prompt_tokens": 2518,
+        "completion_tokens": 1487,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.00063775,
+        "truncated": true,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 31.6,
+        "victim": "crowbar-soft"
+      }
+    ],
+    "crowbar-threshold": [
+      {
+        "payload_url": "192.0.2.1",
+        "has_payload": true,
+        "payload_offset": "0x10144a",
+        "n_functions": 3,
+        "chars": 2390,
+        "ok": true,
+        "verdict": "malicious",
+        "payload_found": true,
+        "payload_fn_suspicious": true,
+        "payload_in_context": true,
+        "false_positive": false,
+        "analyzed": 2,
+        "coverage": 0.667,
+        "must_include": [
+          "0x101229",
+          "0x10144a"
+        ],
+        "prompt_tokens": 2107,
+        "completion_tokens": 1147,
+        "cost_usd": 0.0,
+        "billing_source": "go",
+        "allowance": 0.00044448999999999997,
+        "truncated": true,
+        "http_status": 200,
+        "failures": [],
+        "time_s": 46.2,
+        "victim": "crowbar-threshold"
+      }
+    ]
+  }
+}

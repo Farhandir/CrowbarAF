@@ -599,7 +599,7 @@ class TestLoadPe:
 class TestStaticFeatureNodePeMetadata:
     @pytest.fixture(autouse=True)
     def _tools(self, monkeypatch):
-        monkeypatch.setattr(nodes, "run_floss", lambda p: [])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
         monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
         monkeypatch.setattr(nodes, "extract_imports", lambda p: [])
         monkeypatch.setattr(nodes, "compute_imphash", lambda p, i: "")
@@ -672,7 +672,7 @@ class TestRealPeFile:
 
     def test_full_node_on_real_pe_produces_metadata_findings(self, monkeypatch) -> None:
         pytest.importorskip("pefile")
-        monkeypatch.setattr(nodes, "run_floss", lambda p: [])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
         monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
         out = static_feature_node(AgentState(file_path=r"C:\Windows\System32\cmd.exe"))
         meta = {f.kind: f.value for f in out["findings"] if f.source == "pe_metadata"}
@@ -890,7 +890,7 @@ class TestFindingModel:
 # --------------------------------------------------------------------------- #
 class TestStaticFeatureNode:
     def test_collects_all_sources(self, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "run_floss", lambda p: ["http://c2.example/x"])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: (["http://c2.example/x"], []))
         monkeypatch.setattr(
             nodes,
             "run_capa",
@@ -920,7 +920,7 @@ class TestStaticFeatureNode:
 
     def test_elf_sample_gets_combo_imphash_and_elf_entropy_but_no_raw_imports(self, tmp_path, monkeypatch) -> None:
         path, readelf_s = _make_elf_with_sections(tmp_path)
-        monkeypatch.setattr(nodes, "run_floss", lambda p: [])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
         monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
 
         def run(cmd, **kwargs):
@@ -945,7 +945,7 @@ class TestStaticFeatureNode:
     def test_pe_sample_gets_imphash_from_pefile(self, tmp_path, monkeypatch) -> None:
         path = tmp_path / "a.exe"
         path.write_bytes(b"MZ" + b"\x00" * 60)
-        monkeypatch.setattr(nodes, "run_floss", lambda p: [])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
         monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
         pe = _FakePE(sections=[(".text", 5.0), (".upx", 7.9)], imports=[["VirtualAlloc"]], imphash="cafebabe")
         _install_fake_pefile(monkeypatch, pe)
@@ -958,7 +958,7 @@ class TestStaticFeatureNode:
         assert not any(f.source == "import" for f in out["findings"])
 
     def test_all_tools_failing_gives_empty_findings(self, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "run_floss", lambda p: [])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
         monkeypatch.setattr(nodes, "run_capa", lambda p: ({"error": "timeout"}, []))
         monkeypatch.setattr(nodes, "extract_imports", lambda p: [])
         monkeypatch.setattr(nodes, "section_entropy", lambda p: {})
@@ -967,7 +967,7 @@ class TestStaticFeatureNode:
         assert out["ghidra_hints"] == []
 
     def test_does_not_duplicate_findings_from_entry_node(self, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "run_floss", lambda p: [])
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
         monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
         monkeypatch.setattr(nodes, "extract_imports", lambda p: [])
         monkeypatch.setattr(nodes, "section_entropy", lambda p: {})

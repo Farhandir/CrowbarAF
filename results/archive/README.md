@@ -113,7 +113,7 @@ priority_threshold   fonk=5  coverage=0.38  GT-P=1.00  GT-R=1.00  token=7129
 ```
 
 # 2. Kayıtlar
-Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
+Tam liste: `experiments.json` (44 kayıt). Öne çıkanlar:
 
 | experiment_id | Veri | Model | Ana metrik |
 |---|---|---|---|
@@ -125,6 +125,15 @@ Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
 | `fidelity_strong_obf_anon_qwen8_n1` | güçlü obf (13, anonim) | qwen8 | threshold **P=1.0, R=1.0, %91** |
 | `fidelity_strong_obf_lowprio_qwen8_n1` | payload priority 0 | qwen8 | threshold **R=0.67** (payload kaçtı) |
 | `budget_sweep_strong_obf_qwen8_n1` | güçlü obf | qwen8 | tasarruf ~%87'de doyuyor, recall 1.0 |
+| `s1_scale_ladder_deepseek_v41_flash_go_n1` | sentetik 100–2000 fn | deepseek-v4.1-flash | naive 543k, 2000'de HTTP 400; threshold 904–929 tok |
+| `verdict_policy_a_sqlite_20261029` | gerçek SQLite | deepseek-v4.1-flash | benign `needs_review`, FP yok (token sayıları §11.1 nedeniyle eski) |
+| `parallel_workers_sqlite_20261031` | gerçek SQLite | deepseek-v4.1-flash | 8 worker hızlanma; **token/süre `evidence_channel…` ile güncel** |
+| `s4_packed_encoded_20261031` | UPX + encoded | deepseek-v4.1-flash | UPX unpack ✅; encoded threshold eski sürümde ❌ |
+| `s4_encoded_decoded_xref_20261031` | encoded pipeline state | deepseek-v4.1-flash | decoded-string xref: payload prio 4→7, iocs, must-include; threshold 2.1k ✅ |
+| `evidence_channel_empty_address_20261031` | gerçek SQLite benign/injected | deepseek-v4.1-flash | `address=""` global bulguları düşürüyordu; düzeltildi; threshold 36.6k, FP yok |
+
+`superseded_by` alanı, eski bir kaydın hangi düzeltilmiş kayıtla değiştirildiğini
+gösterir; eski kayıtlar silinmez, böylece hata ve düzeltme birlikte görülür.
 
 # 3. Yeni koşu ekleme (ör. API / 27B)
 1. Aynı veri kümesi + **aynı `config`** (num_ctx, runs, strateji…).
@@ -150,6 +159,13 @@ Tam liste: `experiments.json` (17 kayıt). Öne çıkanlar:
   **P0 (aynı gün):** dört durumlu dosya verdict'i (`malicious/needs_review/unknown/no_evidence`),
   fail-closed backstop ve iki katmanlı kanıt (yerel + global digest). Bu tarihten önceki ve
   sonraki kayıtlar doğrudan kıyaslanmamalı; gerekirse yeniden koşun.
+- **Adres normalizasyonu 2026-10-31.** `state.Finding.address` yoksa `""`; LLM
+  katmanı `None` bekliyordu. `scale_eval --from-state` bu kayıtları doğrudan
+  yüklediği için YARA/FLOSS/capa-behavior gibi **adressiz tüm global bulgular**
+  prompt'tan ve fail-closed kapsamından düşüyordu. `finding_from_record` + `not
+  f.address` ile düzeltildi. `S1` sentetik merdiveninde global bulgu yoktu, bu
+  yüzden etkilenmedi; `S3/S4` state koşularının token/süreleri değişti. Eski
+  kayıtlar `superseded_by` ile işaretli.
 
 # 5. Scale / API kayıtları (v1 genişletmesi)
 Büyük ölçek ve API koşularında `metrics` / `config` şu ek alanları taşır:
@@ -158,6 +174,8 @@ Büyük ölçek ve API koşularında `metrics` / `config` şu ek alanları taş�
 - `prompt_tokens`, `completion_tokens`, `cost_usd`, `allowance`, `billing_source`
 - `http_status`, `truncated`, `n_runs`
 - `coverage`, `payload_found`, `payload_in_context`, `false_positive`
+  (`payload_found` 2026-10-31'den itibaren payload fonksiyonunun
+  `suspicious=True` olmasını da sayar; özet URL'yi tekrar etmese bile)
 - `naive_mode` (`raw` / `hardened`), `crowbar_mode` (`soft` / `threshold`)
 
 Kurallar:

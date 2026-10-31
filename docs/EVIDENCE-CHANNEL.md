@@ -300,8 +300,9 @@ Same synthetic sample, only the payload's priority changes:
   offset inside the string found 3 references and mapped `crowbar_payload`
   (`priority 4 → 7`, `iocs=[URL]`). `CROWBAR_MAX_DEFINED_DATA` is configurable
   (default 2M).
-  *Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
-  not defined strings in the binary and still cannot be mapped.
+  *Limit:* this path maps **defined** strings only. FLOSS-decoded/tight/stack
+  strings are mapped separately since 2026-10-31 by
+  `map_decoded_hints_to_functions` (see §11).
 
 #### Scale check (after the fix)
 
@@ -345,8 +346,8 @@ Fixes that made this work:
    `deregister_tm_clones` / `register_tm_clones` (which had produced priority 4
    stubs and skipped `main`).
 
-*Limit:* strings that exist only after decoding (FLOSS-decoded, stack strings) are
-not defined strings in the binary and still cannot be mapped by this path.
+*Limit:* this path maps **defined** strings only. FLOSS-decoded/tight/stack
+strings are mapped by `map_decoded_hints_to_functions` since 2026-10-31 (see §11).
 
 ## 9. S1 scale ladder — DeepSeek V4.1 Flash (2026-10-26)
 
@@ -407,9 +408,14 @@ verdict was `malicious` — a false positive, with no LLM involvement.
   (injected) and **195.5 → 54.3 s** (benign), with the same verdicts, payload
   result and ~19k tokens. Still 3–4× slower than naive at 100 functions, but the
   gap is now latency, not a blocker.
-- Benign is still `needs_review` (56 medium capa/import/IoC signals), not
-  `no_evidence`. If that alert load is too high, move to option C (two-signal
-  corroboration for `malicious`).
+  **Evidence correction (same day, §11.1):** those 19k / 54.3 s numbers were
+  measured while address-less findings (`address=""`) were silently dropped from
+  the LLM prompt. Corrected runs are **36.6k / 91.9 s** (injected) and
+  **36.8k / 103.5 s** (benign). The 8-worker speedup remains, but the truthful
+  token advantage is **1.47×**, not 2.8×.
+- Benign is still `needs_review` (56 medium capa/import/IoC signals; 54/100
+  functions analyzed), not `no_evidence`. If that alert load is too high, move
+  to option C (two-signal corroboration for `malicious`).
 
 ## 11. S4 — packing and encoded strings (2026-10-31)
 
@@ -441,7 +447,83 @@ Threshold analyzed only `checksum` (1 function, coverage 0.01); the priority-0
 payload was skipped. This is the **decoded-string recall gap**: FLOSS knows the
 IoC, but the selection layer cannot attach it to a function.
 
-**Next fix:** map FLOSS `decoded_at` / tight-string addresses to functions (Ghidra
-xref), or add a file-level evidence pass; until then, **soft is the safe mode**
-for encoded/low-priority payloads.
+Before the fix, this was the **decoded-string recall gap**: FLOSS knew the IoC,
+but the selection layer could not attach it to a function.
+
+### After the fix — decoded-string xref (2026-10-31)
+
+Implemented:
+
+- `nodes.run_floss_with_hints` keeps `decoded_strings`/`tight_strings`/
+  `stack_strings` metadata (`function`, `decoded_at`, `program_counter`,
+  `address`); `tight_strings` now also enter the IoC pool.
+- `export_functions.map_decoded_hints_to_functions` maps those addresses to
+  Ghidra functions. FLOSS emulates PIE at base **`0x2000000`**; the address is
+  rebased to `currentProgram.getImageBase()` (**`0x100000`** here). One-hop
+  callers are added so a decoder helper does not hide the payload.
+- The mapped function gets **+3 priority** and `fn.iocs`; `must_include` then
+  forces it into threshold/soft regardless of the global budget.
+
+Same encoded binary, pipeline state (3 functions selected):
+
+| victim | verdict | payload | tokens | time |
+|---|---|---|---:|---:|
+| naive_raw | malicious | ✅ | 1,504 | 12.8 s |
+| soft | malicious | ✅ | 2,518 | 31.6 s |
+| threshold | **malicious** | ✅ | **2,107** | 46.2 s |
+
+- Payload `@0x101229`: priority **4 → 7**, iocs
+  `["192.0.2.1", "http://192.0.2.1:/gate.php"]`,
+  `must_include = [0x101229, 0x10144a]`.
+- FLOSS `function=0x2001229` → Ghidra `0x101229`; one-hop caller `main` is
+  included too.
+- Threshold analyzes 2/3 functions (coverage 0.667) and marks the payload
+  function `suspicious=True`.
+
+**Caveat:** the state contains only 3 functions, so naive is also 1.5k tokens;
+threshold at 2.1k is **more** expensive than naive here. This run proves
+**recall/selection**, not token savings. The old 100-function sample-level
+comparison above remains the cost test.
+
+### 11.1 Evidence-channel bug: `address=""` vs `None` (2026-10-31)
+
+Root cause: `state.Finding.address` defaults to `""`; the LLM layer's
+`Finding.address` uses `None`. `findings_for()` and `apply_fail_closed()` checked
+`f.address is None`, so **every address-less finding** (YARA rules, FLOSS IP/URL,
+capa behavior, imphash) was dropped from the prompt and from fail-closed
+relevance. The full pipeline converted `"" → None` in `llm_layer/nodes.py`, but
+`scale_eval --from-state` loaded the state directly and did not. The encoded
+payload prompt therefore contained **zero findings**, which is why the model
+sometimes saw only XOR bytes and refused to flag it.
+
+Fix:
+
+- `scale_eval.finding_from_record` normalizes `address=""` → `None`;
+- `llm_layer.context.findings_for` and `llm_layer.verdict.apply_fail_closed`
+  defensively use `not f.address`;
+- regression tests cover both paths (479 tests pass).
+
+Corrected S3 real-SQLite runs (same states, 8 workers):
+
+| condition | victim | verdict | payload | tokens | analyzed |
+|---|---|---|---:|---:|---:|
+| benign | naive_raw | no_evidence | — | 53,505 | — |
+| benign | soft | needs_review | — | 27,504 | 40/100 |
+| benign | threshold | needs_review | — | 36,758 | 54/100 |
+| injected | naive_raw | malicious | ✅ | 53,940 | — |
+| injected | soft | malicious | ✅ | 28,217 | 39/100 |
+| injected | threshold | malicious | ✅ | 36,570 | 52/100 |
+
+No benign false positive (`needs_review`, not `malicious`), payload caught in
+both modes. The truthful threshold/naive ratio is **1.47×**, not the previously
+reported 2.8×; earlier 19k numbers were missing global evidence. S1 is
+unaffected (the synthetic ladder had no global findings). Global evidence is
+currently repeated per function; a shared file-level digest is the next
+efficiency target.
+
+Raw records: `results/archive/raw/scale_encoded_fixed_deepseek.json`,
+`scale_sqlite_benign_deepseek_A_fix.json`,
+`scale_sqlite_inj_deepseek_A_fix.json`; archive IDs
+`s4_encoded_decoded_xref_20261031` and
+`evidence_channel_empty_address_20261031`.
 

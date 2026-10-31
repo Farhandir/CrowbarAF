@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from llm_layer.cache import SummaryCache
 from llm_layer.client import LLMClient, LLMHTTPError, LLMResult
-from llm_layer.context import (build_function_context, must_include_offsets,
-                               normalize_address, select_findings,
-                               select_functions, select_with_reasons)
+from llm_layer.context import (build_function_context, findings_for,
+                               must_include_offsets, normalize_address,
+                               select_findings, select_functions,
+                               select_with_reasons)
 from llm_layer.pipeline import AnalysisResult, analyze
 from llm_layer.summarize import summarize_function
 import io
@@ -898,3 +899,21 @@ def test_verdict_dedupes_capa_medium():
     v = compute_verdict([fn], fs, {"0x1": s})
     assert v["counts"]["medium_findings"] == 1
     assert v["verdict"] == "needs_review"
+
+
+def test_findings_for_treats_empty_address_as_global():
+    fn = _fn("0x401000", "code")
+    f = Finding(source="floss", kind="url", value="http://198.51.100.7/x", address="")
+    assert findings_for(fn, [f]) == [f]
+    ctx, stats = build_function_context(fn, [], [f], 1000)
+    assert stats["findings_total"] == 1
+    assert "198.51.100.7" in ctx
+
+
+def test_fail_closed_empty_address_critical():
+    fn = _fn("0x401000", "code")
+    findings = [Finding(source="floss", kind="url",
+                        value="http://198.51.100.7/x", address="")]
+    out = apply_fail_closed(_summary("0x401000", False), fn, findings)
+    assert out.suspicious is None
+    assert out.fail_closed is True

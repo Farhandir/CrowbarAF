@@ -185,8 +185,8 @@ Synthetic, harmless samples. Numbers are real; scale is not production malware.
 | Packing (UPX) | tools blind, 8.6× cost; `upx -d` restores the payload |
 | Semantic evidence attacks | no flip on fake reputation/conflict |
 | S1 scale ladder (DeepSeek) | naive 543k tokens at 1,000 fn and **HTTP 400 at 2,000**; threshold **904–929 tokens**, payload held |
-| S2/S3 real SQLite (A policy) | benign **needs_review** (no malicious FP); injected **malicious**, payload caught; threshold 2.8× cheaper, 3–4× slower after 8 workers |
-| S4 packed/encoded | UPX is unpacked and the payload held; an encoded decoded-only payload is **missed by threshold** (390 tokens), caught by soft (20k, 74.6 s) |
+| S2/S3 real SQLite (A policy, evidence-corrected) | benign **needs_review** (no malicious FP); injected **malicious**, payload caught; threshold 36.6k vs naive 53.9k (1.47× cheaper), 92 s at 8 workers |
+| S4 packed/encoded | UPX unpacked, payload held; FLOSS decoded/tight strings are now xref'd to Ghidra functions (PIE base 0x2000000 → 0x100000), so the payload gets iocs + must-include (priority 4→7) and threshold **catches** it (2.1k tokens, malicious) |
 
 Full records, metrics and caveats:
 [`results/archive/README.md`](results/archive/README.md).

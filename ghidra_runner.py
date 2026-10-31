@@ -76,12 +76,15 @@ def run_ghidra(
     file_path: str,
     hints: list[dict[str, Any]],
     findings: list[BaseModel | dict[str, Any]] | None = None,
+    decoded_hints: list[dict[str, Any]] | None = None,
 ) -> list[DecompiledFunction]:
     """Hedef dosyayı Ghidra ile analiz eder; öncelikli fonksiyonları decompile eder.
 
     ``hints``: capa adres ipuçları (``[{"offset", "rule"}]``).
     ``findings``: ``state.findings``; betik ``import_combo`` bulgularını fonksiyon
     önceliğine yansıtmak için kullanır.
+    ``decoded_hints``: FLOSS ``decoded_at``/``function`` metadata'sı; decoded-only
+    string'leri fonksiyona bağlamak için.
 
     ``hints`` ve ``findings`` boş olsa bile Ghidra çalıştırılır; betik tüm
     fonksiyonları tarayıp kendi önceliklendirmesini yapar. Hata, timeout veya
@@ -105,6 +108,8 @@ def run_ghidra(
         payload = {
             "hints": hints,
             "findings": [_finding_to_dict(f) for f in findings or []],
+            # FLOSS decoded/tight string -> function metadata (Ghidra xref)
+            "decoded_hints": decoded_hints or [],
             # import_combo bulgusu -> API isimleri (betik kuralları bilmek zorunda kalmasın)
             "combo_apis": combo_api_map(),
         }

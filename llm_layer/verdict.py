@@ -80,7 +80,7 @@ def apply_fail_closed(summary: FunctionSummary, fn: FunctionInfo,
     """If the LLM says benign but a critical finding is relevant, return unknown."""
     if summary.suspicious is not False:
         return summary
-    relevant = [f for f in findings if f.address is None or f.address == fn.offset]
+    relevant = [f for f in findings if not f.address or f.address == fn.offset]
     if not any(is_critical_finding(f) for f in relevant):
         return summary
     summary.suspicious = None

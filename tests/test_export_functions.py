@@ -143,13 +143,16 @@ class TestPlanExport:
 class TestReadInput:
     def test_valid(self, tmp_path) -> None:
         path = tmp_path / "in.json"
-        path.write_text(json.dumps({"hints": [{"offset": "0x1"}], "findings": [{"a": 1}], "combo_apis": {"x": ["y"]}}))
-        assert ef.read_input(str(path)) == ([{"offset": "0x1"}], [{"a": 1}], {"x": ["y"]})
+        path.write_text(json.dumps({"hints": [{"offset": "0x1"}], "findings": [{"a": 1}],
+                                    "combo_apis": {"x": ["y"]},
+                                    "decoded_hints": [{"value": "http://x", "function": 1}]}))
+        assert ef.read_input(str(path)) == ([{"offset": "0x1"}], [{"a": 1}], {"x": ["y"]},
+                                            [{"value": "http://x", "function": 1}])
 
     def test_wrong_types_fall_back(self, tmp_path) -> None:
         path = tmp_path / "in.json"
         path.write_text(json.dumps({"hints": "x", "findings": None, "combo_apis": []}))
-        assert ef.read_input(str(path)) == ([], [], {})
+        assert ef.read_input(str(path)) == ([], [], {}, [])
 
     def test_write_results_roundtrip(self, tmp_path) -> None:
         path = tmp_path / "out.json"
@@ -243,8 +246,9 @@ class TestDeepInspectionNode:
     def test_passes_hints_and_findings(self, monkeypatch) -> None:
         captured = {}
 
-        def fake_run_ghidra(path, hints, findings=None):
-            captured.update(path=path, hints=hints, findings=findings)
+        def fake_run_ghidra(path, hints, findings=None, decoded_hints=None):
+            captured.update(path=path, hints=hints, findings=findings,
+                            decoded_hints=decoded_hints)
             return [DecompiledFunction(offset="0x1", c_code="x")]
 
         monkeypatch.setattr(nodes, "run_ghidra", fake_run_ghidra)
@@ -255,7 +259,8 @@ class TestDeepInspectionNode:
 
         out = nodes.deep_inspection_node(state)
 
-        assert captured == {"path": "a.exe", "hints": state.ghidra_hints, "findings": [finding]}
+        assert captured == {"path": "a.exe", "hints": state.ghidra_hints,
+                            "findings": [finding], "decoded_hints": []}
         assert [f.offset for f in out["source_code"]] == ["0x1"]
 
     def test_empty_result_is_passed_through(self, monkeypatch) -> None:
@@ -418,8 +423,9 @@ class _Ref:
 
 
 class _Func:
-    def __init__(self, entry, size=0x40, name=None, thunk=False, callees=()):
+    def __init__(self, entry, size=0x40, name=None, thunk=False, callees=(), callers=()):
         self.entry, self.size, self.name, self.thunk, self.callees = entry, size, name or f"FUN_{entry:x}", thunk, callees
+        self.callers = list(callers)
 
     def getEntryPoint(self):
         return _Addr(self.entry)
@@ -443,6 +449,9 @@ class _Func:
     def getCalledFunctions(self, monitor):
         return list(self.callees)
 
+    def getCallingFunctions(self, monitor):
+        return list(self.callers)
+
 
 class _Program:
     def __init__(self, strings, refs, functions):
@@ -451,6 +460,9 @@ class _Program:
     def getReferenceManager(self):
         prog = self
         return type("RM", (), {"getReferencesTo": lambda s, addr: prog.refs.get(addr.getOffset(), [])})()
+
+    def getImageBase(self):
+        return _Addr(0x100000)
 
     def getFunctionManager(self):
         prog = self
@@ -594,10 +606,12 @@ class TestIocsContract:
         monkeypatch.setattr(ghidra_runner.subprocess, "run", fake_run)
         findings = [Finding(source="floss", kind="ip", value="10.0.0.1")]
 
-        result = ghidra_runner.run_ghidra("sample.exe", [], findings)
+        decoded = [{"value": "10.0.0.1", "function": 0x401000}]
+        result = ghidra_runner.run_ghidra("sample.exe", [], findings, decoded_hints=decoded)
 
         # betiğin IoC'leri toplayabilmesi için kind/value girdi JSON'una ulaşmalı
         assert {(f["kind"], f["value"]) for f in seen["input"]["findings"]} == {("ip", "10.0.0.1")}
+        assert seen["input"]["decoded_hints"] == decoded
         assert ef.collect_target_iocs(seen["input"]["findings"]) == {"10.0.0.1"}
         assert [f.iocs for f in result] == [["10.0.0.1"]]
 
@@ -641,3 +655,21 @@ def test_ioc_offset_inside_defined_string(fake_ghidra):
     assert ef.map_iocs_to_functions({"http://evil.example/gate.php"}) == {
         "0x401000": ["http://evil.example/gate.php"]
     }
+
+
+def test_map_decoded_hints_to_function_and_caller(fake_ghidra, monkeypatch):
+    caller = _Func(0x402000, size=0x100)
+    decoder = _Func(0x401000, size=0x100, callers=[caller])
+    fake_ghidra(_Program([], {}, [decoder, caller]))
+    monkeypatch.setattr(ef, "toAddr", lambda n: _Addr(n), raising=False)
+    hits = ef.map_decoded_hints_to_functions([{"value": "http://x", "function": 0x401010}])
+    assert hits["0x401000"] == ["http://x"]
+    assert hits["0x402000"] == ["http://x"]
+
+
+def test_map_decoded_hints_rebases_floss_pie_address(fake_ghidra, monkeypatch):
+    # FLOSS emulates PIE at 0x2000000; Ghidra loaded at 0x100000.
+    fake_ghidra(_Program([], {}, [_Func(0x101000, size=0x1000)]))
+    monkeypatch.setattr(ef, "toAddr", lambda n: _Addr(n), raising=False)
+    hits = ef.map_decoded_hints_to_functions([{"value": "http://x", "function": 0x2001229}])
+    assert hits == {"0x101000": ["http://x"]}

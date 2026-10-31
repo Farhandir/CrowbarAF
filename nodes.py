@@ -515,7 +515,7 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
     """FLOSS + capa + pefile (import/entropy); tüm bulguları ``findings`` altında toplar."""
     logger.info("[static_feature_node]")
 
-    floss_iocs = run_floss(state.file_path)  # hata durumunda []
+    floss_iocs, floss_hints = run_floss_with_hints(state.file_path)  # hata: ([], [])
     # Hata/timeout durumunda: ({"error": ...}, [])
     capabilities, ghidra_hints = run_capa(state.file_path)
     capabilities, ghidra_hints = _filter_trivial_capa(capabilities, ghidra_hints)
@@ -557,6 +557,7 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
         "extracted_strings": extracted_strings,
         "capabilities": capabilities,
         "ghidra_hints": ghidra_hints,
+        "floss_hints": floss_hints,
         "findings": merge_findings(state.findings, new_findings),
     }
 
@@ -1164,7 +1165,7 @@ def filter_iocs(strings_list: list[str]) -> list[str]:
 
 
 def _collect_floss_strings(report: dict[str, Any]) -> list[str]:
-    """FLOSS JSON'undan decoded, stack ve static string metinlerini toplar.
+    """FLOSS JSON'undan decoded, stack, tight ve static string metinlerini toplar.
 
     ``run_floss`` çıktıyı ``filter_iocs`` ile süzdüğü için static string'lerin
     gürültüsü gelmez; düz metin C2 URL'leri ancak bu yolla bulguya girer.
@@ -1175,7 +1176,7 @@ def _collect_floss_strings(report: dict[str, Any]) -> list[str]:
         strings_section = report  # bazı sürümlerde anahtarlar kök seviyesinde olabilir
 
     pool: list[str] = []
-    for key in ("decoded_strings", "stack_strings", "static_strings"):
+    for key in ("decoded_strings", "stack_strings", "tight_strings", "static_strings"):
         entries = strings_section.get(key)
         if not isinstance(entries, list):
             continue
@@ -1186,11 +1187,54 @@ def _collect_floss_strings(report: dict[str, Any]) -> list[str]:
     return pool
 
 
-def run_floss(file_path: str) -> list[str]:
-    """``floss -j <file_path>`` çalıştırır; filtrelenmiş IoC metinlerini döndürür.
+def _collect_floss_hints(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Decoded/tight/stack string'lerin fonksiyon/adres metadata'sını toplar.
 
-    Hata durumunda (zaman aşımı, floss/dosya bulunamadı, sıfır olmayan çıkış kodu,
-    geçersiz JSON) uygulama çökmez; hata loglanır ve boş liste döndürülür.
+    ``function`` (tight/stack), ``decoded_at`` (decoded), ``program_counter`` ve
+    ``address`` alanlarından hangisi varsa saklanır. Sadece IoC filtrenden geçen
+    değerler döner; böylece gürültü artmaz.
+    """
+    strings_section = report.get("strings")
+    if not isinstance(strings_section, dict):
+        strings_section = report
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple] = set()
+    for key in ("decoded_strings", "tight_strings", "stack_strings"):
+        entries = strings_section.get(key)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            text = entry.get("string")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            if not filter_iocs([text]):
+                continue
+            hint: dict[str, Any] = {"value": text}
+            for field in ("function", "decoded_at", "program_counter", "address"):
+                if entry.get(field) is not None:
+                    hint[field] = entry[field]
+            if len(hint) == 1:  # no address/function metadata
+                continue
+            keyt = tuple(sorted(hint.items()))
+            if keyt in seen:
+                continue
+            seen.add(keyt)
+            out.append(hint)
+    return out
+
+
+def _filter_hints_by_iocs(hints: list[dict[str, Any]], iocs: list[str]) -> list[dict[str, Any]]:
+    allowed = set(iocs)
+    return [h for h in hints if h.get("value") in allowed]
+
+
+def run_floss_with_hints(file_path: str) -> tuple[list[str], list[dict[str, Any]]]:
+    """``floss -j`` çalıştırır; (filtrelenmiş IoC'ler, decoded-string hints) döndürür.
+
+    Hata durumunda ``([], [])`` döner; akış çökmez.
     """
     try:
         proc = subprocess.run(
@@ -1210,8 +1254,9 @@ def run_floss(file_path: str) -> list[str]:
             if not isinstance(report, dict):
                 msg = "floss beklenmeyen JSON yapısı döndürdü (dict değil)"
             else:
-                return filter_iocs(_collect_floss_strings(report))
-
+                iocs = filter_iocs(_collect_floss_strings(report))
+                hints = _filter_hints_by_iocs(_collect_floss_hints(report), iocs)
+                return iocs, hints
     except subprocess.TimeoutExpired:
         msg = f"floss {FLOSS_TIMEOUT_SECONDS} saniye içinde tamamlanamadı (timeout)"
     except FileNotFoundError as exc:
@@ -1222,7 +1267,12 @@ def run_floss(file_path: str) -> list[str]:
         msg = f"floss çalıştırılırken beklenmeyen hata: {type(exc).__name__}: {exc}"
 
     logger.error("[static_feature_node] %s", msg)
-    return []
+    return [], []
+
+
+def run_floss(file_path: str) -> list[str]:
+    """Backward-compatible wrapper: only the filtered IoC strings."""
+    return run_floss_with_hints(file_path)[0]
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -1472,7 +1522,8 @@ def deep_inspection_node(state: AgentState) -> dict[str, Any]:
         )
         return {}
 
-    result = run_ghidra(state.file_path, state.ghidra_hints, state.findings)
+    result = run_ghidra(state.file_path, state.ghidra_hints, state.findings,
+                        decoded_hints=list(getattr(state, "floss_hints", []) or []))
     return {"source_code": result}
 
 
