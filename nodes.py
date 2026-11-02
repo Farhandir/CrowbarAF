@@ -24,6 +24,11 @@ try:
 except ImportError:  # kurulu değilse PE yardımcıları boş sonuç döner, akış çökmez
     pefile = None  # type: ignore[assignment]
 
+try:
+    import tlsh
+except ImportError:  # kurulu değilse (py-tlsh) compute_tlsh "" döner, akış çökmez
+    tlsh = None  # type: ignore[assignment]
+
 import db
 from ghidra_runner import run_ghidra
 from import_combos import IMPORT_COMBO_RULES
@@ -51,6 +56,30 @@ KNOWN_MALWARE_META_VALUE = "known_malware"
 
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# Araç profili: "deep" (varsayılan; capa + FLOSS + Ghidra çalışır) veya "core" (hızlı tarama:
+# capa, FLOSS ve Ghidra atlanır). DIE, YARA, pefile/readelf, unpacker'lar ve TLSH her iki
+# profilde de çalışır.
+TOOL_PROFILE_ENV = "CROWBAR_TOOL_PROFILE"
+TOOL_PROFILES = ("core", "deep")
+DEFAULT_TOOL_PROFILE = "deep"
+
+
+def get_tool_profile() -> str:
+    """``CROWBAR_TOOL_PROFILE`` değerini (her çağrıda) okur: ``"core"`` | ``"deep"``.
+
+    Boşsa ``deep``. Tanınmayan değer (yazım hatası) uyarıyla ``deep``'e düşer; yani
+    sessizce daha az analiz yapılmaz.
+    """
+    raw = os.getenv(TOOL_PROFILE_ENV, "").strip().lower()
+    if not raw:
+        return DEFAULT_TOOL_PROFILE
+    if raw in TOOL_PROFILES:
+        return raw
+    logger.warning("[tool_profile] bilinmeyen %s=%r; '%s' kullanılıyor (geçerli: %s)",
+                   TOOL_PROFILE_ENV, raw, DEFAULT_TOOL_PROFILE, ", ".join(TOOL_PROFILES))
+    return DEFAULT_TOOL_PROFILE
 
 
 # --------------------------------------------------------------------------- #
@@ -517,16 +546,23 @@ def _run_upx_unpack(src: str, dst: str) -> bool:
 # --------------------------------------------------------------------------- #
 def static_feature_node(state: AgentState) -> dict[str, Any]:
     """FLOSS + capa + pefile (import/entropy); tüm bulguları ``findings`` altında toplar."""
-    logger.info("[static_feature_node]")
+    profile = get_tool_profile()
+    logger.info("[static_feature_node] profil=%s", profile)
 
-    floss_iocs, floss_hints = run_floss_with_hints(state.file_path)  # hata: ([], [])
-    # Hata/timeout durumunda: ({"error": ...}, [])
-    capabilities, ghidra_hints = run_capa(state.file_path)
-    capabilities, ghidra_hints = _filter_trivial_capa(capabilities, ghidra_hints)
+    if profile == "core":
+        # Hızlı tarama: ağır araçlar (FLOSS, capa) hiç çalıştırılmaz; boş sonuç gibi davranılır.
+        floss_iocs, floss_hints = [], []
+        capabilities, ghidra_hints = {}, []
+    else:
+        floss_iocs, floss_hints = run_floss_with_hints(state.file_path)  # hata: ([], [])
+        # Hata/timeout durumunda: ({"error": ...}, [])
+        capabilities, ghidra_hints = run_capa(state.file_path)
+        capabilities, ghidra_hints = _filter_trivial_capa(capabilities, ghidra_hints)
 
     # Ham import listesi findings'e GİRMEZ (gürültü); yalnızca combo eşleşmesi ve imphash için kullanılır.
     imports = extract_imports(state.file_path)  # PE: pefile, ELF: readelf; aksi halde []
     imphash = compute_imphash(state.file_path, imports)  # PE: pefile imphash, ELF: MD5(imports); yoksa ""
+    tlsh_hash = compute_tlsh(state.file_path)  # kütüphane yok / dosya < 50 bayt -> ""
     entropy = section_entropy(state.file_path)  # PE: pefile, ELF: readelf -S; aksi halde {}
     entropy_source = "elf_entropy" if is_elf(state.file_path) else "pefile_entropy"
     combos = match_import_combos(imports)
@@ -555,6 +591,7 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
         imphash=imphash,
         entropy_source=entropy_source,
         pe_metadata=pe_metadata,
+        tlsh_hash=tlsh_hash,
     )
 
     return {
@@ -562,7 +599,12 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
         "capabilities": capabilities,
         "ghidra_hints": ghidra_hints,
         "floss_hints": floss_hints,
-        "findings": merge_findings(state.findings, new_findings),
+        # kimlik + varlık kontrolü: FLOSS decoded/stack/tight değerleri (floss_hints) hariç tutulur
+        "findings": finalize_findings(
+            merge_findings(state.findings, new_findings),
+            state.file_path,
+            {h["value"] for h in floss_hints if isinstance(h, dict) and isinstance(h.get("value"), str)},
+        ),
     }
 
 
@@ -834,6 +876,37 @@ def compute_imphash(file_path: str, imports: list[str]) -> str:
     return ""
 
 
+TLSH_MIN_BYTES = 50  # TLSH'nin alt sınırı: daha kısa girdiden hash üretilemez
+TLSH_MAX_FILE_BYTES = 256 * 1024 * 1024  # bellekte tamamı okunur; bundan büyük dosyalar atlanır
+
+
+def compute_tlsh(file_path: str) -> str:
+    """Dosyanın TLSH (bulanık) hash'i; benzer örnekleri gruplamak için.
+
+    ``""`` döner: ``py-tlsh`` kurulu değil, dosya okunamadı, dosya ``TLSH_MIN_BYTES``
+    (50) bayttan küçük (veya ``TLSH_MAX_FILE_BYTES``'tan büyük), ya da TLSH yeterli
+    varyans bulamadı (``TNULL``/boş). Hiçbir koşulda istisna fırlatmaz.
+    """
+    if tlsh is None:
+        return ""
+    try:
+        size = os.path.getsize(file_path)
+        if size < TLSH_MIN_BYTES or size > TLSH_MAX_FILE_BYTES:
+            return ""
+        with open(file_path, "rb") as fh:
+            data = fh.read()
+        if len(data) < TLSH_MIN_BYTES:
+            return ""
+        digest = tlsh.hash(data)
+    except Exception as exc:  # noqa: BLE001 - hash hatası analizi düşürmemeli
+        logger.warning("[static_feature_node] tlsh hesaplanamadı: %s: %s", type(exc).__name__, exc)
+        return ""
+    if isinstance(digest, bytes):
+        digest = digest.decode("ascii", "ignore")
+    digest = str(digest or "").strip()
+    return "" if digest.upper() == "TNULL" else digest
+
+
 def section_entropy(file_path: str) -> dict[str, float]:
     """Section'ların Shannon entropy değerlerini döndürür: ``{".text": 6.2, ...}``.
 
@@ -1081,11 +1154,12 @@ def build_findings(
     imphash: str = "",
     entropy_source: str = "pefile_entropy",
     pe_metadata: list[Finding] | None = None,
+    tlsh_hash: str = "",
 ) -> list[Finding]:
     """Araç çıktılarını ``Finding`` listesine çevirir (saf mantık).
 
     Sıra, bağlam bütçesi daraldığında en değerli kanıtlar önde kalsın diye:
-    yara, capa, import combo, imphash, entropy, floss.
+    yara, capa, import combo, imphash, tlsh, entropy, floss.
     Ham import listesi bilerek bulgu üretmez; yalnızca eşleşen combolar ve ``imphash`` gider.
     ``entropy_source``: PE için ``pefile_entropy``, ELF için ``elf_entropy``.
     """
@@ -1114,6 +1188,9 @@ def build_findings(
     if imphash:
         findings.append(Finding(source="imphash", kind="grouping_key", value=imphash))
 
+    if tlsh_hash:  # bulanık hash: benzer örnekleri gruplamak için (karar kanıtı değil)
+        findings.append(Finding(source="tlsh", kind="grouping_key", value=tlsh_hash))
+
     findings.extend(pe_metadata or [])
 
     for name, value in entropy.items():
@@ -1125,6 +1202,93 @@ def build_findings(
             findings.append(Finding(source="floss", kind=_ioc_kind(text), value=text))
 
     return findings
+
+
+# --------------------------------------------------------------------------- #
+# Bulgu bütünlüğü: kimlik + "binary'de gerçekten var mı?" kontrolü
+# --------------------------------------------------------------------------- #
+# Dosya içinden metin olarak çıkarıldığı için raw byte'larda aranabilen IoC türleri.
+VERIFIABLE_IOC_KINDS = frozenset({"ip", "url", "domain", "email"})
+VERIFIABLE_SOURCES = frozenset({"floss"})
+MAX_VERIFY_VALUES = 500  # tekil değer üst sınırı (her biri tüm dosyada aranır); fazlası kontrol edilmez
+
+
+def compute_finding_id(f: Finding) -> str:
+    """Deterministik bulgu kimliği: ``md5(source_kind_value_address)[:8]``."""
+    raw = f"{f.source}_{f.kind}_{f.value}_{f.address}"
+    return hashlib.md5(raw.encode("utf-8", "replace")).hexdigest()[:8]  # noqa: S324 - kimlik, güvenlik değil
+
+
+def _verifiable(f: Finding, dynamic_values: frozenset[str]) -> bool:
+    """Statik olarak çıkarılmış, aranabilir metin IoC'si mi? (FLOSS decoded/stack/tight hariç)."""
+    return (
+        (f.source or "").lower() in VERIFIABLE_SOURCES
+        and (f.kind or "").lower() in VERIFIABLE_IOC_KINDS
+        and bool(f.value)
+        and f.value not in dynamic_values
+    )
+
+
+def string_in_file(path: str, values: list[str]) -> dict[str, bool] | None:
+    """Her ``value`` dosyanın raw byte'larında (UTF-8 veya UTF-16LE) geçiyor mu?
+
+    Dosya bir kez ``mmap`` ile eşlenir (belleğe yüklenmez). Dosya okunamıyorsa ``None``
+    (kontrol edilemedi) döner; bu durumda hiçbir bulgu ``verified=False`` yapılmaz.
+    """
+    import mmap
+
+    result: dict[str, bool] = {}
+    try:
+        with open(path, "rb") as fh:
+            try:
+                data = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+            except ValueError:  # boş dosya mmap edilemez
+                data = b""
+            try:
+                for value in values:
+                    needles = (value.encode("utf-8", "replace"), value.encode("utf-16le", "replace"))
+                    result[value] = any(n and data.find(n) != -1 for n in needles)
+            finally:
+                if not isinstance(data, bytes):
+                    data.close()
+    except OSError as exc:
+        logger.warning("[static_feature_node] bulgu doğrulaması için dosya okunamadı: %s", exc)
+        return None
+    return result
+
+
+def finalize_findings(
+    findings: list[Finding],
+    file_path: str,
+    dynamic_values: frozenset[str] | set[str] = frozenset(),
+) -> list[Finding]:
+    """Her bulguya ``finding_id`` atar ve statik metin IoC'lerini dosya byte'larında doğrular.
+
+    * ``finding_id``: ``compute_finding_id`` (her bulgu).
+    * ``verified=False``: FLOSS'un **statik** ip/url/domain/email string'i, dosyanın hiçbir
+      yerinde UTF-8 veya UTF-16LE olarak geçmiyorsa. FLOSS decoded/stack/tight string'leri
+      (``dynamic_values``; çalışma anında oluştuğu için dosyada düz metin olmaz) ve diğer
+      tüm türler kontrol edilemez: ``verified`` değeri değişmez (``True`` kalır). Daha önce
+      ``False`` olan bulgu hiçbir zaman ``True``'ya çevrilmez.
+    """
+    dynamic = frozenset(dynamic_values)
+    targets: list[str] = []
+    for f in findings:
+        if f.verified and _verifiable(f, dynamic) and f.value not in targets:
+            targets.append(f.value)
+    if len(targets) > MAX_VERIFY_VALUES:
+        logger.warning("[static_feature_node] %d IoC değeri doğrulanacak; ilk %d kontrol edilir",
+                       len(targets), MAX_VERIFY_VALUES)
+        targets = targets[:MAX_VERIFY_VALUES]
+    found = string_in_file(file_path, targets) if targets else {}
+
+    out: list[Finding] = []
+    for f in findings:
+        update: dict[str, Any] = {"finding_id": compute_finding_id(f)}
+        if found and f.value in found and not found[f.value]:
+            update["verified"] = False
+        out.append(f.model_copy(update=update))
+    return out
 
 
 def merge_findings(existing: list[Finding], new: list[Finding]) -> list[Finding]:
@@ -1518,6 +1682,9 @@ def deep_inspection_node(state: AgentState) -> dict[str, Any]:
     böylece Python/C# kaynağı decompile çıktısıyla ezilmez.
     """
     logger.info("[deep_inspection_node]")
+    if get_tool_profile() == "core":
+        logger.info("[deep_inspection_node] atlandı (%s=core: Ghidra çalıştırılmaz)", TOOL_PROFILE_ENV)
+        return {}
     if state.source_code or state.route_flag != "native":
         logger.info(
             "[deep_inspection_node] atlandı (source_code=%d, route_flag=%s)",
@@ -1583,13 +1750,9 @@ def db_writer_node(state: AgentState) -> dict[str, Any]:
         return {}
 
     try:
-        db_path = db.init_db()
-        db.insert_sample(state.sample, db_path)
-        db.insert_findings(sha256, state.findings, db_path)
-        # llm_summary: DecompiledFunction.llm_summary (ai_reverser state'e geri yazar) -> functions.llm_summary
-        db.insert_functions_and_calls(sha256, state.source_code, db_path)
-        if state.analysis_report or state.verdict:  # supervisor raporu ve/veya dosya kararı
-            db.insert_llm_claims(sha256, state.analysis_report, db_path, verdict=state.verdict)
+        # init_db -> sample -> findings -> functions/calls (llm_summary dahil)
+        # -> llm_claims (rapor ve/veya verdict); split mod (host_analyze --db) ile ortak.
+        db.save_analysis(state)
     except Exception as exc:  # noqa: BLE001 - kalıcılık hatası analiz sonucunu düşürmemeli
         logger.error("[db_writer_node] veritabanı hatası: %s: %s", type(exc).__name__, exc)
     return {}

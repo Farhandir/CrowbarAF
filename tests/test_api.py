@@ -312,3 +312,25 @@ class TestCliPreserved:
     def test_cli_entry_points_still_exist(self) -> None:
         assert callable(main.main)
         assert main.app.title == "CrowbarAF"
+
+
+class TestUnverifiedFindingUx:
+    def test_ui_renders_unverified_chip_only_for_verified_false(self, client) -> None:
+        html = client.get("/").text
+        assert "(Unverified)" in html
+        assert "f.verified === false" in html  # undefined/true/NULL -> no warning
+
+    def test_detail_api_exposes_verified_and_finding_id(self, client, db_path) -> None:
+        sha = "ef" * 32
+        state = AgentState(
+            file_path="x", sample=SampleInfo(sha256=sha),
+            findings=[
+                Finding(source="floss", kind="url", value="http://ghost.example/b", finding_id="abcd1234",
+                        verified=False),
+                Finding(source="yara", kind="rule", value="R", finding_id="ffff0000"),
+            ],
+        )
+        db.save_analysis(state, db_path)
+        findings = {f["source"]: f for f in client.get(f"/api/samples/{sha}").json()["findings"]}
+        assert findings["floss"]["verified"] is False and findings["floss"]["finding_id"] == "abcd1234"
+        assert findings["yara"]["verified"] is True

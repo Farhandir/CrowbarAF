@@ -19,7 +19,7 @@ from nodes import (
     section_entropy,
     static_feature_node,
 )
-from state import AgentState, Finding
+from state import AgentState, DecompiledFunction, Finding
 
 
 # --------------------------------------------------------------------------- #
@@ -1002,3 +1002,417 @@ def test_build_findings_filters_trivial_capa_rules():
     vals = [f.value for f in fs if f.source == "capa"]
     assert "contain loop" not in vals
     assert "encrypt data" in vals
+
+
+# --------------------------------------------------------------------------- #
+# TLSH (bulanık hash) ve CROWBAR_TOOL_PROFILE
+# --------------------------------------------------------------------------- #
+class _FakeTlsh:
+    """py-tlsh yerine: hash() çağrılarını kaydeder."""
+
+    def __init__(self, result="T1ABCDEF0123456789", raises=None):
+        self.result, self.raises, self.calls = result, raises, []
+
+    def hash(self, data):
+        self.calls.append(bytes(data))
+        if self.raises:
+            raise self.raises
+        return self.result
+
+
+def _install_fake_tlsh(monkeypatch, **kwargs):
+    fake = _FakeTlsh(**kwargs)
+    monkeypatch.setattr(nodes, "tlsh", fake)
+    return fake
+
+
+class TestComputeTlsh:
+    def test_returns_hash_of_file_bytes(self, tmp_path, monkeypatch) -> None:
+        fake = _install_fake_tlsh(monkeypatch, result="T1DEADBEEF")
+        p = tmp_path / "s.bin"
+        data = bytes(range(256)) * 2
+        p.write_bytes(data)
+        assert nodes.compute_tlsh(str(p)) == "T1DEADBEEF"
+        assert fake.calls == [data]
+
+    def test_minimum_size_is_50_bytes(self, tmp_path, monkeypatch) -> None:
+        fake = _install_fake_tlsh(monkeypatch)
+        small, ok = tmp_path / "small", tmp_path / "ok"
+        small.write_bytes(b"A" * 49)
+        ok.write_bytes(b"A" * 50)
+        assert nodes.TLSH_MIN_BYTES == 50
+        assert nodes.compute_tlsh(str(small)) == ""
+        assert fake.calls == []  # küçük dosyada kütüphane hiç çağrılmaz
+        assert nodes.compute_tlsh(str(ok)) == "T1ABCDEF0123456789"
+        assert len(fake.calls) == 1
+
+    def test_empty_file(self, tmp_path, monkeypatch) -> None:
+        _install_fake_tlsh(monkeypatch)
+        p = tmp_path / "empty"
+        p.write_bytes(b"")
+        assert nodes.compute_tlsh(str(p)) == ""
+
+    def test_library_missing_returns_empty(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(nodes, "tlsh", None)  # ImportError yolu: modül None kalır
+        p = tmp_path / "s.bin"
+        p.write_bytes(b"B" * 500)
+        assert nodes.compute_tlsh(str(p)) == ""
+
+    @pytest.mark.parametrize("raw", ["TNULL", "tnull", "", None])
+    def test_tlsh_cannot_hash_low_variance_data(self, tmp_path, monkeypatch, raw) -> None:
+        _install_fake_tlsh(monkeypatch, result=raw)
+        p = tmp_path / "s.bin"
+        p.write_bytes(b"B" * 500)
+        assert nodes.compute_tlsh(str(p)) == ""
+
+    def test_bytes_result_is_decoded(self, tmp_path, monkeypatch) -> None:
+        _install_fake_tlsh(monkeypatch, result=b"T1CAFE")
+        p = tmp_path / "s.bin"
+        p.write_bytes(b"B" * 500)
+        assert nodes.compute_tlsh(str(p)) == "T1CAFE"
+
+    def test_missing_file_and_library_error_never_raise(self, tmp_path, monkeypatch) -> None:
+        _install_fake_tlsh(monkeypatch)
+        assert nodes.compute_tlsh(str(tmp_path / "nope")) == ""
+        _install_fake_tlsh(monkeypatch, raises=ValueError("boom"))
+        p = tmp_path / "s.bin"
+        p.write_bytes(b"B" * 500)
+        assert nodes.compute_tlsh(str(p)) == ""
+
+    def test_oversized_file_is_skipped(self, tmp_path, monkeypatch) -> None:
+        fake = _install_fake_tlsh(monkeypatch)
+        monkeypatch.setattr(nodes, "TLSH_MAX_FILE_BYTES", 100)
+        p = tmp_path / "big"
+        p.write_bytes(b"B" * 500)
+        assert nodes.compute_tlsh(str(p)) == ""
+        assert fake.calls == []
+
+    def test_build_findings_adds_tlsh_grouping_key(self) -> None:
+        got = _build(tlsh_hash="T1ABC")
+        assert Finding(source="tlsh", kind="grouping_key", value="T1ABC") in got
+        assert not any(f.source == "tlsh" for f in _build())
+        assert not any(f.source == "tlsh" for f in _build(tlsh_hash=""))
+
+
+class TestStaticFeatureNodeTlsh:
+    def _quiet(self, monkeypatch) -> None:
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: ([], []))
+        monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
+        monkeypatch.setattr(nodes, "extract_imports", lambda p: [])
+        monkeypatch.setattr(nodes, "section_entropy", lambda p: {})
+
+    def test_node_emits_tlsh_finding(self, tmp_path, monkeypatch) -> None:
+        self._quiet(monkeypatch)
+        _install_fake_tlsh(monkeypatch, result="T1FEED")
+        p = tmp_path / "s.bin"
+        p.write_bytes(b"C" * 300)
+        out = static_feature_node(AgentState(file_path=str(p)))
+        tl = [f for f in out["findings"] if f.source == "tlsh"]
+        assert len(tl) == 1 and (tl[0].kind, tl[0].value) == ("grouping_key", "T1FEED")
+
+    def test_node_without_library_or_with_small_file_has_no_tlsh_finding(self, tmp_path, monkeypatch) -> None:
+        self._quiet(monkeypatch)
+        p = tmp_path / "s.bin"
+        p.write_bytes(b"C" * 300)
+        monkeypatch.setattr(nodes, "tlsh", None)
+        assert not any(f.source == "tlsh" for f in static_feature_node(AgentState(file_path=str(p)))["findings"])
+        _install_fake_tlsh(monkeypatch)
+        small = tmp_path / "small"
+        small.write_bytes(b"C" * 10)
+        assert not any(f.source == "tlsh" for f in static_feature_node(AgentState(file_path=str(small)))["findings"])
+
+
+class TestToolProfile:
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("CROWBAR_TOOL_PROFILE", raising=False)
+
+    def test_default_is_deep(self) -> None:
+        assert nodes.DEFAULT_TOOL_PROFILE == "deep"
+        assert nodes.get_tool_profile() == "deep"
+
+    @pytest.mark.parametrize("raw, expected", [("core", "core"), ("CORE", "core"), (" Core ", "core"),
+                                               ("deep", "deep"), ("DEEP", "deep"), ("", "deep")])
+    def test_values(self, monkeypatch, raw, expected) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", raw)
+        assert nodes.get_tool_profile() == expected
+
+    def test_unknown_value_warns_and_falls_back_to_deep(self, monkeypatch, caplog) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "fast")
+        with caplog.at_level("WARNING"):
+            assert nodes.get_tool_profile() == "deep"
+        assert "CROWBAR_TOOL_PROFILE" in caplog.text
+
+
+class TestCoreProfileSkipsHeavyTools:
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("CROWBAR_TOOL_PROFILE", raising=False)
+
+    @staticmethod
+    def _track(monkeypatch):
+        calls = {"floss": 0, "capa": 0, "ghidra": 0}
+
+        def floss(p):
+            calls["floss"] += 1
+            return ["http://c2.example/x"], [{"value": "http://c2.example/x", "function": "0x1"}]
+
+        def capa(p):
+            calls["capa"] += 1
+            return ({"matched_rules": ["create registry key"], "mitre_attack": [], "malware_behavior": []},
+                    [{"offset": "0x401050", "rule": "create registry key"}])
+
+        def ghidra(*a, **kw):
+            calls["ghidra"] += 1
+            return [DecompiledFunction(offset="0x401000", name="f", c_code="x")]
+
+        monkeypatch.setattr(nodes, "run_floss_with_hints", floss)
+        monkeypatch.setattr(nodes, "run_capa", capa)
+        monkeypatch.setattr(nodes, "run_ghidra", ghidra)
+        # hafif araçlar her profilde çalışır
+        monkeypatch.setattr(nodes, "extract_imports", lambda p: ["VirtualAlloc", "WriteProcessMemory", "CreateRemoteThread"])
+        monkeypatch.setattr(nodes, "section_entropy", lambda p: {".upx": 7.9})
+        return calls
+
+    def _state(self, tmp_path, **kw) -> AgentState:
+        p = tmp_path / "a.bin"
+        p.write_bytes(b"D" * 300)
+        return AgentState(file_path=str(p), yara_results=[{"rule": "Emotet", "tags": [], "meta": {}}], **kw)
+
+    def test_core_does_not_call_capa_or_floss(self, tmp_path, monkeypatch) -> None:
+        calls = self._track(monkeypatch)
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "core")
+        out = static_feature_node(self._state(tmp_path))
+        assert calls["floss"] == 0 and calls["capa"] == 0
+        assert out["capabilities"] == {} and out["ghidra_hints"] == []
+        assert out["floss_hints"] == [] and out["extracted_strings"] == []
+        assert not any(f.source in ("capa", "floss") for f in out["findings"])
+
+    def test_core_still_runs_yara_imports_entropy_and_tlsh(self, tmp_path, monkeypatch) -> None:
+        self._track(monkeypatch)
+        _install_fake_tlsh(monkeypatch, result="T1CORE")
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "core")
+        got = {(f.source, f.kind, f.value) for f in static_feature_node(self._state(tmp_path))["findings"]}
+        assert ("yara", "rule", "Emotet") in got
+        assert ("import_combo", "behavior", "Process Injection Combo") in got
+        assert ("pefile_entropy", "high_entropy", ".upx: 7.90") in got
+        assert ("tlsh", "grouping_key", "T1CORE") in got
+
+    def test_deep_runs_capa_and_floss(self, tmp_path, monkeypatch) -> None:
+        calls = self._track(monkeypatch)
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "deep")
+        out = static_feature_node(self._state(tmp_path))
+        assert calls["floss"] == 1 and calls["capa"] == 1
+        assert out["extracted_strings"] == ["http://c2.example/x"]
+        assert any(f.source == "capa" for f in out["findings"])
+
+    def test_unset_profile_behaves_like_deep(self, tmp_path, monkeypatch) -> None:
+        calls = self._track(monkeypatch)
+        static_feature_node(self._state(tmp_path))
+        assert calls["floss"] == 1 and calls["capa"] == 1
+
+    def test_core_skips_ghidra_without_calling_it(self, tmp_path, monkeypatch) -> None:
+        calls = self._track(monkeypatch)
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "core")
+        state = self._state(tmp_path, route_flag="native")  # normalde Ghidra çalışırdı
+        assert nodes.deep_inspection_node(state) == {}
+        assert calls["ghidra"] == 0
+
+    def test_deep_runs_ghidra(self, tmp_path, monkeypatch) -> None:
+        calls = self._track(monkeypatch)
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "deep")
+        out = nodes.deep_inspection_node(self._state(tmp_path, route_flag="native"))
+        assert calls["ghidra"] == 1 and len(out["source_code"]) == 1
+
+    def test_unset_and_unknown_profile_run_ghidra(self, tmp_path, monkeypatch) -> None:
+        calls = self._track(monkeypatch)
+        nodes.deep_inspection_node(self._state(tmp_path, route_flag="native"))
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "turbo")
+        nodes.deep_inspection_node(self._state(tmp_path, route_flag="native"))
+        assert calls["ghidra"] == 2
+
+    def test_core_full_graph_never_touches_heavy_tools(self, tmp_path, monkeypatch) -> None:
+        """static_feature_node + deep_inspection_node arka arkaya: hiçbir ağır araç çağrılmaz."""
+        calls = self._track(monkeypatch)
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "core")
+        state = self._state(tmp_path, route_flag="native")
+        state = state.model_copy(update=static_feature_node(state))
+        state = state.model_copy(update=nodes.deep_inspection_node(state))
+        assert calls == {"floss": 0, "capa": 0, "ghidra": 0}
+        assert state.source_code == []
+
+
+# --------------------------------------------------------------------------- #
+# Bulgu bütünlüğü: finding_id + "binary'de gerçekten var mı?" (verified)
+# --------------------------------------------------------------------------- #
+REAL_URL = "http://198.51.100.7/gate.php"
+FAKE_URL = "http://203.0.113.99/never-in-file.php"
+
+
+def _blob(tmp_path, *chunks: bytes, name="sample.bin"):
+    p = tmp_path / name
+    p.write_bytes(b"\x00\x01JUNK" * 20 + b"\x00".join(chunks) + b"\xffTAIL" * 20)
+    return str(p)
+
+
+class TestComputeFindingId:
+    def test_matches_the_specified_md5_prefix(self) -> None:
+        f = Finding(source="floss", kind="url", value=REAL_URL, address="0x401000")
+        expected = hashlib.md5(f"floss_url_{REAL_URL}_0x401000".encode()).hexdigest()[:8]
+        assert nodes.compute_finding_id(f) == expected
+        assert len(expected) == 8 and all(c in "0123456789abcdef" for c in expected)
+
+    def test_deterministic_and_sensitive_to_every_component(self) -> None:
+        base = Finding(source="floss", kind="url", value="v", address="")
+        same = Finding(source="floss", kind="url", value="v", address="")
+        assert nodes.compute_finding_id(base) == nodes.compute_finding_id(same)
+        variants = [
+            Finding(source="capa", kind="url", value="v"),
+            Finding(source="floss", kind="ip", value="v"),
+            Finding(source="floss", kind="url", value="w"),
+            Finding(source="floss", kind="url", value="v", address="0x1"),
+        ]
+        ids = {nodes.compute_finding_id(x) for x in variants} | {nodes.compute_finding_id(base)}
+        assert len(ids) == 5
+
+    def test_confidence_does_not_change_the_id(self) -> None:
+        a = Finding(source="yara", kind="rule", value="R", confidence=1.0)
+        b = Finding(source="yara", kind="rule", value="R", confidence=0.4)
+        assert nodes.compute_finding_id(a) == nodes.compute_finding_id(b)
+
+
+class TestStringInFile:
+    def test_utf8_and_utf16le_are_found_and_fakes_are_not(self, tmp_path) -> None:
+        path = _blob(tmp_path, REAL_URL.encode("utf-8"), "http://wide.example/x".encode("utf-16le"))
+        got = nodes.string_in_file(path, [REAL_URL, "http://wide.example/x", FAKE_URL])
+        assert got == {REAL_URL: True, "http://wide.example/x": True, FAKE_URL: False}
+
+    def test_utf16_needle_is_not_confused_with_ascii_substring(self, tmp_path) -> None:
+        # only the *wide* encoding of a different string is present
+        path = _blob(tmp_path, "other-string".encode("utf-16le"))
+        assert nodes.string_in_file(path, ["other-string"]) == {"other-string": True}
+        assert nodes.string_in_file(path, ["other-strinX"]) == {"other-strinX": False}
+
+    def test_empty_file_and_unreadable_file(self, tmp_path) -> None:
+        empty = tmp_path / "empty"
+        empty.write_bytes(b"")
+        assert nodes.string_in_file(str(empty), ["abc"]) == {"abc": False}
+        assert nodes.string_in_file(str(tmp_path / "missing"), ["abc"]) is None  # could not check
+
+    def test_non_ascii_value(self, tmp_path) -> None:
+        path = _blob(tmp_path, "http://ünicode.example/ü".encode("utf-8"))
+        assert nodes.string_in_file(path, ["http://ünicode.example/ü"]) == {"http://ünicode.example/ü": True}
+
+
+class TestFinalizeFindings:
+    def _floss(self, kind, value):
+        return Finding(source="floss", kind=kind, value=value)
+
+    def test_present_strings_stay_verified_and_fake_strings_are_flagged(self, tmp_path) -> None:
+        path = _blob(tmp_path, REAL_URL.encode(), b"198.51.100.7", "wide.example".encode("utf-16le"))
+        findings = [
+            self._floss("url", REAL_URL),
+            self._floss("ip", "198.51.100.7"),
+            self._floss("domain", "wide.example"),     # only as UTF-16LE
+            self._floss("url", FAKE_URL),
+            self._floss("email", "ghost@nowhere.example"),
+        ]
+        out = nodes.finalize_findings(findings, path)
+        flags = {f.value: f.verified for f in out}
+        assert flags == {REAL_URL: True, "198.51.100.7": True, "wide.example": True,
+                         FAKE_URL: False, "ghost@nowhere.example": False}
+        assert all(f.finding_id == nodes.compute_finding_id(f) and len(f.finding_id) == 8 for f in out)
+
+    def test_decoded_stack_strings_are_excluded_from_the_check(self, tmp_path) -> None:
+        path = _blob(tmp_path, b"nothing useful")
+        decoded = self._floss("url", "http://decoded.example/c2")   # never plaintext in the file
+        out = nodes.finalize_findings([decoded], path, {"http://decoded.example/c2"})
+        assert out[0].verified is True
+
+    def test_uncheckable_kinds_and_sources_stay_true(self, tmp_path) -> None:
+        path = _blob(tmp_path, b"x")
+        findings = [
+            self._floss("registry", r"HKLM\Software\Not\There"),
+            self._floss("file", "ghost.dll"),
+            Finding(source="yara", kind="rule", value="Rule"),
+            Finding(source="capa", kind="rule", value="create process"),
+            Finding(source="import_combo", kind="behavior", value="Process Injection Combo"),
+            Finding(source="imphash", kind="grouping_key", value="deadbeef"),
+            Finding(source="pefile_entropy", kind="high_entropy", value=".x: 7.90"),
+            Finding(source="capa", kind="url", value="http://not-floss.example/"),  # source not checkable
+        ]
+        out = nodes.finalize_findings(findings, path)
+        assert all(f.verified for f in out)
+        assert all(f.finding_id for f in out)
+
+    def test_never_flips_false_back_to_true_and_does_not_mutate_input(self, tmp_path) -> None:
+        path = _blob(tmp_path, REAL_URL.encode())
+        pre = Finding(source="floss", kind="url", value=REAL_URL, verified=False)
+        out = nodes.finalize_findings([pre], path)
+        assert out[0].verified is False
+        assert pre.finding_id == ""  # input untouched (model_copy)
+
+    def test_unreadable_file_leaves_verified_untouched_but_still_assigns_ids(self, tmp_path) -> None:
+        out = nodes.finalize_findings([self._floss("url", FAKE_URL)], str(tmp_path / "gone.bin"))
+        assert out[0].verified is True and out[0].finding_id
+
+    def test_duplicate_values_are_searched_once(self, tmp_path, monkeypatch) -> None:
+        path = _blob(tmp_path, b"x")
+        seen = []
+        real = nodes.string_in_file
+        monkeypatch.setattr(nodes, "string_in_file", lambda p, v: seen.append(list(v)) or real(p, v))
+        nodes.finalize_findings([self._floss("url", FAKE_URL),
+                                 Finding(source="floss", kind="url", value=FAKE_URL, address="0x1")], path)
+        assert seen == [[FAKE_URL]]
+
+    def test_value_cap(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(nodes, "MAX_VERIFY_VALUES", 2)
+        path = _blob(tmp_path, b"x")
+        out = nodes.finalize_findings([self._floss("url", f"http://h{i}.example/") for i in range(4)], path)
+        assert [f.verified for f in out] == [False, False, True, True]  # the rest is not checked
+
+    def test_no_targets_does_not_open_the_file(self, monkeypatch) -> None:
+        monkeypatch.setattr(nodes, "string_in_file", lambda *a: pytest.fail("must not scan"))
+        out = nodes.finalize_findings([Finding(source="yara", kind="rule", value="R")], "does-not-matter")
+        assert out[0].verified is True
+
+
+class TestStaticFeatureNodeIntegrity:
+    def _quiet(self, monkeypatch, iocs, hints=()):
+        monkeypatch.setattr(nodes, "run_floss_with_hints", lambda p: (list(iocs), list(hints)))
+        monkeypatch.setattr(nodes, "run_capa", lambda p: ({}, []))
+        monkeypatch.setattr(nodes, "extract_imports", lambda p: [])
+        monkeypatch.setattr(nodes, "section_entropy", lambda p: {})
+
+    def test_node_marks_fake_floss_ioc_unverified(self, tmp_path, monkeypatch) -> None:
+        path = _blob(tmp_path, REAL_URL.encode())
+        self._quiet(monkeypatch, [REAL_URL, FAKE_URL])
+        out = static_feature_node(AgentState(file_path=path))
+        by_value = {f.value: f for f in out["findings"] if f.source == "floss"}
+        assert by_value[REAL_URL].verified is True
+        assert by_value[FAKE_URL].verified is False
+        assert all(f.finding_id for f in out["findings"])
+
+    def test_node_does_not_check_decoded_hint_values(self, tmp_path, monkeypatch) -> None:
+        decoded = "http://decoded-only.example/c2"
+        path = _blob(tmp_path, b"packed bytes only")
+        self._quiet(monkeypatch, [decoded, FAKE_URL], hints=[{"value": decoded, "decoded_at": "0x2001229"}])
+        out = static_feature_node(AgentState(file_path=path))
+        by_value = {f.value: f.verified for f in out["findings"] if f.source == "floss"}
+        assert by_value == {decoded: True, FAKE_URL: False}
+
+    def test_node_keeps_yara_from_entry_node_and_gives_it_an_id(self, tmp_path, monkeypatch) -> None:
+        path = _blob(tmp_path, b"x")
+        self._quiet(monkeypatch, [])
+        yara = [{"rule": "Emotet"}]
+        state = AgentState(file_path=path, yara_results=yara, findings=nodes.yara_findings(yara))
+        (f,) = static_feature_node(state)["findings"]
+        assert f.source == "yara" and f.verified is True and f.finding_id
+
+    def test_core_profile_still_verifies(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "core")
+        self._quiet(monkeypatch, [])
+        path = _blob(tmp_path, b"x")
+        state = AgentState(file_path=path, findings=[Finding(source="floss", kind="url", value=FAKE_URL)])
+        out = static_feature_node(state)
+        assert out["findings"][0].verified is False

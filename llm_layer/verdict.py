@@ -6,6 +6,10 @@ Four states (never "clean"):
                   string, or a conflict
   unknown       : coverage too low, packed, tool failure, no functions
   no_evidence   : covered surface analyzed, no malicious evidence found
+
+Integrity: a critical finding with ``verified=False`` (a statically extracted text IoC
+that is not present in the file bytes) is never evidence for "malicious"; it only
+escalates the verdict to needs_review (and still overrides a benign LLM verdict).
 """
 from __future__ import annotations
 
@@ -31,6 +35,8 @@ CONFIDENCE_FLOOR = 0.7
 
 
 def finding_id(f: Finding) -> str:
+    if f.finding_id:  # nodes.compute_finding_id: DB/state ile aynı kimlik
+        return f.finding_id
     raw = f"{f.source}|{f.kind}|{f.value}|{f.address}"
     return "f_" + hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
 
@@ -81,11 +87,15 @@ def apply_fail_closed(summary: FunctionSummary, fn: FunctionInfo,
     if summary.suspicious is not False:
         return summary
     relevant = [f for f in findings if not f.address or f.address == fn.offset]
-    if not any(is_critical_finding(f) for f in relevant):
+    critical = [f for f in relevant if is_critical_finding(f)]
+    if not critical:
         return summary
+    # Doğrulanmamış (binary'de bulunamayan) kritik bulgu da "temiz" kararını geçersiz kılar
+    # (fail-closed: unknown), ama dosya kararında malicious üretemez (compute_verdict).
     summary.suspicious = None
     summary.fail_closed = True
-    note = "fail-closed: critical finding present"
+    note = ("fail-closed: critical finding present" if any(f.verified for f in critical)
+            else "fail-closed: unverified critical finding present")
     if note not in summary.behaviors:
         summary.behaviors = (list(summary.behaviors) + [note])[:4]
     return summary
@@ -114,7 +124,12 @@ def compute_verdict(
     unknown_fns = [f for f in analyzed if summaries[f.offset].suspicious is None]
     fail_closed = [f for f in analyzed if summaries[f.offset].fail_closed]
 
-    critical = _unique_findings([f for f in findings if is_critical_finding(f)])
+    all_critical = [f for f in findings if is_critical_finding(f)]
+    # Integrity: a critical finding whose text IoC is NOT present in the file bytes
+    # (verified=False) is not evidence. It can never support "malicious" (alone or as a
+    # corroborating signal); it only escalates to needs_review.
+    critical = _unique_findings([f for f in all_critical if f.verified])
+    unverified = _unique_findings([f for f in all_critical if not f.verified])
     high = [f for f in critical if is_high_authority(f)]
     low = [f for f in critical if not is_high_authority(f)]
     medium = [f for f in _unique_findings([f for f in findings if is_medium_authority(f)])
@@ -166,6 +181,10 @@ def compute_verdict(
     elif conflicts:
         verdict = NEEDS_REVIEW
         reasons.append(f"{len(conflicts)} benign claim(s) conflict with evidence")
+    elif unverified:
+        verdict = NEEDS_REVIEW
+        reasons.append(f"{len(unverified)} unverified critical finding(s) (string not found in the "
+                       "file bytes); cannot support a malicious verdict")
     elif medium:
         verdict = NEEDS_REVIEW
         reasons.append(f"{len(medium)} medium-authority finding(s) (capa/import/IoC)")
@@ -191,6 +210,8 @@ def compute_verdict(
         verdict = NO_EVIDENCE
         reasons.append("covered surface analyzed; no malicious evidence found")
 
+    if unverified and verdict != NEEDS_REVIEW:
+        reasons.append(f"{len(unverified)} unverified critical finding(s) ignored as evidence")
     if fail_closed:
         reasons.append(f"{len(fail_closed)} function(s) fail-closed over a benign LLM verdict")
     if unknown_fns:
@@ -225,6 +246,7 @@ def compute_verdict(
             "unknown_functions": len(unknown_fns),
             "fail_closed": len(fail_closed),
             "critical_findings": len(critical),
+            "unverified_critical": len(unverified),
             "high_authority": len(high),
             "medium_findings": len(medium),
             "c2_like": len(low),
@@ -238,6 +260,11 @@ def compute_verdict(
              "value": (f.value or "")[:160], "address": f.address,
              "tier": "high" if is_high_authority(f) else "c2_like"}
             for f in critical[:20]
+        ],
+        "unverified_findings": [
+            {"id": finding_id(f), "source": f.source, "kind": f.kind,
+             "value": (f.value or "")[:160], "address": f.address, "tier": "unverified"}
+            for f in unverified[:20]
         ],
         "medium_findings": [
             {"id": finding_id(f), "source": f.source, "kind": f.kind,

@@ -350,7 +350,14 @@ function renderDetail(d) {
     for (const f of d.findings) {
       tbody.append(el("tr", {},
         el("td", { text: f.source }), el("td", { text: f.kind }),
-        el("td", {}, el("code", { text: f.value })), el("td", { text: f.address || "" }),
+        el("td", {}, el("code", { text: f.value }),
+          // verified === false: string dosya byte'larında bulunamadı (araç hatası / uydurma olabilir)
+          f.verified === false
+            ? el("span", { class: "chip bad", style: "margin-left:6px",
+                           title: "Dosya byte'larında (UTF-8/UTF-16) bulunamadı; kanıt olarak güvenilmez. Tek başına malicious üretemez.",
+                           text: "(Unverified)" })
+            : null),
+        el("td", { text: f.address || "" }),
         el("td", { text: String(f.confidence) })));
     }
     box.append(el("table", {},

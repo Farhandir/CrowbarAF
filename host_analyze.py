@@ -23,6 +23,10 @@ Examples:
     CROWBAR_LLM_PROVIDER=openai CROWBAR_LLM_API_KEY=... \
         python host_analyze.py --state state.json --out state_llm.json \
         --model deepseek-v4.1-flash --max-workers 8
+
+    # also persist to SQLite so the FastAPI UI (main.py --serve) shows it
+    python host_analyze.py --state state.json --db            # crowbaraf.db
+    python host_analyze.py --state state.json --db other.db
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ import os
 import sys
 from pathlib import Path
 
+import db
 from llm_layer.nodes import run_reverser, run_supervisor
 from state import AgentState
 
@@ -73,7 +78,8 @@ def analyze_state(
     """Run the LLM stage on a deterministic state and return the merged state.
 
     ``client`` is injectable for tests; production uses ``from_env`` inside
-    ``run_reverser``. No database write and no sample execution happens here.
+    ``run_reverser``. No database write (see ``persist_state``) and no sample
+    execution happens here.
     """
     out = run_reverser(state, client=client, budget_tokens=budget_tokens)
     merged = state.model_copy(update=out)
@@ -104,6 +110,17 @@ def write_state(state: AgentState, path: str | Path) -> Path:
         except FileNotFoundError:
             pass
     return p
+
+
+def persist_state(state: AgentState, db_path: str | None = None) -> dict:
+    """Host'ta biten analizi SQLite'a yazar (UI/``report.py --db`` görsün diye).
+
+    Sample, bulgular, fonksiyonlar (``llm_summary`` dahil), çağrı kenarları ve
+    ``llm_claims`` (rapor + ``verdict``) ``db.save_analysis`` ile kalıcı olur.
+    ``sample.sha256`` boşsa ``ValueError`` fırlatır. Sadece **host** tarafında
+    çağrılır; analiz VM'i ``--no-db`` ile hiç veritabanına dokunmaz.
+    """
+    return db.save_analysis(state, db_path)
 
 
 def _apply_cli_env(args: argparse.Namespace) -> None:
@@ -145,6 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trace-dir", help="directory for LLM trace JSON")
     parser.add_argument("--cache", help="summary cache JSON path")
     parser.add_argument("--no-report", action="store_true", help="skip the deterministic report")
+    parser.add_argument(
+        "--db", nargs="?", const=db.DEFAULT_DB_PATH, default=None, metavar="PATH",
+        help=f"persist the result to SQLite so the UI/report.py --db can show it "
+             f"(PATH optional; default {db.DEFAULT_DB_PATH}). Omit to skip the DB.",
+    )
     return parser
 
 
@@ -173,6 +195,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"host_analyze: wrote {path}", file=sys.stderr)
         else:
             print(merged.model_dump_json(indent=2))
+        if args.db:
+            saved = persist_state(merged, args.db)
+            print(
+                f"host_analyze: saved to {saved['db_path']} "
+                f"(sha256={saved['sha256'][:12]}, functions={saved['functions']}, "
+                f"findings={saved['findings']}, verdict="
+                f"{(merged.verdict or {}).get('verdict', '-')})",
+                file=sys.stderr,
+            )
     except Exception as exc:  # noqa: BLE001 - clean CLI failure, no traceback/key
         print(f"host_analyze: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

@@ -13,7 +13,10 @@ Mantık:
   1. Programdaki TÜM fonksiyonlar için ad, adres, size, callees ve priority hesaplanır
      (decompile yapılmaz; ucuzdur).
   2. Puanlama: capa hint +5, tehlikeli API +4, import combo API'si +4,
-     çok büyük fonksiyon -2, kütüphane/thunk = 0.
+     çok büyük fonksiyon -2, kütüphane/stub = 0 (``is_library_heuristic``: thunk/external,
+     ``__libc_``/``_Z``/``std::``/... önekleri, size < 16; is_library=True ve priority=0).
+     İstisna: entry/main ve kanıt taşıyan (capa/IoC) fonksiyonlar ad/boyut sezgisiyle
+     kütüphane sayılmaz (``SOFT_LIBRARY_REASONS``).
   3. Sadece en yüksek puanlı ilk MAX_DECOMPILE (100) fonksiyon decompile edilir.
      Puanlı fonksiyon yoksa en büyük birkaç fonksiyon (FALLBACK_DECOMPILE) denenir.
   4. Decompile edilenlerin doğrudan callee'leri ``c_code: ""`` ile (çağrı grafiği
@@ -49,6 +52,17 @@ MAX_DEFINED_DATA = int(os.environ.get("CROWBAR_MAX_DEFINED_DATA", "2000000"))  #
 MAX_DECOMPILE = int(os.environ.get("CROWBAR_MAX_DECOMPILE", "100"))  # Top-N
 FALLBACK_DECOMPILE = int(os.environ.get("CROWBAR_FALLBACK_DECOMPILE", "20"))
 MAX_STUBS = 500  # c_code'suz callee kayıtlarının üst sınırı
+
+# Kütüphane/derleyici sezgisi (is_library_heuristic). Önek eşleşmesi büyük/küçük harf duyarlı.
+LIBRARY_NAME_PREFIXES = (
+    "__libc_", "_Z", "std::", "__cxa_", "__gxx_", "j_", "CRT_", "golang.", "runtime.",
+)
+MIN_FUNCTION_BYTES = 16  # daha küçükler: padding, thunk veya işlevsiz RET
+# Sadece ad/boyut sezgisiyle (Ghidra bayrağı olmadan) kütüphane sayılan bir fonksiyon;
+# entry/main ise veya kanıt taşıyorsa (capa / IoC) kütüphane SAYILMAZ: "_Z" ile başlayan
+# kullanıcı C++ kodu ya da kısa ama IoC'ye referans veren fonksiyon sessizce 0'a düşmesin.
+SOFT_LIBRARY_REASONS = frozenset(("prefix", "size"))
+ENTRY_NAMES = frozenset(("main", "_start", "entry", "wmain"))
 MAX_CALLEES = 50
 MAX_XREFS = 50
 
@@ -180,6 +194,54 @@ def add_ioc_hits(hits, entry, iocs):
             bucket.append(ioc)
 
 
+def _call(obj, method, default):
+    """``obj.method()`` çağırır; yoksa/hata verirse ``default`` (Ghidra nesneleri bazen patlar)."""
+    try:
+        return getattr(obj, method)()
+    except Exception:
+        return default
+
+
+def is_entry_name(name):
+    """Giriş noktası/main benzeri ad (her zaman decompile edilir; kütüphane sayılmaz)."""
+    return str(name or "").strip().lower() in ENTRY_NAMES
+
+
+def library_reason(func, size):
+    """Fonksiyonun neden kütüphane/stub sayıldığı: ``""`` (sayılmadı) ya da
+    ``"thunk"`` | ``"external"`` | ``"prefix"`` | ``"size"`` (bu sırayla ilk eşleşen).
+    """
+    if _call(func, "isThunk", False):
+        return "thunk"
+    if _call(func, "isExternal", False):
+        return "external"
+    name = str(_call(func, "getName", "") or "")
+    if name.startswith(LIBRARY_NAME_PREFIXES):
+        return "prefix"
+    try:
+        if int(size) < MIN_FUNCTION_BYTES:
+            return "size"
+    except (TypeError, ValueError):
+        pass
+    return ""
+
+
+def is_library_heuristic(func, size):
+    """Kütüphane/derleyici/stub fonksiyonu mu? (``True`` => is_library, priority 0)
+
+    ``True`` döner:
+      * Ghidra bayrağı: ``func.isThunk()`` veya ``func.isExternal()``;
+      * ad ``LIBRARY_NAME_PREFIXES`` öneklerinden biriyle başlıyorsa
+        (``__libc_``, ``_Z``, ``std::``, ``__cxa_``, ``__gxx_``, ``j_``, ``CRT_``,
+        ``golang.``, ``runtime.``);
+      * ``size < 16`` byte (padding / thunk / işlevsiz RET).
+
+    Saf sezgidir. Kanıt taşıyan fonksiyonlar için istisna ``collect_records``'tadır
+    (``SOFT_LIBRARY_REASONS``).
+    """
+    return bool(library_reason(func, size))
+
+
 def compute_priority(capa_hits, callee_names, size, is_library, combo_apis, ioc_hits=None):
     """Fonksiyon öncelik puanı (kütüphane/thunk her zaman 0).
 
@@ -234,6 +296,12 @@ def plan_export(records):
     * Hiç puanlı fonksiyon yoksa: kütüphane olmayan en büyük FALLBACK_DECOMPILE fonksiyon.
     * Seçilenlerin doğrudan (dahili) callee'leri stub olarak eklenir (en fazla MAX_STUBS).
     """
+    # Kütüphane/stub kaydı ne olursa olsun puan 0: Top-N'e girip boş yere decompile
+    # edilmesin, LLM token bütçesi harcamasın (propagate_priority sonrası da garanti).
+    for r in records:
+        if r.get("is_library"):
+            r["priority"] = 0
+
     ranked = sorted(records, key=lambda r: (-r["priority"], r["size"], r["offset"]))
     chosen = []
     seen = set()
@@ -245,8 +313,7 @@ def plan_export(records):
 
     # Entry point / main is always analyzed; compiler stubs must not crowd it out.
     for r in records:
-        name = str(r.get("name") or "").strip().lower()
-        if r.get("is_entry") or name in ("main", "_start", "entry", "wmain"):
+        if r.get("is_entry") or is_entry_name(r.get("name")):
             add(r)
 
     scored = [r for r in ranked if r["priority"] > 0]
@@ -584,13 +651,20 @@ def collect_records(hits, combo_apis, ioc_hits=None):
             entry = fmt_addr(func.getEntryPoint())
             capa_hits = list(hits.get(entry, []))
             iocs = list(ioc_hits.get(entry, []))
-            is_library = bool(func.isThunk())
             size = int(func.getBody().getNumAddresses())
             callee_addrs, callee_names = get_callees(func)
             try:
                 is_entry = bool(entry_point is not None and func.getEntryPoint() == entry_point)
             except Exception:
                 is_entry = False
+
+            reason = library_reason(func, size)
+            is_library = bool(reason)
+            # Kanıt/entry istisnası: ad/boyut sezgisi tek başına kanıt taşıyan veya entry/main
+            # fonksiyonu kütüphane yapmaz (Ghidra thunk/external bayrağı yine kesindir).
+            if reason in SOFT_LIBRARY_REASONS and (
+                    is_entry or is_entry_name(func.getName()) or capa_hits or iocs):
+                is_library = False
 
             records.append({
                 "offset": entry,
@@ -637,8 +711,8 @@ def main():
         records = collect_records(hits, combo_set, ioc_hits)
         propagate_priority(records)
         chosen, stubs = plan_export(records)
-        println("[export_functions] %d fonksiyon tarandi, %d decompile edilecek, %d stub" % (  # noqa: F821
-            len(records), len(chosen), len(stubs)))
+        println("[export_functions] %d fonksiyon tarandi (%d kutuphane/stub), %d decompile edilecek, %d stub" % (  # noqa: F821
+            len(records), sum(1 for r in records if r["is_library"]), len(chosen), len(stubs)))
 
         decomp = DecompInterface()
         decomp.openProgram(currentProgram)  # noqa: F821

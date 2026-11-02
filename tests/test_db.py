@@ -43,7 +43,8 @@ class TestInitDb:
             return [r[1] for r in _rows(db_path, f"PRAGMA table_info({table})")]
 
         assert cols("samples") == ["sha256", "file_type", "route", "packer", "arch"]
-        assert cols("findings") == ["id", "sha256", "source", "kind", "value", "address", "confidence"]
+        assert cols("findings") == ["id", "sha256", "source", "kind", "value", "address", "confidence",
+                                    "finding_id", "verified"]
         assert cols("functions") == [
             "id", "sha256", "offset", "name", "priority", "c_code", "decompile_warnings",
             "llm_summary", "size", "is_library", "capa_hits", "xrefs", "iocs",
@@ -242,7 +243,8 @@ class TestFunctionIocs:
         assert json.loads(raw["0x1"]) == ["http://evil.example/ü", "10.0.0.1"]
         assert json.loads(raw["0x2"]) == []
         by_offset = {f["offset"]: f for f in db.get_sample_details(SHA, db_path)["functions"]}
-        assert by_offset["0x1"]["iocs"] == ["http://evil.example/ü", "10.0.0.1"]
+        # DB ham değeri saklar; okuma yolu (API/UI) IoC'leri defang eder
+        assert by_offset["0x1"]["iocs"] == ["hxxp://evil[.]example/ü", "10.0.0[.]1"]
         assert by_offset["0x2"]["iocs"] == []
 
     def test_old_functions_table_gets_iocs_column_and_old_rows_read_as_empty(self, tmp_path) -> None:
@@ -267,7 +269,7 @@ class TestFunctionIocs:
             source_code=[DecompiledFunction(offset="0x1", name="f", c_code="x", iocs=["10.0.0.1"])],
         )
         nodes.db_writer_node(state)
-        assert db.get_sample_details(SHA, db_path)["functions"][0]["iocs"] == ["10.0.0.1"]
+        assert db.get_sample_details(SHA, db_path)["functions"][0]["iocs"] == ["10.0.0[.]1"]  # defang edilmiş
 
 
 class TestDbWriterNodeVerdictAndSummaries:
@@ -329,3 +331,44 @@ class TestGraphWiring:
         edges = self._edges()
         assert ("entry_node", "ai_supervisor_agent") in edges  # fast_track
         assert ("ai_supervisor_agent", "db_writer_node") in edges
+
+
+class TestFindingIntegrityColumns:
+    def test_finding_id_and_verified_roundtrip(self, db_path) -> None:
+        db.init_db(db_path)
+        db.insert_sample(SampleInfo(sha256=SHA), db_path)
+        db.insert_findings(SHA, [
+            Finding(source="floss", kind="ip", value="198.51.100.7", finding_id="abcd1234", verified=False),
+            Finding(source="yara", kind="rule", value="R", finding_id="ffff0000"),
+        ], db_path)
+        raw = _rows(db_path, "SELECT finding_id, verified FROM findings ORDER BY id")
+        assert raw == [("abcd1234", 0), ("ffff0000", 1)]
+        by_source = {f["source"]: f for f in db.get_sample_details(SHA, db_path)["findings"]}
+        assert by_source["floss"]["finding_id"] == "abcd1234" and by_source["floss"]["verified"] is False
+        assert by_source["yara"]["finding_id"] == "ffff0000" and by_source["yara"]["verified"] is True
+
+    def test_defaults_for_findings_without_the_new_fields(self, db_path) -> None:
+        class Legacy:  # eski tip: finding_id/verified özniteliği yok
+            source, kind, value, address, confidence = "yara", "rule", "R", "", 1.0
+
+        db.init_db(db_path)
+        db.insert_findings(SHA, [Legacy()], db_path)
+        assert _rows(db_path, "SELECT finding_id, verified FROM findings") == [("", 1)]
+
+    def test_old_findings_table_is_migrated_and_old_rows_read_as_verified(self, tmp_path) -> None:
+        path = str(tmp_path / "old.db")
+        with closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute(
+                "CREATE TABLE findings (id INTEGER PRIMARY KEY AUTOINCREMENT, sha256 TEXT, source TEXT, "
+                "kind TEXT, value TEXT, address TEXT, confidence REAL)"
+            )
+            conn.execute("INSERT INTO findings (sha256, source, kind, value, address, confidence) "
+                         "VALUES (?, 'floss', 'ip', '10.0.0.1', '', 1.0)", (SHA,))
+            conn.execute("CREATE TABLE samples (sha256 TEXT PRIMARY KEY, file_type TEXT, route TEXT, packer TEXT, arch TEXT)")
+            conn.execute("INSERT INTO samples (sha256) VALUES (?)", (SHA,))
+        db.init_db(path)
+        cols = [r[1] for r in _rows(path, "PRAGMA table_info(findings)")]
+        assert cols[-2:] == ["finding_id", "verified"]
+        (old,) = db.get_sample_details(SHA, path)["findings"]
+        assert old["verified"] is True and old["finding_id"] == ""
+        db.init_db(path)  # idempotent

@@ -41,6 +41,8 @@ def _to_findings(state) -> list[Finding]:
             value=f.value,
             address=f.address or None,  # boş adres = genel (tüm fonksiyonlar için) bulgu
             confidence=f.confidence,
+            finding_id=getattr(f, "finding_id", "") or "",
+            verified=bool(getattr(f, "verified", True)),
         )
         for f in getattr(state, "findings", []) or []
     ]

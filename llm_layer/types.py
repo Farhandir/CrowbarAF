@@ -16,6 +16,8 @@ class Finding:
     value: str
     address: str | None = None
     confidence: float = 1.0
+    finding_id: str = ""        # nodes.finding_id (md5[:8]); boşsa verdict kendi kimliğini üretir
+    verified: bool = True       # False: metin IoC'si binary'de bulunamadı (kanıt olarak güvenilmez)
 
 
 @dataclass

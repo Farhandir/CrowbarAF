@@ -673,3 +673,129 @@ def test_map_decoded_hints_rebases_floss_pie_address(fake_ghidra, monkeypatch):
     monkeypatch.setattr(ef, "toAddr", lambda n: _Addr(n), raising=False)
     hits = ef.map_decoded_hints_to_functions([{"value": "http://x", "function": 0x2001229}])
     assert hits == {"0x101000": ["http://x"]}
+
+
+# --------------------------------------------------------------------------- #
+# is_library_heuristic: Ghidra bayrakları, ad önekleri, size < 16
+# --------------------------------------------------------------------------- #
+class _ExtFunc(_Func):
+    def __init__(self, *a, external=False, **kw):
+        super().__init__(*a, **kw)
+        self.external = external
+
+    def isExternal(self):
+        return self.external
+
+
+class TestIsLibraryHeuristic:
+    def test_plain_user_function_is_not_library(self) -> None:
+        assert ef.is_library_heuristic(_Func(0x401000, size=64, name="FUN_00401000"), 64) is False
+        assert ef.is_library_heuristic(_Func(0x401000, size=64, name="decrypt_payload"), 64) is False
+
+    def test_ghidra_flags(self) -> None:
+        assert ef.is_library_heuristic(_Func(0x1, thunk=True), 64) is True
+        assert ef.is_library_heuristic(_ExtFunc(0x1, external=True), 64) is True
+        assert ef.library_reason(_Func(0x1, thunk=True), 64) == "thunk"
+        assert ef.library_reason(_ExtFunc(0x1, external=True), 64) == "external"
+
+    @pytest.mark.parametrize("name", [
+        "__libc_start_main", "__libc_csu_init", "_ZN3FooC1Ev", "_Z3barv", "std::vector::push_back",
+        "__cxa_atexit", "__cxa_finalize", "__gxx_personality_v0", "j_memcpy", "CRT_INIT",
+        "golang.org/x/sys.Foo", "runtime.mallocgc", "runtime.morestack",
+    ])
+    def test_name_prefixes(self, name) -> None:
+        assert ef.is_library_heuristic(_Func(0x1, name=name), 64) is True
+        assert ef.library_reason(_Func(0x1, name=name), 64) == "prefix"
+
+    @pytest.mark.parametrize("name", [
+        "main", "FUN_00401000", "decrypt", "my_libc_wrapper", "xstd::y", "Z_func", "_z_lower",
+        "jump_table", "crt_init", "Runtime.Foo", "mainruntime.x", "main.main",
+    ])
+    def test_similar_names_are_not_library(self, name) -> None:
+        assert ef.is_library_heuristic(_Func(0x1, name=name), 64) is False
+
+    @pytest.mark.parametrize("size, expected", [(0, True), (1, True), (15, True), (16, False), (17, False), (4096, False)])
+    def test_size_threshold_is_16_bytes(self, size, expected) -> None:
+        assert ef.MIN_FUNCTION_BYTES == 16
+        assert ef.is_library_heuristic(_Func(0x1, name="FUN_1"), size) is expected
+
+    def test_garbage_size_does_not_crash(self) -> None:
+        assert ef.is_library_heuristic(_Func(0x1, name="FUN_1"), None) is False
+
+    def test_broken_ghidra_object_does_not_crash(self) -> None:
+        class Broken:
+            def isThunk(self):
+                raise RuntimeError("boom")
+
+            def isExternal(self):
+                raise RuntimeError("boom")
+
+            def getName(self):
+                raise RuntimeError("boom")
+
+        assert ef.is_library_heuristic(Broken(), 64) is False
+        assert ef.is_library_heuristic(Broken(), 4) is True  # boyut kuralı yine çalışır
+
+
+class TestLibraryScoringAndExclusion:
+    def test_collect_records_marks_library_with_zero_priority(self, fake_ghidra) -> None:
+        funcs = [
+            _Func(0x401000, size=64, name="FUN_user"),
+            _Func(0x401100, size=64, name="__libc_csu_init"),
+            _Func(0x401200, size=8, name="FUN_stub"),
+            _Func(0x401300, size=64, name="FUN_thunk", thunk=True),
+            _Func(0x401400, size=64, name="_ZN3FooC1Ev"),
+        ]
+        fake_ghidra(_Program([], {}, funcs))
+        # tehlikeli API çağıran (puan alabilecek) kütüphane fonksiyonu bile 0 kalmalı
+        funcs[1].callees = [_Func(0x900000, name="VirtualAlloc")]
+        records = {r["offset"]: r for r in ef.collect_records({"0x401100": ["capa rule"]}, set())}
+        assert records["0x401000"]["is_library"] is False
+        for off in ("0x401200", "0x401300", "0x401400"):
+            assert records[off]["is_library"] is True and records[off]["priority"] == 0
+        # capa kanıtlı ama sadece ad önekiyle "kütüphane" olan fonksiyon: istisna (aşağıda ayrıca test edilir)
+        assert records["0x401100"]["is_library"] is False
+
+    def test_library_functions_never_enter_top_n_or_fallback(self, fake_ghidra) -> None:
+        funcs = [_Func(0x401000, size=64, name="FUN_user"),
+                 _Func(0x401100, size=900, name="std::huge_inline"),
+                 _Func(0x401200, size=4, name="FUN_stub")]
+        fake_ghidra(_Program([], {}, funcs))
+        records = ef.collect_records({}, set())
+        chosen, stubs = ef.plan_export(records)
+        offsets = [r["offset"] for r in chosen]
+        assert "0x401100" not in offsets and "0x401200" not in offsets
+        assert offsets == ["0x401000"]  # fallback sadece kütüphane olmayanı seçer
+
+    def test_plan_export_forces_library_priority_to_zero(self) -> None:
+        records = [_rec("0x1", priority=9, is_library=True), _rec("0x2", priority=3)]
+        chosen, _ = ef.plan_export(records)
+        assert [r["offset"] for r in chosen] == ["0x2"]
+        assert records[0]["priority"] == 0
+
+    def test_library_json_contract(self, fake_ghidra) -> None:
+        fake_ghidra(_Program([], {}, [_Func(0x401000, size=8, name="FUN_stub")]))
+        (rec,) = ef.collect_records({}, set())
+        assert rec["is_library"] is True and rec["priority"] == 0
+        DecompiledFunction(**{k: v for k, v in rec.items() if k not in ("_func", "is_entry")})
+
+    # -- kanıt / entry istisnası (yalnızca ad-önek ve size sezgisi için) --------------------
+    def test_main_is_never_library_even_if_tiny(self, fake_ghidra) -> None:
+        fake_ghidra(_Program([], {}, [_Func(0x401000, size=11, name="main")]))
+        (rec,) = ef.collect_records({}, set())
+        assert rec["is_library"] is False
+        chosen, _ = ef.plan_export([rec])
+        assert [r["offset"] for r in chosen] == ["0x401000"]
+
+    def test_iocs_or_capa_keep_name_or_size_heuristic_functions_analyzable(self, fake_ghidra) -> None:
+        funcs = [_Func(0x401000, size=8, name="FUN_tiny"), _Func(0x401100, size=64, name="_Z7payloadv")]
+        fake_ghidra(_Program([], {}, funcs))
+        records = {r["offset"]: r for r in ef.collect_records(
+            {"0x401100": ["connect to c2"]}, set(), {"0x401000": ["10.0.0.1"]})}
+        assert records["0x401000"]["is_library"] is False and records["0x401000"]["priority"] == 3
+        assert records["0x401100"]["is_library"] is False and records["0x401100"]["priority"] == 5
+
+    def test_ghidra_thunk_flag_is_not_overridden_by_evidence(self, fake_ghidra) -> None:
+        fake_ghidra(_Program([], {}, [_Func(0x401000, size=64, name="FUN_t", thunk=True)]))
+        (rec,) = ef.collect_records({"0x401000": ["rule"]}, set(), {"0x401000": ["10.0.0.1"]})
+        assert rec["is_library"] is True and rec["priority"] == 0

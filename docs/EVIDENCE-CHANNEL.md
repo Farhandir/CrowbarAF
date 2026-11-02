@@ -83,16 +83,21 @@ comparable.
 
 ## 3. Not implemented (gaps)
 
-1. **Tool-output provenance/integrity.** No finding ID, raw-output hash, tool
-   version or "this value came from this tool" check. The pipeline builds
-   findings from tool JSON, but there is no explicit integrity record.
-2. **Existence check.** No verification that a string exists in the binary
-   (or was produced by a recorded decoder), that a capa rule is in the capa
-   output, or that a YARA rule actually matched.
+1. **Tool-output provenance/integrity — DONE (scoped, Step 6/7).** Every
+   finding now carries a deterministic `finding_id` (`md5(source_kind_value_address)[:8]`)
+   and a `verified` flag (see §12). **Still open:** raw-output hashes and tool
+   version records.
+2. **Existence check — DONE for static FLOSS IoCs (Step 6/7).** `ip/url/domain/email`
+   values from static FLOSS strings are searched byte-level (UTF-8 and UTF-16LE)
+   in the file; a miss sets `verified=False`. FLOSS decoded/tight/stack strings are
+   excluded (they legitimately do not exist in the file bytes). **Still open:**
+   existence checks for capa rules and YARA matches.
 3. **Cross-tool corroboration.** A lone string has the same standing as a string
    corroborated by imports/behaviour. No corroboration score.
-4. **Source-specific policy.** YARA/capa, imports, IOC and raw strings are not
-   treated differently at the authority level.
+4. **Source-specific policy — DONE (Policy C, §10/§11.2/§12).** YARA is high,
+   capa/import_combo/IoC medium, FLOSS C2-like strings low-critical; `malicious`
+   requires two independent signal classes. Unverified critical findings lose
+   authority (see §12). **Still open:** attack coverage for non-FLOSS sources (item 6).
 5. **Conflict policy.** The file verdict detects a benign claim that conflicts
    with critical evidence (`needs_review`), but there is no full per-claim
    conflict ledger yet.
@@ -176,8 +181,9 @@ or semantically close to `http://192.0.2.1:4444/gate.php`. Therefore:
 
 ## 7. Next steps (ordered)
 
-1. **Tool-output validation layer:** finding IDs, raw-output hashes, existence
-   checks, source-specific authority.
+1. **Tool-output validation layer — DONE (scoped):** finding IDs, byte-level
+   existence check for static FLOSS IoCs, source-specific authority (§12).
+   Remaining: raw-output hashes, tool-version records, capa/YARA existence checks.
 2. **Source coverage:** add capa/YARA/import/IOC/metadata attack variants to
    Gaslighter and re-run the hardening.
 3. **Decision-recall tests:** permutation + ablation on the synthetic samples.
@@ -579,3 +585,24 @@ Corrected S3/S4 runs (8 workers, same states):
 - Global digest still shows critical YARA/C2 in every prompt (a few tokens); the
   bulk saving comes from collapsing medium findings to one count line.
 
+
+## 12. Tool-output integrity and authority (Step 6/7, 2026-11-02)
+
+Closes §3 items 1, 2, 4 and §7 item 1 for the scope below.
+
+- **`finding_id`:** `md5(f"{source}_{kind}_{value}_{address}")[:8]`, stored in state, SQLite
+  (`findings.finding_id`) and the API. `llm_layer.verdict.finding_id()` reuses it when set.
+- **`verified`:** `nodes.finalize_findings` searches static FLOSS `ip/url/domain/email` values in
+  the file bytes (mmap; UTF-8 and UTF-16LE). Not found -> `verified=False`. It never flips
+  False -> True; an unreadable file leaves everything untouched; cap of 500 values per sample.
+  FLOSS decoded/tight/stack values are excluded.
+- **Authority rule (`llm_layer/verdict.py`):** an unverified critical finding is **not a signal** —
+  it cannot contribute to `malicious`. If it is the only critical evidence the file verdict
+  is lifted to at most `needs_review` (never `malicious`), and it still triggers fail-closed
+  (an LLM "benign" claim becomes `unknown`). The verdict output lists `unverified_findings`.
+- **UX:** web UI and HTML/Markdown report show **(Unverified)** next to such findings, since
+  it is most likely a tool error or a fabricated value.
+- **Limits (honest):** a sample that really embeds a fake IoC string stays `verified=True`;
+  `domain`/`email` kinds are not yet produced by the IoC classifier; capa/YARA findings are
+  not existence-checked; no raw-output hash or tool-version record. Tested with unit
+  tests and mocks only, not a new live LLM run.

@@ -3,13 +3,32 @@
 Bu belge, analiz hattına eklenecek yeni araçların **nasıl kullanılacağını,
 nereye bağlanacağını ve kabul kriterlerini** tanımlar.
 
+## Durum özeti (güncel)
+
+| # | Madde | Durum | Not |
+|---|---|---|---|
+| 1.1 | ELF importları (`readelf`) | **done** | `extract_imports` PE+ELF; ham import bulgu olmaz → combo + imphash |
+| 1.2 | PE versiyon / manifest | **done** | `source="pe_metadata"` (`version_info`, `manifest_privilege`); kaynak-dil bulgusu yok |
+| 1.3 | Authenticode | **done (varlık)** | `Present (Unverified)`; `osslsigncode` doğrulaması **yok** |
+| 1.4 | TLSH (fuzzy hash) | **done** | `compute_tlsh`; benzerlik karşılaştırması ayrı adım |
+| 2.1 | imphash | **done** | PE: pefile; ELF: MD5(sıralı import listesi) |
+| 2.2 | Kütüphane fonksiyonu sezgisi | **done (heuristic)** | `is_library_heuristic`; FID/BSim **yok** |
+| 2.3 | ELF section entropy | **done** | `elf_entropy` (`readelf -S -W`) |
+| — | `CROWBAR_TOOL_PROFILE=core\|deep` | **done** | varsayılan `deep` |
+| — | Unique-contribution ölçümü | **açık** | profil var, ölçüm koşusu yok |
+
+Tüm uygulanan araçlar gerçek ELF/`readelf` ile değil **mock çıktıyla** test edildi; Windows PE dosyaları
+(`cmd.exe`) ile PE yolları denendi.
+
 ## 0. İlke
 - **Ham çıktı ≠ rapor.** Araç çıktısı `findings`'e yazılır; rapor onu damıtır.
 - **Unique contribution testi:** Bir araç ancak *"kapalıyken kaçırılan, açıkken
   yakalanan benzersiz bulgu > 0"* ise eklenir. YARA-X / rizin bu testi geçmiyor → eklenmez.
-- **Core / deep:** `CROWBAR_TOOL_PROFILE=core|deep` (varsayılan `core`).
-  - core: DIE, YARA, capa, FLOSS, import (PE+ELF), entropy, Ghidra
-  - deep: + Authenticode, kaynaklar, imphash, TLSH, FLIRT
+- **Core / deep:** `CROWBAR_TOOL_PROFILE=core|deep` (varsayılan `deep`). **Uygulandı.**
+  - core (hızlı tarama): DIE, YARA, unpacker'lar, import (PE+ELF), imphash, entropy,
+    PE metadata, TLSH. **capa, FLOSS ve Ghidra atlanır** (`deep_inspection_node` `{}` döner).
+  - deep: core + capa + FLOSS + Ghidra (mevcut davranış).
+  - Tanınmayan değer uyarıyla `deep` sayılır.
 - **Kademeli bozulma:** Araç yoksa/hata verirse **çökme**; boş sonuç + log.
 
 ## 1. Ortak kurallar
@@ -46,6 +65,11 @@ Finding(source="import", kind="elf_library", value="libc.so.6")
 **Kabul:** ELF örnekte import listesi dolu; `match_import_combos` çalışıyor;
 `readelf` yoksa `[]` + log.
 
+**Durum: done.** Uygulanan tasarım yukarıdaki `Finding` örneğinden farklıdır: ham import'lar gürültü olduğu için
+**bulgu üretmez**; yalnızca `import_combo` (PE + `Linux Process Injection` / `Linux Evasion`) ve imphash LLM'e gider.
+`readelf --wide --dyn-syms` (UND, yalnızca FUNC/IFUNC; timeout 30 sn, `CROWBAR_READELF_TIMEOUT`). `NEEDED`
+kütüphane (`elf_library`) bulgusu **yapılmadı**. Statik bağlı ELF'te import yoktur. Gerçek `readelf` ile denenmedi (mock).
+
 ### 1.2 PE kaynak / versiyon / manifest (`pefile`)
 **Neden:** Sahte isim, sürüm, ikon, manifest — başka araçtan çıkmaz.
 
@@ -63,6 +87,10 @@ Finding(source="pefile", kind="manifest", value="requireAdministrator")
 Finding(source="pefile", kind="resource_lang", value="tr-TR")
 ```
 **Kabul:** PE'de versiyon/manifest bulguları dolu; ELF'te atlanır.
+
+**Durum: done.** Gerçek şekil: `Finding(source="pe_metadata", kind="version_info", value="OriginalFilename: x; CompanyName: y")`
+(tek satır, değer başına ≤200 karakter) ve `kind="manifest_privilege"` (yalnızca `asInvoker` / `highestAvailable` /
+`requireAdministrator`; enjeksiyona karşı beyaz liste). Dosya `pefile` ile **bir kez** yüklenir. `resource_lang` yapılmadı.
 
 ### 1.3 Authenticode / imza
 **Neden:** "İmzalı mı, geçerli mi, kim imzalamış" — güçlü triyaj sinyali.
@@ -84,6 +112,10 @@ Finding(source="signature", kind="signer", value="CN=...")
 **Kabul:** İmzasız PE'de `present=no`; imzalıysa doğrulama sonucu. `osslsigncode`
 yoksa yalnızca "var/yok" (adım 1).
 
+**Durum: done (adım 1 — yalnızca varlık).** Gerçek şekil: `Finding(source="pe_metadata", kind="authenticode",
+value="Present (Unverified)")`; imza **doğrulanmaz** (katalog imzalı Windows sistem dosyalarında imza dizini boş
+olduğundan "yok" çıkar). Adım 2 (`osslsigncode`) **yapılmadı**.
+
 ### 1.4 TLSH / ssdeep (fuzzy hash)
 **Neden:** Örnekler arası benzerlik; aile/kümeleme/decoy analizi. Tek örnekte anlamsız
 → **korpus gelince** anlam kazanır.
@@ -95,9 +127,10 @@ digest = tlsh.hash(open(path, "rb").read())   # "T1..."
 ```
 **Finding:**
 ```python
-Finding(source="tlsh", kind="fuzzy_hash", value=digest)
+Finding(source="tlsh", kind="grouping_key", value=digest)
 ```
-**Kabul:** Hash üretilir; DB'de saklanır; benzerlik karşılaştırması (opsiyonel) ayrı adım.
+**Durum: done** (`nodes.compute_tlsh`; her iki profilde çalışır; `py-tlsh` yoksa veya dosya < 50 bayt ise `""`;
+`TNULL` da boş sayılır). **Kabul:** Hash üretilir; DB'de saklanır; benzerlik karşılaştırması (opsiyonel) ayrı adım.
 
 ---
 
@@ -112,6 +145,9 @@ Finding(source="imphash", kind="grouping_key", value=imphash)
 ```
 **Kabul:** PE'de standart imphash; ELF'te deterministik türev.
 
+**Durum: done.** ELF türevi SHA-256 değil **MD5(`",".join(sorted(imports))`)**'dır (sıralama, bağlayıcı sırasından
+bağımsızlık sağlar). Import yoksa `""`. PE'deki imphash ile ELF'tekiler birbiriyle karşılaştırılamaz.
+
 ### 2.2 FLIRT / BSim (kütüphane fonksiyonu tanıma)
 **Neden:** Kütüphane/thunk fonksiyonlarını atlayıp **context'i küçültmek** (tezin konusu).
 Bulgu eklemez, gürültüyü azaltır.
@@ -125,6 +161,13 @@ Bulgu eklemez, gürültüyü azaltır.
 LLM katmanı `is_library=True` olanları atlıyor.
 **Kabul:** Kütüphane fonksiyonu oranı ölçülür; LLM'e giden fonksiyon sayısı düşer.
 
+**Durum: adım 1 (heuristic) done; adım 2 (FID/BSim) açık.** `export_functions.is_library_heuristic(func, size)`:
+`isThunk()`/`isExternal()`; ad önekleri `__libc_`, `_Z`, `std::`, `__cxa_`, `__gxx_`, `j_`, `CRT_`, `golang.`, `runtime.`;
+`size < 16`. `True` ⇒ `is_library=True`, `priority=0`, Top-N'e ve yedek listeye girmez. **İstisna:** entry/main ve
+capa/IoC kanıtı taşıyan fonksiyonlar ad/boyut sezgisiyle kütüphane sayılmaz (`SOFT_LIBRARY_REASONS`; `_Z` kullanıcı
+C++ kodunu da yakaladığı için); Ghidra thunk/external bayrağı her zaman kesindir. **Ölçüm (oran, LLM'e giden fonksiyon
+sayısı) henüz yapılmadı.**
+
 ### 2.3 Section entropy (ELF)
 **Neden:** Packed/şifreli bölüm sinyali; capa/Ghidra'nın kör olduğu yeri işaretler.
 
@@ -135,18 +178,22 @@ Finding(source="entropy", kind="section", value=".text=7.91")
 ```
 **Kabul:** ELF'te section entropy dolu; yüksek entropy (>7) "packed olabilir" sinyali.
 
+**Durum: done.** `Finding(source="elf_entropy", kind="high_entropy", value=".packed: 7.91")` (PE için `pefile_entropy`;
+yalnızca eşik > 7.0 üstü bulgu olur). `readelf -S -W` + dosyadan bayt okuma; `readelf` yoksa `{}`.
+
 ---
 
 ## Öncelik ve kabul sırası
-| # | Araç | Öncelik | Neden |
-|---|---|---|---|
-| 1 | ELF importları | **P0** | Gerçek boşluk; kombinasyon kuralları ELF'te çalışmıyor |
-| 2 | imphash | **P0** | Ucuz; gruplama anahtarı |
-| 3 | PE kaynak/versiyon/manifest | P1 | PE kimlik/aldatma izleri |
-| 4 | Authenticode (önce var/yok) | P1 | Güçlü triyaj |
-| 5 | Section entropy (ELF) | P1 | Packed sinyali |
-| 6 | TLSH | P2 | Korpus gelince |
-| 7 | FLIRT/BSim | P2 | Context küçültme; heuristic ile başla |
+| # | Araç | Öncelik | Neden | Durum |
+|---|---|---|---|---|
+| 1 | ELF importları | **P0** | Gerçek boşluk; kombinasyon kuralları ELF'te çalışmıyor | **done** |
+| 2 | imphash | **P0** | Ucuz; gruplama anahtarı | **done** |
+| 3 | PE kaynak/versiyon/manifest | P1 | PE kimlik/aldatma izleri | **done** |
+| 4 | Authenticode (önce var/yok) | P1 | Güçlü triyaj | **done** (varlık; doğrulama yok) |
+| 5 | Section entropy (ELF) | P1 | Packed sinyali | **done** |
+| 6 | TLSH | P2 | Korpus gelince | **done** |
+| 7 | FLIRT/BSim | P2 | Context küçültme; heuristic ile başla | **heuristic done**; FID/BSim açık |
+| 8 | `CROWBAR_TOOL_PROFILE` | — | Hızlı tarama / derin analiz ayrımı | **done** |
 
 ## Ölçüm: unique contribution
 Her araç için:
@@ -157,9 +204,16 @@ unique(tool) = tool açıkken bulunan benzersiz bulgu
 `CROWBAR_TOOL_PROFILE` ile aç/kapat, aynı örnek setinde karşılaştır. Yalnızca
 `unique > 0` olan araçları `core`'a al.
 
+**Durum: açık.** Profil mekanizması hazır (`core` = capa/FLOSS/Ghidra olmadan hızlı tarama; `deep` = hepsi), ama
+araç başına benzersiz katkı **ölçülmedi**; bu bir koşu/ölçüm işidir, kod değil.
+
 ## Test/DoD
-- [ ] Araç yoksa çökmez, `[]` + log.
-- [ ] `findings` şemasına uygun kayıt üretir.
-- [ ] Birim test (mock çıktı ile) eklenir.
-- [ ] `report.py` ilgili bölümü gösterir.
-- [ ] `pytest` geçer.
+Uygulanan 8 madde için (680 test geçti, 8 POSIX-only atlandı):
+- [x] Araç yoksa çökmez, `[]` + log.
+- [x] `findings` şemasına uygun kayıt üretir (her bulgu `finding_id` ve `verified` taşır).
+- [x] Birim test (mock çıktı ile) eklenir.
+- [x] `report.py` ilgili bölümü gösterir (imphash, TLSH, entropy, PE metadata; ham ELF import'u bulgu olmadığı için gösterilmez).
+- [x] `pytest` geçer.
+
+Açık (bu belgenin kapsamında): FID/BSim, `osslsigncode`, `elf_library` (NEEDED), TLSH benzerlik karşılaştırması,
+unique-contribution ölçümü.

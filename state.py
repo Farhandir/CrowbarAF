@@ -100,6 +100,17 @@ class Finding(BaseModel):
         le=1.0,
         description="0-1 arası güven; deterministik araçlar için 1.0.",
     )
+    finding_id: str = Field(
+        default="",
+        description="Bulgunun deterministik kimliği: md5(source_kind_value_address)[:8] "
+                    "(static_feature_node atar).",
+    )
+    verified: bool = Field(
+        default=True,
+        description="Bulgu binary'de gerçekten var mı? Statik olarak çıkarılan metin IoC'leri "
+                    "(ip/url/domain/email) dosya byte'larında (UTF-8/UTF-16LE) bulunamazsa False; "
+                    "kontrol edilemeyen türler True kalır.",
+    )
 
 
 class AgentState(BaseModel):

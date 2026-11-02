@@ -3,6 +3,7 @@ langchain>=0.3
 langchain-ollama>=0.2
 pydantic>=2.0
 pefile>=2023.2.7
+py-tlsh>=4.7  # opsiyonel: yoksa TLSH bulgusu üretilmez (import tlsh)
 
 # Web arayüzü / API
 fastapi>=0.110

@@ -15,6 +15,8 @@ import sqlite3
 from contextlib import closing
 from typing import Any, Iterable
 
+from utils import defang_finding, defang_iocs
+
 # Varsayılan: çalışma dizininde "crowbaraf.db"; CROWBAR_DB_PATH ile değiştirilebilir.
 DEFAULT_DB_PATH = os.environ.get("CROWBAR_DB_PATH", "crowbaraf.db")
 
@@ -34,7 +36,9 @@ CREATE TABLE IF NOT EXISTS findings (
     kind       TEXT,
     value      TEXT,
     address    TEXT,
-    confidence REAL
+    confidence REAL,
+    finding_id TEXT,
+    verified   BOOLEAN DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS functions (
@@ -86,8 +90,16 @@ FUNCTION_EXTRA_COLUMNS = (
 # llm_claims'e sonradan eklenen sütunlar (verdict: dosya düzeyi karar, JSON metni)
 LLM_CLAIMS_EXTRA_COLUMNS = (("verdict", "TEXT"),)
 
+# findings'e sonradan eklenen sütunlar: finding_id (kimlik), verified (binary'de var mı?).
+# Eski satırlar DEFAULT 1 ile "doğrulanmış" sayılır (geriye uyumluluk).
+FINDINGS_EXTRA_COLUMNS = (("finding_id", "TEXT"), ("verified", "BOOLEAN DEFAULT 1"))
+
 # tablo -> sonradan eklenen sütunlar (eski veritabanı migrasyonu)
-_MIGRATIONS = (("functions", FUNCTION_EXTRA_COLUMNS), ("llm_claims", LLM_CLAIMS_EXTRA_COLUMNS))
+_MIGRATIONS = (
+    ("functions", FUNCTION_EXTRA_COLUMNS),
+    ("llm_claims", LLM_CLAIMS_EXTRA_COLUMNS),
+    ("findings", FINDINGS_EXTRA_COLUMNS),
+)
 
 
 def _path(db_path: str | None) -> str:
@@ -127,11 +139,16 @@ def insert_sample(sample: Any, db_path: str | None = None) -> None:
 
 def insert_findings(sha256: str, findings: Iterable[Any], db_path: str | None = None) -> int:
     """Örneğin bulgularını yazar (öncekileri siler). Yazılan satır sayısını döndürür."""
-    rows = [(sha256, f.source, f.kind, f.value, f.address, f.confidence) for f in findings]
+    rows = [
+        (sha256, f.source, f.kind, f.value, f.address, f.confidence,
+         getattr(f, "finding_id", "") or "", int(bool(getattr(f, "verified", True))))
+        for f in findings
+    ]
     with closing(sqlite3.connect(_path(db_path))) as conn, conn:
         conn.execute("DELETE FROM findings WHERE sha256 = ?", (sha256,))
         conn.executemany(
-            "INSERT INTO findings (sha256, source, kind, value, address, confidence) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO findings (sha256, source, kind, value, address, confidence, finding_id, verified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
     return len(rows)
@@ -206,6 +223,30 @@ def insert_llm_claims(
         )
 
 
+def save_analysis(state: Any, db_path: str | None = None) -> dict[str, Any]:
+    """Bir ``AgentState``'in tüm sonuçlarını tek çağrıda kalıcı hale getirir.
+
+    ``db_writer_node`` (tam hat) ve ``host_analyze.py --db`` (split mod) ortak kullanır:
+    ``init_db`` -> ``insert_sample`` -> ``insert_findings`` -> ``insert_functions_and_calls``
+    (``llm_summary`` dahil) -> ``insert_llm_claims`` (rapor ve/veya ``verdict`` varsa).
+
+    ``state.sample.sha256`` boşsa ``ValueError`` fırlatır (anahtarsız satır yazılmaz).
+    Hataları yutmaz; çağıran karar verir. Dönüş: yazılan satır sayıları + ``db_path``.
+    """
+    sha256 = state.sample.sha256
+    if not sha256:
+        raise ValueError("sample.sha256 boş; veritabanına yazılamaz")
+    path = init_db(db_path)
+    insert_sample(state.sample, path)
+    n_findings = insert_findings(sha256, state.findings, path)
+    n_functions, n_calls = insert_functions_and_calls(sha256, state.source_code, path)
+    claims = bool(state.analysis_report or state.verdict)
+    if claims:
+        insert_llm_claims(sha256, state.analysis_report, path, verdict=state.verdict)
+    return {"sha256": sha256, "db_path": path, "findings": n_findings,
+            "functions": n_functions, "calls": n_calls, "llm_claims": claims}
+
+
 # --------------------------------------------------------------------------- #
 # Okuma yardımcıları (API/UI için)
 # --------------------------------------------------------------------------- #
@@ -262,13 +303,19 @@ def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any
         if sample is None:
             return None
 
-        findings = [
-            dict(r)
-            for r in conn.execute(
-                "SELECT source, kind, value, address, confidence FROM findings WHERE sha256 = ? ORDER BY id",
-                (sha256,),
-            )
-        ]
+        # Analist güvenliği: ağ IoC'leri (url/ip/domain/email) defang edilmiş döner;
+        # veritabanında ham değer kalır (bkz. utils.defang_ioc).
+        findings = []
+        for r in conn.execute(
+            "SELECT source, kind, value, address, confidence, finding_id, verified "
+            "FROM findings WHERE sha256 = ? ORDER BY id",
+            (sha256,),
+        ):
+            item = dict(r)
+            item["finding_id"] = item["finding_id"] or ""
+            # NULL (eski satır / migrasyon öncesi) = doğrulanmış; yalnızca açık 0 "False"
+            item["verified"] = item["verified"] is None or bool(item["verified"])
+            findings.append(defang_finding(item))
 
         callees: dict[str, list[str]] = {}
         for r in conn.execute(
@@ -287,7 +334,7 @@ def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any
                 "llm_summary": r["llm_summary"] or "",
                 "capa_hits": _loads(r["capa_hits"], []),
                 "xrefs": _loads(r["xrefs"], []),
-                "iocs": _loads(r["iocs"], []),
+                "iocs": defang_iocs(_loads(r["iocs"], [])),
                 "decompile_warnings": _loads(r["decompile_warnings"], []),
                 "callees": callees.get(r["offset"], []),
             }

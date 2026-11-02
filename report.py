@@ -19,6 +19,8 @@ import os
 import re
 import sys
 
+from utils import defang_ioc, defang_text
+
 FLOSS_CAP = 60
 IMPORT_CAP = 80
 FUNC_CAP = 40
@@ -53,7 +55,9 @@ def build(state: dict, trace: dict | None = None) -> dict:
                (_by_source(findings, "entropy") + _by_source(findings, "pefile_entropy")
                 + _by_source(findings, "elf_entropy"))]
     imphash = next((f.get("value") for f in _by_source(findings, "imphash")), "")
-    pe_metadata = [{"kind": f.get("kind"), "value": f.get("value")} for f in _by_source(findings, "pe_metadata")]
+    tlsh_hash = next((f.get("value") for f in _by_source(findings, "tlsh")), "")
+    pe_metadata = [{"kind": f.get("kind"), "value": defang_text(f.get("value") or "")}
+                   for f in _by_source(findings, "pe_metadata")]
     floss_findings = _by_source(findings, "floss")
 
     ghidra_funcs = [f for f in functions if (f.get("c_code") or "").strip()]
@@ -76,7 +80,7 @@ def build(state: dict, trace: dict | None = None) -> dict:
         state_v = v4.get("verdict", "unknown")
         level = {"malicious": "high", "needs_review": "medium",
                  "unknown": "unknown", "no_evidence": "unknown"}.get(state_v, "unknown")
-        note = "; ".join(v4.get("reasons") or v4.get("unknown_reasons") or [])
+        note = defang_text("; ".join(v4.get("reasons") or v4.get("unknown_reasons") or []))
         deterministic = bool(v4.get("critical_findings"))
 
     ai = None
@@ -84,7 +88,10 @@ def build(state: dict, trace: dict | None = None) -> dict:
         claims = []
         for fn in trace.get("functions", []):
             for c in fn.get("claims", []):
-                claims.append({"offset": fn.get("offset"), "name": fn.get("name"), **c})
+                claim = {"offset": fn.get("offset"), "name": fn.get("name"), **c}
+                if isinstance(claim.get("text"), str):
+                    claim["text"] = defang_text(claim["text"])  # analist güvenliği
+                claims.append(claim)
         ai = {"claims": claims, "functions_analyzed": trace.get("totals", {}).get("functions_analyzed", 0)}
 
     return {
@@ -99,8 +106,8 @@ def build(state: dict, trace: dict | None = None) -> dict:
             "state": state_v,
             "has_deterministic_evidence": deterministic,
             "coverage": (v4.get("coverage") or {}),
-            "unknown_reasons": (v4.get("unknown_reasons") or []),
-            "next_actions": (v4.get("next_actions") or []),
+            "unknown_reasons": [defang_text(x) for x in (v4.get("unknown_reasons") or [])],
+            "next_actions": [defang_text(x) for x in (v4.get("next_actions") or [])],
         },
         "tools": {
             "die": {"file_type": sample.get("file_type", "unknown"), "arch": sample.get("arch", "unknown"),
@@ -111,10 +118,15 @@ def build(state: dict, trace: dict | None = None) -> dict:
                 "mitre_attack": caps.get("mitre_attack", []),
                 "malware_behavior": caps.get("malware_behavior", []),
             },
-            "floss": {"strings": strings[:FLOSS_CAP], "string_count": len(strings),
-                      "ioc_findings": [f.get("value") for f in floss_findings]},
+            # IoC'ler defang edilir (tıklanabilir link olmasın); ham değer state/DB'de kalır.
+            "floss": {"strings": [defang_text(s) for s in strings[:FLOSS_CAP]],
+                      "string_count": len(strings),
+                      "ioc_findings": [defang_ioc(f.get("value") or "") for f in floss_findings],
+                      # verified == False: string dosya byte'larında bulunamadı (araç hatası/uydurma olabilir)
+                      "ioc_unverified": [defang_ioc(f.get("value") or "") for f in floss_findings
+                                         if f.get("verified") is False]},
             "imports": {"list": imports[:IMPORT_CAP], "import_count": len(imports), "combos": combos,
-                        "imphash": imphash},
+                        "imphash": imphash, "tlsh": tlsh_hash},
             "entropy": entropy,
             "pe_metadata": pe_metadata,
             "ghidra": {
@@ -198,7 +210,11 @@ def render_markdown(rep: dict) -> str:
 
     L += ["", f"## 3) FLOSS (strings/IoC) — total {t['floss']['string_count']}"]
     if t["floss"]["ioc_findings"]:
-        L += [f"- **IoC:** {x}" for x in t["floss"]["ioc_findings"]]
+        unverified = set(t["floss"].get("ioc_unverified") or [])
+        L += [f"- **IoC:** {x}" + (" **(Unverified)** — not found in the file bytes; may be a tool "
+                                    "error or fabricated, cannot support a malicious verdict"
+                                    if x in unverified else "")
+              for x in t["floss"]["ioc_findings"]]
     L += [f"- `{s[:90]}`" for s in t["floss"]["strings"][:20]] or ["- (no strings)"]
 
     L += ["", f"## 4) Import analysis — {t['imports']['import_count']} imports"]
@@ -206,6 +222,8 @@ def render_markdown(rep: dict) -> str:
         L += [f"- **combination:** {c}" for c in t["imports"]["combos"]]
     if t["imports"].get("imphash"):
         L.append(f"- **imphash:** `{t['imports']['imphash']}`")
+    if t["imports"].get("tlsh"):
+        L.append(f"- **TLSH:** `{t['imports']['tlsh']}`")
     L += [f"- `{i}`" for i in t["imports"]["list"][:20]] or ["- (no imports)"]
 
     if t["entropy"]:

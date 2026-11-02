@@ -1,4 +1,4 @@
-"""report.py testleri (saf mantık, LLM gerekmez)."""
+﻿"""report.py testleri (saf mantık, LLM gerekmez)."""
 from __future__ import annotations
 
 import report
@@ -31,7 +31,8 @@ def test_deterministic_evidence_raises_verdict():
 def test_floss_only_is_medium():
     rep = report.build(_state(findings=[{"source": "floss", "kind": "url", "value": "http://x"}]))
     assert rep["verdict"]["level"] == "medium"
-    assert "http://x" in rep["tools"]["floss"]["ioc_findings"]
+    assert "hxxp://x" in rep["tools"]["floss"]["ioc_findings"]  # defang edilmiş (tıklanamaz)
+    assert "http://x" not in rep["tools"]["floss"]["ioc_findings"]
 
 
 def test_capa_and_imports_grouped():
@@ -101,3 +102,29 @@ def test_state_verdict_is_rendered_with_coverage():
     md = report.render_markdown(rep)
     assert "State" in md
     assert "40%" in md
+
+
+# --------------------------------------------------------------------------- #
+# verified == False -> "(Unverified)" uyarısı
+# --------------------------------------------------------------------------- #
+def test_unverified_ioc_is_flagged_in_markdown_html_and_json():
+    rep = report.build(_state(findings=[
+        {"source": "floss", "kind": "url", "value": "http://real.example/a", "verified": True},
+        {"source": "floss", "kind": "url", "value": "http://ghost.example/b", "verified": False},
+        {"source": "floss", "kind": "ip", "value": "10.9.8.7"},  # eski state: alan yok -> doğrulanmış sayılır
+    ]))
+    assert rep["tools"]["floss"]["ioc_unverified"] == ["hxxp://ghost[.]example/b"]
+
+    md = report.render_markdown(rep)
+    lines = {ln for ln in md.splitlines() if ln.startswith("- **IoC:**")}
+    flagged = [ln for ln in lines if "(Unverified)" in ln]
+    assert len(flagged) == 1 and "hxxp://ghost[.]example/b" in flagged[0]
+    assert len(lines) == 3  # diğer iki IoC uyarısız
+    assert "(Unverified)" in report.render_html(rep)
+    assert "ioc_unverified" in report.render_json(rep)
+
+
+def test_no_unverified_marker_when_everything_is_verified():
+    rep = report.build(_state(findings=[{"source": "floss", "kind": "url", "value": "http://x", "verified": True}]))
+    assert rep["tools"]["floss"]["ioc_unverified"] == []
+    assert "(Unverified)" not in report.render_markdown(rep)

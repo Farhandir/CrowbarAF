@@ -5,8 +5,9 @@ import os
 
 import pytest
 
+import db
 import nodes
-from state import AgentState, DecompiledFunction, Finding
+from state import AgentState, DecompiledFunction, Finding, SampleInfo
 import host_analyze as ha
 
 
@@ -49,7 +50,9 @@ def test_state_roundtrip_and_permissions(tmp_path, monkeypatch):
     written = ha.write_state(loaded, out)
     assert written == out
     assert out.is_file()
-    assert (out.stat().st_mode & 0o777) == 0o600
+    # POSIX izin bitleri Windows'ta uygulanmaz (chmod sessizce etkisiz); orada atla.
+    if os.name != "nt":
+        assert (out.stat().st_mode & 0o777) == 0o600
 
 
 def test_load_state_rejects_invalid_json(tmp_path):
@@ -106,3 +109,101 @@ def test_host_cli_refuses_skip_llm_env(monkeypatch, capsys):
     rc = ha.main(["--state", "missing.json", "--out", "x.json"])
     assert rc == 2
     assert "CROWBAR_SKIP_LLM" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------- #
+# host_analyze --db: split mod sonuçlarının SQLite'a yazılması
+# --------------------------------------------------------------------------- #
+SHA = "ab" * 32
+
+
+def _merged_state() -> AgentState:
+    """Host'ta LLM + politika bittikten sonraki state (verdict, rapor, llm_summary)."""
+    return AgentState(
+        file_path="/vm/sample.bin",
+        sample=SampleInfo(sha256=SHA, file_type="ELF", route="native", packer="none", arch="x86-64"),
+        source_code=[
+            DecompiledFunction(offset="0x401000", name="payload", c_code="int f(){return 0;}",
+                               priority=7, callees=["0x401100"], iocs=["http://198.51.100.7/gate.php"],
+                               llm_summary="connects to C2"),
+            DecompiledFunction(offset="0x401100", name="helper", c_code="void h(){}", priority=1),
+        ],
+        findings=[
+            Finding(source="floss", kind="url", value="http://198.51.100.7/gate.php", address=""),
+            Finding(source="yara", kind="rule", value="Evil_Rule", address="0x401000"),
+        ],
+        analysis_report="# supervisor report",
+        verdict={"verdict": "malicious", "coverage": {"total": 2, "analyzed": 2}},
+    )
+
+
+def test_persist_state_writes_everything(tmp_path):
+    path = str(tmp_path / "split.db")
+    saved = ha.persist_state(_merged_state(), path)
+    assert saved["sha256"] == SHA
+    assert saved["functions"] == 2 and saved["findings"] == 2 and saved["llm_claims"] is True
+
+    detail = db.get_sample_details(SHA, path)
+    assert detail["sample"]["file_type"] == "ELF"
+    assert detail["verdict"]["verdict"] == "malicious"
+    assert detail["supervisor_report"] == "# supervisor report"
+    by_off = {f["offset"]: f for f in detail["functions"]}
+    assert by_off["0x401000"]["llm_summary"] == "connects to C2"
+    assert by_off["0x401000"]["callees"] == ["0x401100"]
+
+    listing = db.get_all_samples(path)
+    assert [s["sha256"] for s in listing] == [SHA]
+    assert listing[0]["verdict"]["verdict"] == "malicious" and listing[0]["has_report"] is True
+
+
+def test_persist_state_requires_sha256(tmp_path):
+    path = str(tmp_path / "x.db")
+    with pytest.raises(ValueError, match="sha256"):
+        ha.persist_state(AgentState(file_path="x"), path)
+    assert not os.path.exists(path)  # anahtarsız satır / boş DB oluşmaz
+
+
+def _write_state_file(tmp_path) -> str:
+    p = tmp_path / "state.json"
+    p.write_text(_merged_state().model_dump_json(), encoding="utf-8")
+    return str(p)
+
+
+def test_cli_db_flag_persists(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ha, "analyze_state", lambda st, **kw: st)  # LLM yok
+    dbp = str(tmp_path / "cli.db")
+    rc = ha.main(["--state", _write_state_file(tmp_path), "--out", str(tmp_path / "o.json"),
+                  "--db", dbp])
+    assert rc == 0
+    assert "saved to" in capsys.readouterr().err
+    assert db.get_sample_details(SHA, dbp)["verdict"]["verdict"] == "malicious"
+
+
+def test_cli_db_flag_without_value_uses_default_path(tmp_path, monkeypatch):
+    default = str(tmp_path / "crowbaraf.db")
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", default)
+    monkeypatch.setattr(ha, "analyze_state", lambda st, **kw: st)
+    rc = ha.main(["--state", _write_state_file(tmp_path), "--out", str(tmp_path / "o.json"), "--db"])
+    assert rc == 0
+    assert db.get_sample_details(SHA, default) is not None
+
+
+def test_cli_without_db_flag_does_not_touch_db(tmp_path, monkeypatch):
+    default = str(tmp_path / "crowbaraf.db")
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", default)
+    monkeypatch.setattr(ha, "analyze_state", lambda st, **kw: st)
+    rc = ha.main(["--state", _write_state_file(tmp_path), "--out", str(tmp_path / "o.json")])
+    assert rc == 0
+    assert not os.path.exists(default)
+
+
+def test_cli_db_failure_returns_error_but_keeps_state_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ha, "analyze_state", lambda st, **kw: st)
+    out = tmp_path / "o.json"
+    state_no_sha = AgentState(file_path="x")
+    p = tmp_path / "s.json"
+    p.write_text(state_no_sha.model_dump_json(), encoding="utf-8")
+    rc = ha.main(["--state", str(p), "--out", str(out), "--db", str(tmp_path / "d.db")])
+    assert rc == 1
+    assert "sha256" in capsys.readouterr().err
+    assert out.is_file()  # LLM sonucu DB hatası yüzünden kaybolmaz
