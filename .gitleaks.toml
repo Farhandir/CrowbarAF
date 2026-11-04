@@ -1,0 +1,6 @@
+# imphash/TLSH/grouping hashes are fingerprints, not credentials.
+# Keep the default gitleaks rules; only allow the grouping_key context.
+[[allowlists]]
+description = "grouping_key / imphash hex values are not secrets"
+regexTarget = "match"
+regexes = ['''grouping_key:\s*[a-f0-9]{32}''']

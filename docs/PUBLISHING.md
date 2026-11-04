@@ -15,7 +15,7 @@
 | Gerçek API key | ❌ bulunmadı; sadece test fixture’larında `sk-short` gibi sahte değerler |
 | Gerçek malware binary | ❌ yok |
 | State/DB tracked | sadece `results/archive/raw/state_scale_enc_fixed2.json` (sentetik encoded örnek; 192.0.2.1 dokümantasyon IP’si) |
-| Kişisel yol | ⚠️ `results/archive/raw/smoke_qwen8.txt`, `results/archive/raw/state_scale_enc_fixed2.json` içinde `<home>/...` |
+| Kişisel yol | ✅ çalışma ağacında temizlendi (geçmiş için history rewrite gerekir) |
 | Commit e-postaları | ⚠️ iki kişisel e-posta public olur |
 | LICENSE / SECURITY / CITATION | ❌ yok |
 | `.github` CI / CODEOWNERS | ❌ yok |
@@ -48,8 +48,8 @@
 
 - [ ] `gitleaks` / `trufflehog` ile **tüm git geçmişini** tara.
 - [ ] Daha önce paylaşılmış herhangi bir gerçek key varsa **rotate et**.
-- [ ] `<home>` gibi yerel yolları ve kişisel e-postaları temizle; sonuç
-  dosyalarını göreli yolla yeniden üret veya redakte et.
+- [x] Yerel ev dizini yolları temizlendi; geçmiş için history rewrite yapılmalı.
+- [ ] Kişisel commit e-postalarını GitHub noreply ile değiştir (history rewrite).
 - [ ] `git ls-files` ile gerçek örnek/DB/state olmadığını doğrula.
 - [ ] Lisans kararı ver ve `LICENSE` ekle (MIT / Apache-2.0 / GPL-3.0 / özel).
 - [ ] `SECURITY.md` (iletişim + kapsam) ve `CITATION.cff` ekle.
