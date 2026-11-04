@@ -31,6 +31,26 @@ The design goal is not "an AI that decides". It is:
 
 ---
 
+## Responsible Use and Disclaimer
+
+> **CrowbarAF is intended solely for educational, research, and defensive
+> security purposes.** Use it only on files, systems, networks and data you own
+> or are explicitly authorized to analyze. Do not execute untrusted samples on
+> production systems; use an isolated, offline analysis environment. Never
+> distribute malware or make it available to unauthorized parties.
+
+The software is provided **“AS IS”**, without warranty of any kind. To the
+maximum extent permitted by law, the authors and contributors are not liable for
+misuse, damage, false positives/negatives, data loss, legal consequences, or any
+other harm arising from use of the software. LLM summaries and verdicts are
+decision support, **not authoritative**, and must be reviewed by a human; the
+tool never guarantees that a sample is “clean”.
+
+See [`DISCLAIMER.md`](DISCLAIMER.md) for the full English/Turkish text. This is
+not legal or professional security advice.
+
+---
+
 ## Architecture
 
 ```mermaid
