@@ -4,11 +4,26 @@
 > ilgili düğüm boş sonuç döner ve log'a yazar (kademeli bozulma).
 
 ## 1. Python bağımlılıkları
+
+Tek komut (venv + çekirdek; `--with-tools` ile pip analiz araçları):
+
+```bash
+./scripts/setup.sh --with-tools
+source .venv/bin/activate
+python scripts/check_tools.py
+```
+
+Manuel:
+
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt          # çekirdek (langgraph, fastapi, pydantic...)
-pip install -r requirements-tools.txt    # OPSİYONEL: capa, floss, yara-python, pyinstxtractor-ng
+pip install -r requirements-tools.txt    # OPSİYONEL: capa, floss, yara-python, py-tlsh...
 ```
+
+`py-tlsh` opsiyoneldir ve C derleyicisi gerektirebilir; kurulmazsa TLSH bulgusu
+üretilmez, akış çökmez. Ghidra/JDK/readelf/UPX **pip ile kurulmaz**; aşağıdaki
+sistem araçları bölümüne bakın.
 
 ## 2. Ghidra + JDK + PyGhidra (native yol)
 - **Ghidra 12.1.x** ve **JDK 21+** gerekir (JRE yetmez).

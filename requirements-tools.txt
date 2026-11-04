@@ -15,3 +15,6 @@ decompyle3>=3.9
 # NOT: pyinstxtractor-ng (xdis>=6.3) ile decompyle3 (xdis<6.3) çakışabilir.
 # pycdc birincil .pyc decompiler olduğu için pratikte sorun değil; gerekirse
 # decompyle3'ü atlayıp yalnızca pycdc kullanın.
+
+# Opsiyonel TLSH; C derleyicisi yoksa bu satırı atlayabilirsiniz.
+py-tlsh>=4.7

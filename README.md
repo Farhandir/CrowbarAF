@@ -288,9 +288,10 @@ python host_analyze.py --state state.json --out state.llm.json --max-workers 8
 ## Quick start
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements-tools.txt      # optional: capa, floss, yara-python, ...
+# One command: venv + core Python dependencies (+ optional pip analysis tools)
+./scripts/setup.sh --with-tools
+source .venv/bin/activate
+python scripts/check_tools.py              # shows missing system tools (Ghidra, UPX, ...)
 
 cp .env.example .env
 # edit .env (local Ollama or an API provider)
@@ -367,6 +368,8 @@ CrowbarAF/
   handoff for a teammate (benign samples, no keys)
 - [`docs/HANDOFF-FULL-STUDY.md`](docs/HANDOFF-FULL-STUDY.md) — full remaining
   study package (items 1–5) with ownership and safety gates
+- [`docs/PUBLISHING.md`](docs/PUBLISHING.md) — public-repo checklist, secret/
+  sample/personal-data audit, licensing and branch protection
 - [`docs/TOOL-ADDITIONS.md`](docs/TOOL-ADDITIONS.md) — how to add analysis tools
 - [`results/archive/README.md`](results/archive/README.md) — experiment setup,
   records, metrics and pitfalls
