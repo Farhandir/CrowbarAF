@@ -370,6 +370,7 @@ CrowbarAF/
   study package (items 1–5) with ownership and safety gates
 - [`docs/PUBLISHING.md`](docs/PUBLISHING.md) — public-repo checklist, secret/
   sample/personal-data audit, licensing and branch protection
+- [`docs/CI.md`](docs/CI.md) — GitHub Actions CI and branch-protection setup
 - [`docs/TOOL-ADDITIONS.md`](docs/TOOL-ADDITIONS.md) — how to add analysis tools
 - [`results/archive/README.md`](results/archive/README.md) — experiment setup,
   records, metrics and pitfalls
