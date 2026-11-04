@@ -12,3 +12,11 @@ state_real_*.json
 sandbox/out/
 sandbox/samples/
 sandbox/state*.json
+
+# Local caches / ad-hoc outputs
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+*.log
+*.tmp
+state*.json
