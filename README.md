@@ -385,3 +385,13 @@ CrowbarAF/
 - Test scale is still small; real malware has thousands of functions and
   stronger packers/obfuscation.
 - Unknown is not clean: every negative is scoped by coverage and reasons.
+
+---
+
+## License
+
+CrowbarAF is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE)
+and [`NOTICE`](NOTICE). Academic citation metadata is in [`CITATION.cff`](CITATION.cff).
+
+The paper text, figures and datasets may use separate licenses; do not assume the
+code license covers third-party tools, samples or paper text.

@@ -18,7 +18,7 @@
 | Kişisel yol | ✅ çalışma ağacı + git geçmişi temizlendi (history rewrite) |
 | Commit e-postaları | ✅ GitHub noreply adreslerine çevrildi (history rewrite) |
 | Secret taraması | ✅ gitleaks 0 (imphash allowlist), trufflehog 0 |
-| LICENSE / SECURITY / CITATION | ❌ yok |
+| LICENSE / SECURITY / CITATION | ✅ Apache-2.0 + NOTICE + SECURITY.md + CITATION.cff |
 | `.github` CI / CODEOWNERS | ❌ yok |
 | Repo boyutu | ~9 MiB; büyük binary yok |
 | Branch | `master`; arkadaş doğrudan push etmiş, PR/branch protection yok |
@@ -52,8 +52,8 @@
 - [x] Yerel ev dizini yolları çalışma ağacından ve git geçmişinden temizlendi.
 - [x] Kişisel commit e-postaları GitHub noreply ile değiştirildi (history rewrite).
 - [ ] `git ls-files` ile gerçek örnek/DB/state olmadığını doğrula.
-- [ ] Lisans kararı ver ve `LICENSE` ekle (MIT / Apache-2.0 / GPL-3.0 / özel).
-- [ ] `SECURITY.md` (iletişim + kapsam) ve `CITATION.cff` ekle.
+- [x] Lisans: **Apache-2.0**; `LICENSE` + `NOTICE` eklendi.
+- [x] `SECURITY.md` + `CITATION.cff` eklendi (yazar listesi makale için güncellenecek).
 - [ ] Branch protection: `master`’a doğrudan push yok; PR + test zorunlu.
 - [ ] CI: `pytest -q`, `python scripts/check_tools.py` (secret yok).
 - [ ] Gerçek malware/state için `.gitignore` + şifreli kasa kuralı.
@@ -70,6 +70,10 @@
 | **MPL-2.0** | Dosya bazında copyleft | Tüm proje GPL olmak zorunda değil | Orta yol |
 | **Unlicense/CC0** | Kamu malı; atıf şartı yok | Patent/atıf koruması zayıf | Atıf istemiyorsan |
 | **Özel / All rights reserved** | Görüntülenebilir, yeniden kullanım yok | Açık kaynak değil; yine de kopyalanabilir | Sadece görünürlük |
+
+**Seçilen:** **Apache-2.0** (kod için). Makale metni/figürleri ve veri seti
+ayrı lisanslarla paylaşılmalı; üçüncü taraf araçlar ve malware örnekleri bu
+lisansa dahil değildir.
 
 **Kısa öneri:**
 - Geniş kullanım + atıf + patent koruması: **Apache-2.0**.
