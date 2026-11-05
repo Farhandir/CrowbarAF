@@ -116,3 +116,44 @@ def test_opencode_provider_preset(monkeypatch):
     assert client.provider == "openai"
     assert client.model == "deepseek-v4.1-flash"
     assert client.base_url == "https://opencode.ai/inference/go/openai"
+
+
+def test_offline_vm_path_without_host_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(web_v2, "UPLOAD_DIR", tmp_path / "samples")
+    monkeypatch.setattr(web_v2, "STATE_DIR", tmp_path / "states")
+    web_v2.UPLOAD_DIR.mkdir()
+    web_v2.STATE_DIR.mkdir()
+    state_template = AgentState(file_path="sample.bin").model_dump_json(indent=2)
+    seen = {}
+
+    def fake_run_offline(self, sample_path, out_path, **kwargs):
+        seen["sample_path"] = sample_path
+        seen["remote_sample"] = kwargs.get("remote_sample")
+        Path(out_path).write_text(state_template, encoding="utf-8")
+        Path(out_path).chmod(0o600)
+        return out_path
+
+    monkeypatch.setattr(GuestControlTransport, "run_offline", fake_run_offline)
+    client = _client()
+    res = client.post(
+        "/api/v2/offline",
+        data={"source_mode": "vm", "vm_path": "/samples/real.bin",
+              "vm_name": "vm", "vm_user": "kali", "vm_password": "secret",
+              "repo_dir": "/repo", "profile": "deep", "max_decompile": "10"},
+    )
+    assert res.status_code == 200, res.text
+    job = client.get(f"/api/v2/jobs/{res.json()['job_id']}").json()
+    assert job["status"] == "done"
+    assert job["result"]["source"] == "vm_path"
+    assert seen["sample_path"] is None
+    assert seen["remote_sample"] == "/samples/real.bin"
+
+
+def test_offline_vm_path_rejects_relative_path():
+    client = _client()
+    res = client.post(
+        "/api/v2/offline",
+        data={"source_mode": "vm", "vm_path": "relative.bin",
+              "vm_name": "vm", "vm_user": "kali", "vm_password": "secret"},
+    )
+    assert res.status_code == 400

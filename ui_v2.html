@@ -79,9 +79,20 @@
   <section id="tab-offline" class="tab active">
     <div class="card">
       <h2>Offline analiz (VM)</h2>
+      <div class="grid" style="margin-bottom:10px">
+        <div><label>Örnek kaynağı</label><select id="sourceMode">
+          <option value="host">Host'tan dosya yükle (benign/sentetik)</option>
+          <option value="vm">VM içindeki dosya yolu (gerçek malware)</option>
+        </select></div>
+      </div>
       <div class="drop" id="offDrop">
         <input type="file" id="offFile">
         <div class="muted" style="margin-top:8px">Dosyayı seçin veya bu alana sürükleyin.</div>
+      </div>
+      <div id="vmPathWrap" hidden style="margin-top:10px">
+        <label>VM içindeki mutlak dosya yolu</label>
+        <input id="vmPath" placeholder="/home/kali/samples/sample.bin">
+        <div class="muted" style="margin-top:5px">Bu modda örnek host'a kopyalanmaz; yalnızca state.json geri alınır.</div>
       </div>
       <div class="grid" style="margin-top:12px">
         <div><label>VM adı</label><input id="vmName" value="kali-linux-2026.2-virtualbox-amd64"></div>
@@ -246,11 +257,15 @@ function pollJob(jobId, kind) {
 }
 
 async function offlineRun() {
+  const mode = $("#sourceMode").value;
   const file = $("#offFile").files[0];
-  if (!file) { setStatus("#offStatus", "Önce dosya seçin.", "err"); return; }
+  if (mode === "host" && !file) { setStatus("#offStatus", "Önce dosya seçin.", "err"); return; }
+  if (mode === "vm" && !$("#vmPath").value.trim()) { setStatus("#offStatus", "VM içindeki dosya yolunu yazın.", "err"); return; }
   if (!$("#vmPass").value) { setStatus("#offStatus", "VM şifresi gerekli.", "err"); return; }
   const form = new FormData();
-  form.append("file", file);
+  form.append("source_mode", mode);
+  form.append("vm_path", mode === "vm" ? $("#vmPath").value.trim() : "");
+  if (mode === "host") form.append("file", file);
   for (const [k, id] of [["vm_name","#vmName"],["vm_user","#vmUser"],["vm_password","#vmPass"],
                          ["repo_dir","#vmRepo"],["profile","#profile"],["max_decompile","#maxDec"],
                          ["ghidra_timeout","#ghidraT"],["capa_timeout","#capaT"],["floss_timeout","#flossT"],
@@ -338,6 +353,14 @@ drop.addEventListener("drop", (e) => {
   e.preventDefault(); drop.style.borderColor = "var(--border)";
   if (e.dataTransfer.files.length) $("#offFile").files = e.dataTransfer.files;
 });
+
+function syncSourceMode() {
+  const vm = $("#sourceMode").value === "vm";
+  $("#offDrop").hidden = vm;
+  $("#vmPathWrap").hidden = !vm;
+}
+$("#sourceMode").addEventListener("change", syncSourceMode);
+syncSourceMode();
 
 $("#provider").addEventListener("change", () => {
   const p = $("#provider").value;
