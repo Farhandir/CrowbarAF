@@ -98,7 +98,7 @@ class GuestControlTransport:
     def copyto(self, local: str, guest_dir: str) -> None:
         with self._auth() as auth:
             self._vbox([
-                "copyto", *auth, f"--target-directory={guest_dir}", local,
+                "copyto", *auth, f"--target-directory={guest_dir.rstrip('/')}/", local,
             ])
 
     def copyfrom(self, guest: str, local: str) -> None:
