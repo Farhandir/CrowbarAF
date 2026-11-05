@@ -22,6 +22,7 @@ import shutil
 import sys
 import tempfile
 import threading
+from pathlib import Path
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
@@ -31,6 +32,7 @@ import db
 from graph import build_graph
 from nodes import compute_sha256
 from state import AgentState
+from web_v2 import router as web_v2_router
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ MAX_UPLOAD_BYTES = int(os.environ.get("CROWBAR_MAX_UPLOAD_MB", "200")) * 1024 * 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 app = FastAPI(title="CrowbarAF", description="Otonom statik zararlı yazılım analizi")
+app.include_router(web_v2_router)
 
 # sha256 -> {"status": "running" | "error", "error": str}; başarılı işler kayıttan düşer
 _JOBS: dict[str, dict[str, str]] = {}
@@ -434,6 +437,14 @@ loadSamples();
 """
 
 
+UI_V2_HTML = Path(__file__).with_name("ui_v2.html").read_text(encoding="utf-8")
+
+
+@app.get("/v2", response_class=HTMLResponse)
+def index_v2() -> str:
+    return UI_V2_HTML
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return INDEX_HTML
@@ -457,6 +468,11 @@ def main() -> None:
                         help="LLM çağrısı yapmadan deterministik state üret (offline VM)")
     parser.add_argument("--no-db", action="store_true", help="SQLite yazmayı atla (offline VM)")
     parser.add_argument("--out", help="State JSON dosyası (verilmezse stdout)")
+    parser.add_argument("--profile", choices=("core", "deep"), help="Araç profili: core/deep")
+    parser.add_argument("--max-decompile", type=int, help="Ghidra top-N decompile")
+    parser.add_argument("--ghidra-timeout", type=int, help="Ghidra timeout (saniye)")
+    parser.add_argument("--capa-timeout", type=int, help="capa timeout (saniye)")
+    parser.add_argument("--floss-timeout", type=int, help="FLOSS timeout (saniye)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -464,6 +480,16 @@ def main() -> None:
         os.environ["CROWBAR_SKIP_LLM"] = "1"
     if args.no_db:
         os.environ["CROWBAR_SKIP_DB"] = "1"
+    if args.profile:
+        os.environ["CROWBAR_TOOL_PROFILE"] = args.profile
+    if args.max_decompile is not None:
+        os.environ["CROWBAR_MAX_DECOMPILE"] = str(args.max_decompile)
+    if args.ghidra_timeout is not None:
+        os.environ["CROWBAR_GHIDRA_TIMEOUT"] = str(args.ghidra_timeout)
+    if args.capa_timeout is not None:
+        os.environ["CROWBAR_CAPA_TIMEOUT"] = str(args.capa_timeout)
+    if args.floss_timeout is not None:
+        os.environ["CROWBAR_FLOSS_TIMEOUT"] = str(args.floss_timeout)
 
     if args.serve:
         import uvicorn

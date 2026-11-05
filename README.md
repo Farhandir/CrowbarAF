@@ -318,7 +318,8 @@ cp .env.example .env
 set -a; . ./.env; set +a
 
 python main.py <sample>                    # analysis + state JSON
-python main.py --serve                     # UI/API at http://127.0.0.1:8000
+python main.py --serve                     # legacy UI at http://127.0.0.1:8000
+# split UI: http://127.0.0.1:8000/v2
 python report.py <state.json> --format md --out reports/
 ```
 
@@ -391,6 +392,7 @@ CrowbarAF/
 - [`docs/PUBLISHING.md`](docs/PUBLISHING.md) — public-repo checklist, secret/
   sample/personal-data audit, licensing and branch protection
 - [`docs/CI.md`](docs/CI.md) — GitHub Actions CI and branch-protection setup
+- [`docs/UI-V2.md`](docs/UI-V2.md) — split-mode UI (`/v2`): Offline / Host-LLM / History / Setup
 - [`docs/TOOL-ADDITIONS.md`](docs/TOOL-ADDITIONS.md) — how to add analysis tools
 - [`results/archive/README.md`](results/archive/README.md) — experiment setup,
   records, metrics and pitfalls

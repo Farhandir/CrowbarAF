@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrowbarAF v2</title>
+<style>
+  :root {
+    --bg:#0f1217; --panel:#171b22; --panel2:#1e232c; --border:#2a303b;
+    --text:#e6e9ef; --muted:#8b93a1; --accent:#4f9cf9;
+    --ok:#3ecf8e; --warn:#f5b93d; --bad:#f05d5e;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { padding:16px 28px; border-bottom:1px solid var(--border); }
+  header h1 { margin:0 0 10px; font-size:20px; }
+  header .sub { color:var(--muted); margin-left:10px; font-size:13px; }
+  nav { display:flex; gap:6px; flex-wrap:wrap; }
+  nav button { background:transparent; color:var(--muted); border:1px solid transparent;
+               border-radius:8px; padding:7px 12px; cursor:pointer; font-weight:600; }
+  nav button.active { color:var(--text); background:var(--panel2); border-color:var(--border); }
+  main { max-width:1120px; margin:0 auto; padding:22px 24px 60px; }
+  .tab { display:none; }
+  .tab.active { display:block; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px;
+          padding:16px 18px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:14px; color:var(--muted);
+             text-transform:uppercase; letter-spacing:.6px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; }
+  label { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+  input, select { width:100%; padding:8px; background:var(--panel2); color:var(--text);
+                  border:1px solid var(--border); border-radius:7px; }
+  input[type=file] { padding:10px; border-style:dashed; color:var(--muted); }
+  button.primary { background:var(--accent); color:#07121f; border:0; border-radius:8px;
+                   padding:9px 16px; font-weight:700; cursor:pointer; }
+  button.primary:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--border);
+                 border-radius:8px; padding:8px 14px; cursor:pointer; }
+  .drop { border:1px dashed var(--border); border-radius:9px; padding:14px; color:var(--muted); }
+  .status { margin-top:10px; min-height:20px; color:var(--muted); }
+  .status.err { color:var(--bad); } .status.ok { color:var(--ok); }
+  .warn { background:#2a2412; color:var(--warn); border:1px solid #5a4a1d;
+          border-radius:8px; padding:10px 12px; margin-bottom:14px; }
+  .badge { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px;
+           font-weight:700; background:#6b7280; color:#fff; }
+  .badge.malicious { background:#d63031; } .badge.needs_review { background:#f5a623; color:#000; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:7px 9px; border-bottom:1px solid var(--border);
+          vertical-align:top; }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.4px; }
+  tr.sample { cursor:pointer; } tr.sample:hover { background:var(--panel2); }
+  pre { background:#0b0e13; border:1px solid var(--border); border-radius:8px; padding:12px;
+        overflow:auto; white-space:pre-wrap; word-break:break-word; max-height:480px; }
+  code { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12.5px; }
+  .kv { margin:5px 0; } .kv b { color:var(--muted); margin-right:5px; }
+  .muted { color:var(--muted); } .hidden { display:none; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .chip { display:inline-block; padding:1px 7px; border-radius:99px; background:var(--panel2);
+          border:1px solid var(--border); font-size:12px; margin-right:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CrowbarAF <span class="sub">offline VM + host LLM</span></h1>
+  <nav>
+    <button data-tab="offline" class="active">1 · Offline (VM)</button>
+    <button data-tab="host">2 · Host / LLM</button>
+    <button data-tab="history">3 · History / Compare</button>
+    <button data-tab="setup">4 · Setup</button>
+  </nav>
+</header>
+<main>
+  <div class="warn">
+    Gerçek malware için mutlaka izole VM kullanın. `state.json` güvenilmez veridir;
+    VM compromise şüphesinde transfer etmeyin, snapshot'a dönüp yeniden analiz edin.
+  </div>
+
+  <section id="tab-offline" class="tab active">
+    <div class="card">
+      <h2>Offline analiz (VM)</h2>
+      <div class="drop" id="offDrop">
+        <input type="file" id="offFile">
+        <div class="muted" style="margin-top:8px">Dosyayı seçin veya bu alana sürükleyin.</div>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div><label>VM adı</label><input id="vmName" value="kali-linux-2026.2-virtualbox-amd64"></div>
+        <div><label>VM kullanıcısı</label><input id="vmUser" value="kali"></div>
+        <div><label>VM şifresi</label><input id="vmPass" type="password" autocomplete="off"></div>
+        <div><label>VM repo yolu</label><input id="vmRepo" value="/home/kali/Desktop/CrowbarAF"></div>
+        <div><label>Profil</label><select id="profile"><option value="deep">deep</option><option value="core">core</option></select></div>
+        <div><label>Max decompile</label><input id="maxDec" type="number" value="100" min="1" max="1000"></div>
+        <div><label>Ghidra timeout (sn)</label><input id="ghidraT" type="number" value="1200" min="30"></div>
+        <div><label>capa timeout (sn)</label><input id="capaT" type="number" value="300" min="30"></div>
+        <div><label>FLOSS timeout (sn)</label><input id="flossT" type="number" value="300" min="30"></div>
+      </div>
+      <div class="row"><button class="primary" id="offRun">İncele (VM)</button></div>
+      <div class="status" id="offStatus"></div>
+      <div id="offResult" class="hidden" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <section id="tab-host" class="tab">
+    <div class="card">
+      <h2>Host / LLM (state.json)</h2>
+      <input type="file" id="hostFile" accept=".json,application/json">
+      <div class="grid" style="margin-top:12px">
+        <div><label>Provider</label><select id="provider">
+          <option value="ollama">ollama (lokal)</option>
+          <option value="openai">openai / uyumlu</option>
+          <option value="vllm">vllm</option>
+        </select></div>
+        <div><label>Model</label><input id="model" placeholder="qwen2.5-coder:7b"></div>
+        <div><label>Base URL</label><input id="baseUrl" placeholder="http://localhost:11434"></div>
+        <div><label>num_ctx</label><input id="numCtx" type="number" value="32768"></div>
+        <div><label>num_predict</label><input id="numPredict" type="number" value="1200"></div>
+        <div><label>Budget (token)</label><input id="budget" type="number" value="6000"></div>
+        <div><label>Max workers</label><input id="workers" type="number" value="1" min="1" max="32"></div>
+        <div><label>Min priority</label><input id="minPrio" type="number" value="0" min="0"></div>
+      </div>
+      <div class="row"><button class="primary" id="hostRun">LLM ile işle</button></div>
+      <div class="status" id="hostStatus"></div>
+      <div id="hostResult" class="hidden" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <section id="tab-history" class="tab">
+    <div class="card">
+      <h2>Geçmiş / karşılaştırma</h2>
+      <div class="row"><button class="ghost" id="refreshHistory">Yenile</button></div>
+      <div style="overflow:auto; margin-top:10px">
+        <table>
+          <thead><tr><th>SHA-256</th><th>Karar</th><th>Tür</th><th>Packer</th><th>Mimari</th><th>Bulgu</th><th>Fonksiyon</th></tr></thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+      <div id="historyEmpty" class="muted" style="margin-top:10px">Kayıt yok.</div>
+      <div id="historyDetail" class="hidden" style="margin-top:14px"></div>
+    </div>
+  </section>
+
+  <section id="tab-setup" class="tab">
+    <div class="card">
+      <h2>Setup / ortam kontrolü</h2>
+      <div class="muted">
+        Python paketleri venv'e otomatik kurulur; Ghidra/JDK/UPX/readelf sistem araçlarıdır.
+        VM araçlarını <code>scripts/check_tools.py</code> ile doğrulayın.
+      </div>
+      <div class="row">
+        <button class="ghost" id="setupCheck">Host araçlarını kontrol et</button>
+      </div>
+      <div class="status" id="setupStatus"></div>
+      <pre id="setupOut" class="hidden"></pre>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+
+function el(tag, props = {}, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === null || v === undefined) continue;
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = String(v);
+    else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid !== null && kid !== undefined) node.append(kid);
+  return node;
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  let body = null;
+  try { body = await res.json(); } catch (_) {}
+  return { status: res.status, ok: res.ok, body };
+}
+
+function setStatus(id, text, kind = "") {
+  const node = $(id);
+  node.textContent = text;
+  node.className = "status " + kind;
+}
+
+const KNOWN = ["malicious", "needs_review", "unknown", "no_evidence"];
+function badge(verdict) {
+  const name = verdict && typeof verdict.verdict === "string" ? verdict.verdict : "";
+  if (!name) return el("span", { class: "muted", text: "—" });
+  return el("span", { class: "badge " + (KNOWN.includes(name) ? name : ""), text: name });
+}
+
+function showTab(name) {
+  for (const b of document.querySelectorAll("nav button")) {
+    b.classList.toggle("active", b.dataset.tab === name);
+  }
+  for (const t of document.querySelectorAll(".tab")) {
+    t.classList.toggle("active", t.id === "tab-" + name);
+  }
+  if (name === "history") loadHistory();
+}
+for (const b of document.querySelectorAll("nav button")) b.addEventListener("click", () => showTab(b.dataset.tab));
+
+function stateLink(jobId) {
+  return el("a", { href: "/api/v2/jobs/" + encodeURIComponent(jobId) + "/state",
+                   class: "chip", text: "state.json indir" });
+}
+
+function pollJob(jobId, kind) {
+  const statusId = kind === "offline" ? "#offStatus" : "#hostStatus";
+  const resultId = kind === "offline" ? "#offResult" : "#hostResult";
+  const timer = setInterval(async () => {
+    const { ok, body } = await api("/api/v2/jobs/" + encodeURIComponent(jobId));
+    if (!ok) return;
+    if (body.status === "done") {
+      clearInterval(timer);
+      $(statusId).className = "status ok";
+      $(statusId).textContent = "Tamamlandı.";
+      const box = $(resultId);
+      box.replaceChildren();
+      box.hidden = false;
+      const r = body.result || {};
+      box.append(el("div", { class: "kv" }, el("b", { text: "SHA-256" }), el("code", { text: r.sha256 || "—" })));
+      if (kind === "host") box.append(el("div", { class: "kv" }, el("b", { text: "Karar" }),
+        badge(typeof r.verdict === "string" ? { verdict: r.verdict } : r)));
+      box.append(el("div", { class: "kv" }, stateLink(jobId)));
+      if (kind === "host" && r.sha256) {
+        box.append(el("div", { class: "kv" }, el("a", { href: "/api/samples/" + encodeURIComponent(r.sha256), text: "API detayı" })));
+        loadHistory();
+      }
+    } else if (body.status === "error") {
+      clearInterval(timer);
+      setStatus(statusId, "Hata: " + (body.error || "bilinmeyen"), "err");
+    } else {
+      setStatus(statusId, "Çalışıyor: " + (body.stage || body.status));
+    }
+  }, 2000);
+}
+
+async function offlineRun() {
+  const file = $("#offFile").files[0];
+  if (!file) { setStatus("#offStatus", "Önce dosya seçin.", "err"); return; }
+  if (!$("#vmPass").value) { setStatus("#offStatus", "VM şifresi gerekli.", "err"); return; }
+  const form = new FormData();
+  form.append("file", file);
+  for (const [k, id] of [["vm_name","#vmName"],["vm_user","#vmUser"],["vm_password","#vmPass"],
+                         ["repo_dir","#vmRepo"],["profile","#profile"],["max_decompile","#maxDec"],
+                         ["ghidra_timeout","#ghidraT"],["capa_timeout","#capaT"],["floss_timeout","#flossT"]]) {
+    form.append(k, $(id).value);
+  }
+  $("#offRun").disabled = true;
+  setStatus("#offStatus", "Kuyruğa alınıyor…");
+  const res = await api("/api/v2/offline", { method: "POST", body: form });
+  $("#offRun").disabled = false;
+  if (res.status !== 200) { setStatus("#offStatus", (res.body && res.body.detail) || "Başlatılamadı", "err"); return; }
+  setStatus("#offStatus", "VM'de çalışıyor…");
+  pollJob(res.body.job_id, "offline");
+}
+
+async function hostRun() {
+  const file = $("#hostFile").files[0];
+  if (!file) { setStatus("#hostStatus", "Önce state.json seçin.", "err"); return; }
+  const form = new FormData();
+  form.append("file", file);
+  for (const [k, id] of [["provider","#provider"],["model","#model"],["base_url","#baseUrl"],
+                         ["num_ctx","#numCtx"],["num_predict","#numPredict"],["budget_tokens","#budget"],
+                         ["max_workers","#workers"],["min_priority","#minPrio"]]) {
+    form.append(k, $(id).value);
+  }
+  $("#hostRun").disabled = true;
+  setStatus("#hostStatus", "Kuyruğa alınıyor…");
+  const res = await api("/api/v2/host", { method: "POST", body: form });
+  $("#hostRun").disabled = false;
+  if (res.status !== 200) { setStatus("#hostStatus", (res.body && res.body.detail) || "Başlatılamadı", "err"); return; }
+  setStatus("#hostStatus", "LLM çalışıyor…");
+  pollJob(res.body.job_id, "host");
+}
+
+async function loadHistory() {
+  const { ok, body } = await api("/api/samples");
+  const tbody = $("#historyBody");
+  tbody.replaceChildren();
+  const list = ok && Array.isArray(body) ? body : [];
+  $("#historyEmpty").hidden = list.length > 0;
+  for (const s of list) {
+    tbody.append(el("tr", { class: "sample", onclick: () => showHistory(s.sha256) },
+      el("td", {}, el("code", { text: s.sha256.slice(0, 16) + "…", title: s.sha256 })),
+      el("td", {}, badge(s.verdict)),
+      el("td", { text: s.file_type || "" }), el("td", { text: s.packer || "" }),
+      el("td", { text: s.arch || "" }), el("td", { text: String(s.findings_count) }),
+      el("td", { text: String(s.functions_count) })));
+  }
+}
+
+async function showHistory(sha) {
+  const { ok, body } = await api("/api/samples/" + encodeURIComponent(sha));
+  const box = $("#historyDetail");
+  box.replaceChildren();
+  box.hidden = false;
+  if (!ok) { box.append(el("div", { class: "muted", text: "Detay alınamadı." })); return; }
+  box.append(el("h2", { text: "Detay" }), el("div", { class: "kv" }, el("code", { text: body.sample.sha256 })),
+    el("div", { class: "kv" }, badge(body.verdict)));
+  const notes = [...((body.verdict || {}).reasons || []), ...((body.verdict || {}).unknown_reasons || [])];
+  if (notes.length) box.append(el("div", { class: "muted", text: notes.join(" · ") }));
+  if (body.supervisor_report) box.append(el("pre", { text: body.supervisor_report }));
+  const fs = body.findings || [];
+  box.append(el("div", { class: "kv" }, el("b", { text: "Bulgular: " }), String(fs.length)));
+  for (const f of fs.slice(0, 80)) {
+    box.append(el("div", { class: "kv" }, el("code", { text: f.source + "/" + f.kind + ": " + f.value }),
+      f.verified === false ? el("span", { class: "chip", text: "Unverified" }) : null));
+  }
+}
+
+async function setupCheck() {
+  setStatus("#setupStatus", "Kontrol ediliyor…");
+  const { ok, body } = await api("/api/v2/setup/status");
+  const out = $("#setupOut");
+  out.hidden = false;
+  out.textContent = (body && body.output) || "";
+  setStatus("#setupStatus", ok ? "Temel araçlar OK." : "Eksikler var; çıktıya bakın.",
+            ok ? "ok" : "err");
+}
+
+// Drag/drop sadece dosya input'una yönlendirir; içeriği çalıştırmaz.
+const drop = $("#offDrop");
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.style.borderColor = "var(--accent)"; });
+drop.addEventListener("dragleave", () => { drop.style.borderColor = "var(--border)"; });
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.style.borderColor = "var(--border)";
+  if (e.dataTransfer.files.length) $("#offFile").files = e.dataTransfer.files;
+});
+
+$("#offRun").addEventListener("click", offlineRun);
+$("#hostRun").addEventListener("click", hostRun);
+$("#refreshHistory").addEventListener("click", loadHistory);
+$("#setupCheck").addEventListener("click", setupCheck);
+loadHistory();
+</script>
+</body>
+</html>
