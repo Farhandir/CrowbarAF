@@ -38,6 +38,7 @@ class GuestControlConfig:
     password: str = field(repr=False)
     repo_dir: str = "/home/kali/Desktop/CrowbarAF"
     python: str = ""          # default: <repo_dir>/.venv/bin/python
+    env: dict[str, str] = field(default_factory=dict)  # guest --putenv
     timeout: int = 1800
 
 
@@ -89,9 +90,10 @@ class GuestControlTransport:
 
     def run(self, exe: str, args: list[str], timeout: int | None = None) -> str:
         with self._auth() as auth:
+            env_args = [f"--putenv={k}={v}" for k, v in self.config.env.items() if v]
             return self._vbox(
                 ["run", "--exe", exe, "--cwd", self.config.repo_dir,
-                 *auth, "--wait-stdout", "--wait-stderr", "--", *args],
+                 *env_args, *auth, "--wait-stdout", "--wait-stderr", "--", *args],
                 timeout=timeout,
             )
 
