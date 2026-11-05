@@ -108,3 +108,11 @@ def test_transport_does_not_put_password_in_process_args(monkeypatch):
     transport.run("/bin/echo", ["hello"])
     assert "--passwordfile=" in " ".join(seen["args"])
     assert "super-secret" not in " ".join(seen["args"])
+
+
+def test_opencode_provider_preset(monkeypatch):
+    monkeypatch.delenv("CROWBAR_LLM_API_KEY", raising=False)
+    client = web_v2._build_client({"provider": "opencode", "model": "", "base_url": ""})
+    assert client.provider == "openai"
+    assert client.model == "deepseek-v4.1-flash"
+    assert client.base_url == "https://opencode.ai/inference/go/openai"

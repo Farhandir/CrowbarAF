@@ -110,10 +110,11 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _validate_state_file(path: Path) -> None:
+def _validate_state_file(path: Path):
     result = validate_state(path, max_mb=MAX_STATE_MB, allow_empty_summaries=True)
     if not result.ok:
         raise ValueError("state validation failed: " + "; ".join(result.errors[:8]))
+    return result
 
 
 def _run_offline_job(
@@ -129,12 +130,19 @@ def _run_offline_job(
         _job_update(job_id, stage="VM analysis")
         transport.run_offline(str(sample), str(state_path), **options)
         _job_update(job_id, stage="validating state")
-        _validate_state_file(state_path)
+        validation = _validate_state_file(state_path)
         sha = _sha256(sample)
+        warning = ""
+        if validation.functions == 0:
+            warning = ("0 functions: Ghidra/decompile çalışmadı. GHIDRA_INSTALL_DIR, "
+                       "analyzeHeadless ve VM repo/venv yolunu kontrol edin.")
         _job_update(
             job_id, status="done", stage="done",
             result={
                 "sha256": sha,
+                "functions": validation.functions,
+                "findings": validation.findings,
+                "warning": warning,
                 "state_file": state_path.name,
                 "state_bytes": state_path.stat().st_size,
                 "state_sha256": _sha256(state_path),
@@ -154,10 +162,16 @@ def _run_offline_job(
 
 def _build_client(fields: dict[str, Any]) -> LLMClient:
     provider = (fields.get("provider") or os.getenv("CROWBAR_LLM_PROVIDER", "ollama")).strip()
-    model = (fields.get("model") or os.getenv("CROWBAR_LLM_MODEL")
-             or os.getenv("CROWBAR_OLLAMA_MODEL", "llama3.1")).strip()
-    base_url = (fields.get("base_url") or os.getenv("CROWBAR_LLM_BASE_URL")
-                or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).strip()
+    if provider == "opencode":
+        provider = "openai"
+        model = (fields.get("model") or "deepseek-v4.1-flash").strip()
+        base_url = (fields.get("base_url")
+                    or "https://opencode.ai/inference/go/openai").strip()
+    else:
+        model = (fields.get("model") or os.getenv("CROWBAR_LLM_MODEL")
+                 or os.getenv("CROWBAR_OLLAMA_MODEL", "llama3.1")).strip()
+        base_url = (fields.get("base_url") or os.getenv("CROWBAR_LLM_BASE_URL")
+                    or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).strip()
     return LLMClient(
         provider=provider,
         model=model,
@@ -181,7 +195,8 @@ def _run_host_job(
         _job_update(job_id, status="running", stage="validating state")
         _validate_state_file(state_path)
         state = host_analyze.load_state(state_path)
-        _job_update(job_id, stage="LLM")
+        no_functions = not any((f.c_code or "").strip() for f in state.source_code)
+        _job_update(job_id, stage=("verdict only (0 functions)" if no_functions else "LLM"))
         client = _build_client(llm_fields)
         with _LLM_ENV_LOCK:
             old_workers = os.environ.get("CROWBAR_LLM_MAX_WORKERS")
@@ -211,11 +226,21 @@ def _run_host_job(
         except Exception as exc:  # noqa: BLE001 - state is still available
             logger.warning("[web_v2] DB save failed: %s", exc)
             saved = {"error": str(exc)[:300]}
+        llm_failures = (merged.verdict or {}).get("analysis_failures") or []
+        warning = ""
+        if no_functions:
+            warning = ("0 functions: LLM çağrılmadı; verdict yalnızca deterministik "
+                       "bulgulardan hesaplandı. Offline analizi Ghidra ile düzeltip yeniden koşun.")
+        elif llm_failures:
+            warning = (f"{len(llm_failures)} function LLM çağrısı başarısız; verdict yalnızca "
+                       "deterministik bulgulardan hesaplandı. Provider/base URL/API key'i kontrol edin.")
         _job_update(
             job_id, status="done", stage="done",
             result={
                 "sha256": merged.sample.sha256,
                 "verdict": merged.verdict.get("verdict", "unknown") if merged.verdict else "unknown",
+                "functions": len([f for f in state.source_code if (f.c_code or "").strip()]),
+                "warning": warning,
                 "state_file": out_path.name,
                 "state_bytes": out_path.stat().st_size,
                 "state_sha256": _sha256(out_path),
@@ -236,6 +261,9 @@ def offline_analyze(
     vm_user: str = Form(DEFAULT_VM_USER),
     vm_password: str = Form(...),
     repo_dir: str = Form(DEFAULT_VM_REPO),
+    ghidra_dir: str = Form("/home/kali/Desktop/ghidra_12.1.4_PUBLIC"),
+    capa_rules: str = Form("/home/kali/.local/share/capa-rules"),
+    yara_rules: str = Form("/home/kali/.local/share/crowbar/yara_rules"),
     profile: str = Form("deep"),
     max_decompile: int = Form(100),
     ghidra_timeout: int = Form(1200),
@@ -255,9 +283,17 @@ def offline_analyze(
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="empty file")
     state_path = STATE_DIR / f"{job_id}.json"
+    env = {}
+    if ghidra_dir.strip():
+        env["GHIDRA_INSTALL_DIR"] = ghidra_dir.strip()
+    if capa_rules.strip():
+        env["CAPA_RULES"] = capa_rules.strip()
+    if yara_rules.strip():
+        env["CROWBAR_YARA_RULES"] = yara_rules.strip()
     config = GuestControlConfig(
         vm_name=vm_name.strip(), username=vm_user.strip(), password=vm_password,
         repo_dir=repo_dir.strip() or DEFAULT_VM_REPO,
+        env=env,
     )
     options = dict(
         profile=profile,
@@ -329,6 +365,17 @@ def job_state(job_id: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="state not found")
     return FileResponse(path, media_type="application/json", filename=name)
+
+
+@router.get("/api/v2/state/{filename}")
+def state_by_filename(filename: str) -> FileResponse:
+    """Download a state by its server-generated name (survives job-store restart)."""
+    if not re.fullmatch(r"[a-f0-9]{32}(\.llm)?\.json", filename):
+        raise HTTPException(status_code=404, detail="state not found")
+    path = STATE_DIR / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="state not found")
+    return FileResponse(path, media_type="application/json", filename=filename)
 
 
 @router.get("/api/v2/setup/status")
