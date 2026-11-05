@@ -6,6 +6,7 @@ the existing UI/tests keep working while the split-mode UI is added.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -119,19 +120,26 @@ def _validate_state_file(path: Path):
 
 def _run_offline_job(
     job_id: str,
-    sample: Path,
+    sample: Path | None,
     state_path: Path,
     config: GuestControlConfig,
     options: dict[str, Any],
 ) -> None:
     try:
-        _job_update(job_id, status="running", stage="copying to VM")
+        _job_update(job_id, status="running", stage=("checking VM path" if sample is None else "copying to VM"))
         transport = GuestControlTransport(config)
         _job_update(job_id, stage="VM analysis")
-        transport.run_offline(str(sample), str(state_path), **options)
+        transport.run_offline(str(sample) if sample else None, str(state_path), **options)
         _job_update(job_id, stage="validating state")
         validation = _validate_state_file(state_path)
-        sha = _sha256(sample)
+        sha = ""
+        if sample is not None:
+            sha = _sha256(sample)
+        else:
+            try:
+                sha = str(json.loads(state_path.read_text(encoding="utf-8")).get("sample", {}).get("sha256", ""))
+            except Exception:
+                sha = ""
         warning = ""
         if validation.functions == 0:
             warning = ("0 functions: Ghidra/decompile çalışmadı. GHIDRA_INSTALL_DIR, "
@@ -140,6 +148,7 @@ def _run_offline_job(
             job_id, status="done", stage="done",
             result={
                 "sha256": sha,
+                "source": ("vm_path" if sample is None else "host_upload"),
                 "functions": validation.functions,
                 "findings": validation.findings,
                 "warning": warning,
@@ -153,11 +162,12 @@ def _run_offline_job(
         _job_update(job_id, status="error", stage="error",
                     error=f"{type(exc).__name__}: {exc}"[:1000])
     finally:
-        # Keep the state for download; remove the host-side sample copy.
-        try:
-            sample.unlink(missing_ok=True)
-        except OSError:
-            pass
+        # Keep the state for download; remove only a host-side upload copy.
+        if sample is not None:
+            try:
+                sample.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _build_client(fields: dict[str, Any]) -> LLMClient:
@@ -256,7 +266,9 @@ def _run_host_job(
 @router.post("/api/v2/offline")
 def offline_analyze(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file: UploadFile | None = File(None),
+    source_mode: str = Form("host"),
+    vm_path: str = Form(""),
     vm_name: str = Form(DEFAULT_VM_NAME),
     vm_user: str = Form(DEFAULT_VM_USER),
     vm_password: str = Form(...),
@@ -272,16 +284,30 @@ def offline_analyze(
 ) -> dict[str, Any]:
     if profile not in ("core", "deep"):
         raise HTTPException(status_code=400, detail="profile must be core or deep")
+    if source_mode not in ("host", "vm"):
+        raise HTTPException(status_code=400, detail="source_mode must be host or vm")
     if not vm_name.strip() or not vm_user.strip() or not vm_password:
         raise HTTPException(status_code=400, detail="VM name/user/password required")
     job_id = _job_new("offline")
     job_dir = UPLOAD_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
-    sample_path = job_dir / _safe_filename(file.filename)
-    size = _save_upload(file, sample_path)
-    if size == 0:
-        shutil.rmtree(job_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail="empty file")
+    sample_path: Path | None = None
+    if source_mode == "vm":
+        vm_path = vm_path.strip()
+        if not vm_path.startswith("/") or "\n" in vm_path or "\x00" in vm_path:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail="vm_path must be an absolute Linux path")
+        options_remote_sample = vm_path
+    else:
+        if file is None:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail="file required for host upload mode")
+        sample_path = job_dir / _safe_filename(file.filename)
+        size = _save_upload(file, sample_path)
+        if size == 0:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail="empty file")
+        options_remote_sample = None
     state_path = STATE_DIR / f"{job_id}.json"
     env = {}
     if ghidra_dir.strip():
@@ -296,6 +322,7 @@ def offline_analyze(
         env=env,
     )
     options = dict(
+        remote_sample=options_remote_sample,
         profile=profile,
         max_decompile=max(1, min(int(max_decompile), 1000)),
         ghidra_timeout=max(30, int(ghidra_timeout)),

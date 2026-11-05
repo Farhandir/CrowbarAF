@@ -12,8 +12,12 @@ python main.py --serve --host 127.0.0.1 --port 8000
 
 ### 1. Offline (VM)
 
-- Dosya seç / sürükle-bırak.
-- VM adı, kullanıcı, şifre, repo yolu, profil, timeout ayarları.
+- **İki kaynak modu:**
+  - **Host'tan dosya yükle:** benign/sentetik testler.
+  - **VM içindeki dosya yolu:** gerçek malware için önerilen. Örnek host'a
+    kopyalanmaz; VM'deki mutlak yol (`/home/kali/samples/sample.bin`) doğrudan
+    analiz edilir ve yalnızca `state.json` host'a döner.
+- VM adı, kullanıcı, şifre, repo yolu, Ghidra/capa/YARA yolları, profil, timeout ayarları.
 - **İncele (VM)** → host, `VBoxManage guestcontrol` ile örneği VM'e kopyalar,
   `main.py --no-llm --no-db` çalıştırır ve `state.json`'u geri alır.
 - Çıktı: state indirme bağlantısı.
@@ -33,6 +37,10 @@ Gereksinimler:
 
 - Offline'dan gelen `state.json`'u yükle.
 - Provider/model/base URL, token bütçesi, worker ve priority ayarları.
+- **OpenCode Go** hazır seçeneği: base URL
+  `https://opencode.ai/inference/go/openai` (istemci `/v1/chat/completions`
+  ekler), model `deepseek-v4.1-flash`. API key yalnızca host ortamında
+  `CROWBAR_LLM_API_KEY` olarak durur; UI key istemez.
 - **LLM ile işle** → state doğrulanır, LLM + policy C çalışır, verdict/rapor/DB
   üretilir.
 - API key yalnızca host ortamında (`CROWBAR_LLM_API_KEY`); UI'den istenmez.
@@ -60,6 +68,8 @@ Gereksinimler:
 
 - v2 UI yalnızca `127.0.0.1` için tasarlandı; internete açmayın.
 - `state.json` düşman verisidir: boyut/şema/izin doğrulaması yapılır, çalıştırılmaz.
+- **Gerçek malware'i host'a indirmeyin.** VM içinde indirin veya ayrı bir
+  download VM'inden aktarın; UI'de **VM içindeki dosya yolu** modunu kullanın.
 - VM compromise şüphesinde **transfer etmeyin**; snapshot'a dönüp yeniden analiz edin.
 - `state.json` C2 string'leri içerebilir; `600`, git dışı, lokal model.
 - GuestControl şifresini repoya/DB'ye koymayın.

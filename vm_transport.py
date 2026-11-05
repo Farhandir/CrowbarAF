@@ -119,9 +119,10 @@ class GuestControlTransport:
 
     def run_offline(
         self,
-        sample_path: str,
+        sample_path: str | None,
         out_path: str,
         *,
+        remote_sample: str | None = None,
         profile: str = "deep",
         max_decompile: int = 100,
         ghidra_timeout: int = 1200,
@@ -133,10 +134,15 @@ class GuestControlTransport:
         Returns the local state path. The guest runs without LLM/DB and gets a
         fresh per-job directory; only the result state is copied out.
         """
-        local_sample = Path(sample_path).expanduser().resolve()
+        local_sample = Path(sample_path).expanduser().resolve() if sample_path else None
         local_out = Path(out_path).expanduser().resolve()
-        if not local_sample.is_file():
-            raise ValueError(f"sample not found: {local_sample}")
+        if remote_sample is None:
+            if local_sample is None or not local_sample.is_file():
+                raise ValueError(f"sample not found: {local_sample}")
+        else:
+            remote_sample = str(remote_sample).strip()
+            if not remote_sample.startswith("/") or "\n" in remote_sample or "\x00" in remote_sample:
+                raise ValueError("VM sample path must be an absolute Linux path")
         local_out.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.chmod(local_out.parent, 0o700)
