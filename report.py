@@ -90,7 +90,7 @@ def build(state: dict, trace: dict | None = None) -> dict:
             for c in fn.get("claims", []):
                 claim = {"offset": fn.get("offset"), "name": fn.get("name"), **c}
                 if isinstance(claim.get("text"), str):
-                    claim["text"] = defang_text(claim["text"])  # analist güvenliği
+                    claim["text"] = defang_text(claim["text"])  # analyst safety
                 claims.append(claim)
         ai = {"claims": claims, "functions_analyzed": trace.get("totals", {}).get("functions_analyzed", 0)}
 
@@ -118,11 +118,11 @@ def build(state: dict, trace: dict | None = None) -> dict:
                 "mitre_attack": caps.get("mitre_attack", []),
                 "malware_behavior": caps.get("malware_behavior", []),
             },
-            # IoC'ler defang edilir (tıklanabilir link olmasın); ham değer state/DB'de kalır.
+            # IoCs are defanged (so they are not clickable links); the raw value stays in state/DB.
             "floss": {"strings": [defang_text(s) for s in strings[:FLOSS_CAP]],
                       "string_count": len(strings),
                       "ioc_findings": [defang_ioc(f.get("value") or "") for f in floss_findings],
-                      # verified == False: string dosya byte'larında bulunamadı (araç hatası/uydurma olabilir)
+                      # verified == False: string not found in the file bytes (may be a tool error/fabricated)
                       "ioc_unverified": [defang_ioc(f.get("value") or "") for f in floss_findings
                                          if f.get("verified") is False]},
             "imports": {"list": imports[:IMPORT_CAP], "import_count": len(imports), "combos": combos,

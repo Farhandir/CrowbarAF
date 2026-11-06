@@ -1,4 +1,4 @@
-"""LLM katmani saf mantik testleri (LLM cagrisi gerektirmez)."""
+"""Pure-logic tests for the LLM layer (no LLM call required)."""
 from __future__ import annotations
 
 from llm_layer.cache import SummaryCache
@@ -50,7 +50,7 @@ def test_truncate_keeps_head_and_tail():
     assert len(out) <= 50 * 4 + 10
     assert out.startswith("HEAD")
     assert out.endswith("TAIL")
-    assert "kisaltildi" in out
+    assert "truncated" in out
 
 
 def test_truncate_noop_when_fits():
@@ -174,7 +174,7 @@ def test_verify_observation_when_quote_in_code():
 def test_verify_claim_when_matches_finding():
     c = Claim(text="injection", evidence="uses WriteProcessMemory to inject")
     f = [Finding(source="import", kind="import_combo", value="WriteProcessMemory")]
-    # bulgu fonksiyona YEREL ise (deger koddA geciyor) dogrulanir
+    # a finding is verified when it is LOCAL to the function (the value appears in the code)
     assert verify_claim(c, "h = OpenProcess(); WriteProcessMemory(h, ...);", f,
                         function_offset="0x1") == "verified_claim"
 
@@ -186,7 +186,7 @@ def test_verify_claim_by_address_match():
 
 
 def test_verify_global_finding_is_file_level_not_verified():
-    """Dosya-seviyesi (adressiz) bulgu, fonksiyonla eslesmiyorsa 'verified' SAYILMAZ; 'file_level' olur."""
+    """A file-level (addressless) finding is NOT considered 'verified' if it does not match the function; it becomes 'file_level'."""
     c = Claim(text="matches yara", evidence="Crowbar_Test_Connecting")
     f = [Finding(source="yara", kind="rule", value="Crowbar_Test_Connecting")]
     assert verify_claim(c, "int f(){return 0;}", f, function_offset="0x999") == "file_level"
@@ -212,7 +212,7 @@ def test_scc_order_handles_cycle():
     c = _fn("c", callees=["a"])
     sccs = scc_order([a, b, c])
     flat = {o: i for i, scc in enumerate(sccs) for o in scc}
-    # a ve b ayni SCC'de olmali; c'den once islenmeli
+    # a and b must be in the same SCC; it must be processed before c
     assert flat["a"] == flat["b"]
     assert flat["a"] < flat["c"]
 
@@ -276,7 +276,7 @@ def test_analyze_skips_library_functions():
     assert "0xa" in res.summaries
 
 
-# --- dugum entegrasyonu ---
+# --- node integration ---
 def test_run_reverser_updates_state_and_intent():
     from llm_layer.nodes import run_reverser
     from state import AgentState, DecompiledFunction
@@ -299,10 +299,10 @@ def test_run_supervisor_flags_missing_evidence():
     assert "unknown" in report
 
 
-# --- iz (trace) ---
+# --- trace ---
 def test_select_with_reasons_reports_library_and_budget():
     lib = _fn("0x1", "a" * 10, is_library=True)
-    big = _fn("0x2", "b" * 4000)          # ~1000 token, butceye sigmaz
+    big = _fn("0x2", "b" * 4000)          # ~1000 tokens, does not fit the budget
     small = _fn("0x3", "c" * 10)
     selected, skipped = select_with_reasons([lib, big, small], budget_tokens=50)
     reasons = {f.offset: r for f, r in skipped}
@@ -330,7 +330,7 @@ def test_tracer_records_totals_and_saves(tmp_path):
     tr = Tracer(model="m", provider="p", budget_tokens=100)
     tr.skipped(_fn("0x2", "", is_library=True), "library")
     summary = FunctionSummary(
-        offset="0x1", summary="x", suspicious=True, confidence="orta",
+        offset="0x1", summary="x", suspicious=True, confidence="medium",
         claims=[Claim(text="t", evidence="e", status="unverified")],
     )
     tr.analyzed(_fn("0x1", "code"), {"estimated_tokens": 10, "code_truncated": False, "json_ok": True},
@@ -350,11 +350,11 @@ def test_tracer_records_totals_and_saves(tmp_path):
     assert p.exists()
 
 
-# --- token sayaci ---
+# --- token counter ---
 def test_token_counter_estimate_and_calibrate():
     tc = TokenCounter(chars_per_token=4.0)
     assert tc.estimate("a" * 40) == 10
-    tc.calibrate("a" * 40, 20)          # gercek oran 2 karakter/token
+    tc.calibrate("a" * 40, 20)          # actual ratio is 2 characters/token
     assert abs(tc.chars_per_token - 2.0) < 0.01
     assert tc.estimate("a" * 40) == 20
     assert tc.samples == 1
@@ -368,7 +368,7 @@ class FlakyClient:
     def chat(self, messages, json_mode=True, temperature=0.0):
         self.calls += 1
         if self.calls == 1:
-            return LLMResult(content="bu JSON degil", prompt_tokens=5, completion_tokens=2)
+            return LLMResult(content="this is not JSON", prompt_tokens=5, completion_tokens=2)
         return LLMResult(
             content='{"summary":"ok","suspicious":false,"confidence":"medium","behaviors":[],"claims":[],"suggested_name":"x"}',
             prompt_tokens=5, completion_tokens=2)
@@ -383,7 +383,7 @@ def test_summarize_retries_on_invalid_json():
     assert summary.summary == "ok"
 
 
-# --- seviyeler (paralellik) ---
+# --- levels (parallelism) ---
 def test_scc_levels_chain():
     f1 = _fn("0x1", callees=["0x2"])
     f2 = _fn("0x2", callees=["0x3"])
@@ -403,7 +403,7 @@ def test_scc_levels_cycle_same_level():
     assert pos["a"] == pos["b"] < pos["c"]
 
 
-# --- paralel + onbellek ---
+# --- parallel + cache ---
 def test_analyze_parallel_matches_serial():
     fns = [_fn(f"0x{i}", f"int f{i}(){{return {i};}}") for i in range(6)]
     res = analyze(fns, [], FakeClient(), budget_tokens=1000, max_workers=3)
@@ -430,11 +430,11 @@ def test_cache_avoids_second_call(tmp_path):
     r1 = analyze(fns, [], client, budget_tokens=1000, cache=cache)
     assert client.calls == 1 and r1.calls == 1
     r2 = analyze(fns, [], client, budget_tokens=1000, cache=cache)
-    assert client.calls == 1          # ikinci kosuda LLM cagrilmadi
+    assert client.calls == 1          # the LLM was not called on the second run
     assert r2.cache_hits == 1 and r2.calls == 0
 
 
-# --- fidelity harness matematigi ---
+# --- fidelity harness math ---
 def test_fidelity_math():
     import importlib.util
     import pathlib
@@ -451,7 +451,7 @@ def test_fidelity_math():
 
 
 
-# --- findings: pipeline -> LLM katmanı ---
+# --- findings: pipeline -> LLM layer ---
 def test_to_findings_reads_state_findings():
     from llm_layer.nodes import _to_findings
     from state import AgentState, Finding as StateFinding
@@ -462,7 +462,7 @@ def test_to_findings_reads_state_findings():
             StateFinding(source="capa", kind="rule", value="inject code", address="0x401000"),
             StateFinding(source="yara", kind="rule", value="Emotet", confidence=0.8),
         ],
-        # eski alanlar artık kanıt kaynağı değil
+        # legacy fields are no longer an evidence source
         capabilities={"matched_rules": ["ignored"]},
         iocs={"ioc": ["1.2.3.4"]},
     )
@@ -744,7 +744,7 @@ def _fn_with_iocs(offset, code="int f(void){return 1;}", iocs=(), **kw):
 
 def test_functioninfo_has_iocs_default_empty():
     assert FunctionInfo(offset="0x1").iocs == []
-    assert FunctionInfo(offset="0x1").iocs is not FunctionInfo(offset="0x2").iocs  # paylaşılan liste yok
+    assert FunctionInfo(offset="0x1").iocs is not FunctionInfo(offset="0x2").iocs  # no shared list
 
 
 def test_to_function_infos_passes_iocs_losslessly():
@@ -762,15 +762,15 @@ def test_to_function_infos_passes_iocs_losslessly():
         ],
     )
     infos = _to_function_infos(st)
-    assert infos[0].iocs == iocs and infos[0].iocs is not iocs  # kayıpsız, ayrı kopya
+    assert infos[0].iocs == iocs and infos[0].iocs is not iocs  # lossless, separate copy
     assert infos[1].iocs == []
-    # iocs alanı olmayan eski kayıtlar da çökmemeli
+    # legacy records without the iocs field must not crash
     legacy = SimpleNamespace(source_code=[SimpleNamespace(offset="0x3", c_code="x")])
     assert _to_function_infos(legacy)[0].iocs == []
 
 
 def test_must_include_by_ghidra_ioc_when_code_does_not_contain_the_string():
-    # C2 string'i kodda düz metin olarak görünmüyor (ör. dolaylı referans); Ghidra xref ile bağladı
+    # the C2 string does not appear as plain text in the code (e.g. indirect reference); Ghidra linked it via xref
     fn = _fn_with_iocs("0x401000", "int f(void){return sub_402000(p);}", iocs=[C2])
     other = _fn_with_iocs("0x402000", "int g(void){return 2;}")
     f = Finding(source="floss", kind="url", value=C2, address=None)
@@ -779,12 +779,12 @@ def test_must_include_by_ghidra_ioc_when_code_does_not_contain_the_string():
 
 def test_ioc_match_is_case_insensitive_and_accepts_value_inside_longer_ioc():
     fn = _fn_with_iocs("0x1", iocs=["HTTP://192.0.2.1:4444/GATE.PHP?id=7"])
-    f = Finding(source="floss", kind="url", value=C2, address=None)  # değer, IoC'nin içinde
+    f = Finding(source="floss", kind="url", value=C2, address=None)  # value is inside the IoC
     assert must_include_offsets([fn], [f]) == {"0x1"}
 
 
 def test_ioc_match_does_not_use_reverse_containment_or_unrelated_iocs():
-    fn = _fn_with_iocs("0x1", iocs=["http://192.0.2.1"])  # bulgunun yalnızca bir parçası
+    fn = _fn_with_iocs("0x1", iocs=["http://192.0.2.1"])  # only a part of the finding
     f = Finding(source="floss", kind="url", value=C2, address=None)
     assert must_include_offsets([fn], [f]) == set()
     assert must_include_offsets([_fn_with_iocs("0x2", iocs=["http://other.example/x"])], [f]) == set()
@@ -799,8 +799,8 @@ def test_noncritical_finding_with_matching_ioc_is_not_must_include():
 def test_ioc_equality_works_for_short_values_but_substring_needs_length():
     from llm_layer.context import _value_matches_iocs
 
-    assert _value_matches_iocs("a.exe", ["A.EXE"])  # eşitlik: kısa da olsa
-    assert not _value_matches_iocs("a.exe", ["dropper_a.exe"])  # kısa değer alt-dize olarak eşleşmez
+    assert _value_matches_iocs("a.exe", ["A.EXE"])  # equality: even for short values
+    assert not _value_matches_iocs("a.exe", ["dropper_a.exe"])  # a short value does not match as a substring
     assert _value_matches_iocs("dropper.exe", ["c:\\tmp\\dropper.exe"])
     assert not _value_matches_iocs("", ["x"]) and not _value_matches_iocs("x", [])
 
@@ -813,7 +813,7 @@ def test_ioc_linked_function_pulls_in_direct_callees():
 
 
 def test_code_match_still_works_without_iocs():
-    fn = _fn(  # mevcut davranış korunur
+    fn = _fn(  # existing behavior is preserved
         "0x401000", f'const char *u = "{C2}";')
     f = Finding(source="floss", kind="url", value=C2, address=None)
     assert must_include_offsets([fn], [f]) == {"0x401000"}
@@ -826,11 +826,11 @@ def test_analyze_forces_low_priority_ioc_linked_function_under_threshold():
     res = analyze([fn, decoy], findings, FakeClient(), budget_tokens=1000, min_priority=1)
     assert "0x401000" in res.summaries
     assert res.must_include == ["0x401000"]
-    assert res.summaries["0x401000"].fail_closed is True  # LLM "zararsız" dese bile fail-closed
+    assert res.summaries["0x401000"].fail_closed is True  # fail-closed even if the LLM says "benign"
 
 
 def test_analyze_without_ioc_link_still_skips_the_same_function():
-    fn = _fn_with_iocs("0x401000", "int f(void){return sub_402000(p);}", priority=0)  # iocs boş
+    fn = _fn_with_iocs("0x401000", "int f(void){return sub_402000(p);}", priority=0)  # iocs empty
     findings = [Finding(source="floss", kind="url", value=C2, address=None)]
     res = analyze([fn], findings, FakeClient(), budget_tokens=1000, min_priority=1)
     assert res.summaries == {} and res.must_include == []

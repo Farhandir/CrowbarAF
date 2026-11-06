@@ -1,10 +1,10 @@
-"""SQLite kalıcılık katmanı: samples, findings, functions, calls, llm_claims.
+"""SQLite persistence layer: samples, findings, functions, calls, llm_claims.
 
-Yardımcılar duck-typing ile çalışır (``SampleInfo``/``Finding``/``DecompiledFunction``
-alanlarını okur); böylece bu modül ``state.py``'ye bağımlı değildir.
+The helpers work via duck typing (they read ``SampleInfo``/``Finding``/``DecompiledFunction``
+fields), so this module does not depend on ``state.py``.
 
-Yeniden analiz: aynı ``sha256`` için ``insert_*`` çağrıları o örneğin eski
-satırlarını silip yenilerini yazar (çift kayıt oluşmaz).
+Re-analysis: for the same ``sha256``, the ``insert_*`` calls delete that sample's old
+rows and write the new ones (no duplicate records).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any, Iterable
 
 from utils import defang_finding, defang_iocs
 
-# Varsayılan: çalışma dizininde "crowbaraf.db"; CROWBAR_DB_PATH ile değiştirilebilir.
+# Default: "crowbaraf.db" in the working directory; can be changed with CROWBAR_DB_PATH.
 DEFAULT_DB_PATH = os.environ.get("CROWBAR_DB_PATH", "crowbaraf.db")
 
 SCHEMA = """
@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_calls_sha256      ON calls(sha256);
 CREATE INDEX IF NOT EXISTS idx_llm_claims_sha256 ON llm_claims(sha256);
 """
 
-# Eski veritabanlarını yükseltmek için: functions tablosuna sonradan eklenen sütunlar
+# For upgrading older databases: columns added later to the functions table
 FUNCTION_EXTRA_COLUMNS = (
     ("llm_summary", "TEXT"),
     ("size", "INTEGER"),
@@ -87,14 +87,14 @@ FUNCTION_EXTRA_COLUMNS = (
     ("iocs", "TEXT"),
 )
 
-# llm_claims'e sonradan eklenen sütunlar (verdict: dosya düzeyi karar, JSON metni)
+# Columns added later to llm_claims (verdict: file-level decision, JSON text)
 LLM_CLAIMS_EXTRA_COLUMNS = (("verdict", "TEXT"),)
 
-# findings'e sonradan eklenen sütunlar: finding_id (kimlik), verified (binary'de var mı?).
-# Eski satırlar DEFAULT 1 ile "doğrulanmış" sayılır (geriye uyumluluk).
+# Columns added later to findings: finding_id (identity), verified (does it exist in the binary?).
+# Older rows are treated as "verified" via DEFAULT 1 (backward compatibility).
 FINDINGS_EXTRA_COLUMNS = (("finding_id", "TEXT"), ("verified", "BOOLEAN DEFAULT 1"))
 
-# tablo -> sonradan eklenen sütunlar (eski veritabanı migrasyonu)
+# table -> columns added later (old database migration)
 _MIGRATIONS = (
     ("functions", FUNCTION_EXTRA_COLUMNS),
     ("llm_claims", LLM_CLAIMS_EXTRA_COLUMNS),
@@ -107,16 +107,16 @@ def _path(db_path: str | None) -> str:
 
 
 def init_db(db_path: str | None = None) -> str:
-    """Tabloları (yoksa) oluşturur ve kullanılan veritabanı yolunu döndürür.
+    """Creates the tables (if missing) and returns the database path in use.
 
-    ``db_path`` verilmezse ``crowbaraf.db`` (veya ``CROWBAR_DB_PATH``) kullanılır.
-    Şema değişikliğinden önce oluşturulmuş veritabanlarında eksik ``functions``
-    sütunları ``ALTER TABLE`` ile eklenir.
+    If ``db_path`` is not given, ``crowbaraf.db`` (or ``CROWBAR_DB_PATH``) is used.
+    On databases created before a schema change, missing ``functions`` columns
+    are added with ``ALTER TABLE``.
     """
     path = _path(db_path)
     with closing(sqlite3.connect(path)) as conn, conn:
         conn.executescript(SCHEMA)
-        # CREATE TABLE IF NOT EXISTS mevcut tabloya sütun eklemez: eski şemayı yükselt
+        # CREATE TABLE IF NOT EXISTS does not add columns to an existing table: upgrade the old schema
         for table, columns in _MIGRATIONS:
             existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
             for column, sql_type in columns:
@@ -126,10 +126,10 @@ def init_db(db_path: str | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Yazma yardımcıları
+# Write helpers
 # --------------------------------------------------------------------------- #
 def insert_sample(sample: Any, db_path: str | None = None) -> None:
-    """``samples`` tablosuna örneği yazar (aynı sha256 varsa günceller)."""
+    """Writes the sample to the ``samples`` table (updates if the same sha256 exists)."""
     with closing(sqlite3.connect(_path(db_path))) as conn, conn:
         conn.execute(
             "INSERT OR REPLACE INTO samples (sha256, file_type, route, packer, arch) VALUES (?, ?, ?, ?, ?)",
@@ -138,7 +138,7 @@ def insert_sample(sample: Any, db_path: str | None = None) -> None:
 
 
 def insert_findings(sha256: str, findings: Iterable[Any], db_path: str | None = None) -> int:
-    """Örneğin bulgularını yazar (öncekileri siler). Yazılan satır sayısını döndürür."""
+    """Writes the sample's findings (deletes previous ones). Returns the number of rows written."""
     rows = [
         (sha256, f.source, f.kind, f.value, f.address, f.confidence,
          getattr(f, "finding_id", "") or "", int(bool(getattr(f, "verified", True))))
@@ -157,12 +157,12 @@ def insert_findings(sha256: str, findings: Iterable[Any], db_path: str | None = 
 def insert_functions_and_calls(
     sha256: str, functions: Iterable[Any], db_path: str | None = None
 ) -> tuple[int, int]:
-    """Fonksiyonları ``functions``, ``callees`` ilişkilerini ``calls`` tablosuna yazar.
+    """Writes functions to ``functions`` and callee relations to ``calls``.
 
-    Önceki kayıtlar silinir. ``decompile_warnings``, ``capa_hits`` ve ``xrefs``
-    JSON metni (``json.dumps``) olarak saklanır; ``is_library`` 0/1 yazılır.
-    Aynı fonksiyondan aynı hedefe tekrarlayan çağrılar tek satıra indirilir.
-    Dönüş: ``(yazılan_fonksiyon_sayısı, yazılan_çağrı_sayısı)``.
+    Previous records are deleted. ``decompile_warnings``, ``capa_hits`` and ``xrefs``
+    are stored as JSON text (``json.dumps``); ``is_library`` is written as 0/1.
+    Repeated calls from the same function to the same target are collapsed into one row.
+    Returns: ``(number_of_functions_written, number_of_calls_written)``.
     """
     function_rows: list[tuple[Any, ...]] = []
     call_rows: list[tuple[str, str, str]] = []
@@ -207,10 +207,10 @@ def insert_llm_claims(
     db_path: str | None = None,
     verdict: dict[str, Any] | str | None = None,
 ) -> None:
-    """Supervisor raporunu ve dosya kararını (``verdict``) ``llm_claims`` tablosuna yazar.
+    """Writes the supervisor report and the file-level decision (``verdict``) to the ``llm_claims`` table.
 
-    Önceki kayıt silinir. ``verdict`` bir ``dict`` ise ``json.dumps`` ile JSON metnine çevrilir;
-    ``None``/boş ise sütun ``NULL`` kalır. (Geriye uyumluluk: ``verdict`` isteğe bağlıdır.)
+    Previous records are deleted. If ``verdict`` is a ``dict``, it is converted to JSON text with
+    ``json.dumps``; if ``None``/empty, the column stays ``NULL``. (Backward compatibility: ``verdict`` is optional.)
     """
     verdict_json = None
     if verdict:
@@ -224,18 +224,18 @@ def insert_llm_claims(
 
 
 def save_analysis(state: Any, db_path: str | None = None) -> dict[str, Any]:
-    """Bir ``AgentState``'in tüm sonuçlarını tek çağrıda kalıcı hale getirir.
+    """Persists all results of an ``AgentState`` in a single call.
 
-    ``db_writer_node`` (tam hat) ve ``host_analyze.py --db`` (split mod) ortak kullanır:
+    Shared by ``db_writer_node`` (full pipeline) and ``host_analyze.py --db`` (split mode):
     ``init_db`` -> ``insert_sample`` -> ``insert_findings`` -> ``insert_functions_and_calls``
-    (``llm_summary`` dahil) -> ``insert_llm_claims`` (rapor ve/veya ``verdict`` varsa).
+    (including ``llm_summary``) -> ``insert_llm_claims`` (if a report and/or ``verdict`` exists).
 
-    ``state.sample.sha256`` boşsa ``ValueError`` fırlatır (anahtarsız satır yazılmaz).
-    Hataları yutmaz; çağıran karar verir. Dönüş: yazılan satır sayıları + ``db_path``.
+    If ``state.sample.sha256`` is empty, it raises ``ValueError`` (no row is written without a key).
+    It does not swallow errors; the caller decides. Returns: written row counts + ``db_path``.
     """
     sha256 = state.sample.sha256
     if not sha256:
-        raise ValueError("sample.sha256 boş; veritabanına yazılamaz")
+        raise ValueError("sample.sha256 is empty; cannot write to the database")
     path = init_db(db_path)
     insert_sample(state.sample, path)
     n_findings = insert_findings(sha256, state.findings, path)
@@ -248,7 +248,7 @@ def save_analysis(state: Any, db_path: str | None = None) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Okuma yardımcıları (API/UI için)
+# Read helpers (for API/UI)
 # --------------------------------------------------------------------------- #
 def _loads(text: str | None, default: Any) -> Any:
     try:
@@ -258,20 +258,20 @@ def _loads(text: str | None, default: Any) -> Any:
 
 
 def _loads_dict(text: str | None) -> dict[str, Any]:
-    """JSON metnini ``dict``'e çevirir; boş, bozuk veya dict olmayan değerde ``{}``."""
+    """Converts JSON text to a ``dict``; ``{}`` for empty, broken or non-dict values."""
     value = _loads(text, {})
     return value if isinstance(value, dict) else {}
 
 
 def _connect_ro(db_path: str | None) -> sqlite3.Connection:
-    path = init_db(db_path)  # tablolar/sütunlar garanti olsun (boş veritabanında da çalışır)
+    path = init_db(db_path)  # ensure tables/columns exist (also works on an empty database)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def get_all_samples(db_path: str | None = None) -> list[dict[str, Any]]:
-    """Analiz edilmiş tüm örnekler (en son yazılan önce) + bulgu/fonksiyon sayıları."""
+    """All analyzed samples (most recently written first) + finding/function counts."""
     with closing(_connect_ro(db_path)) as conn:
         rows = conn.execute(
             """
@@ -295,7 +295,7 @@ def get_all_samples(db_path: str | None = None) -> list[dict[str, Any]]:
 
 
 def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any] | None:
-    """Bir örneğin bulguları, fonksiyonları (callees ile) ve supervisor raporu; yoksa ``None``."""
+    """A sample's findings, functions (with callees) and supervisor report; ``None`` if missing."""
     with closing(_connect_ro(db_path)) as conn:
         sample = conn.execute(
             "SELECT sha256, file_type, route, packer, arch FROM samples WHERE sha256 = ?", (sha256,)
@@ -303,8 +303,8 @@ def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any
         if sample is None:
             return None
 
-        # Analist güvenliği: ağ IoC'leri (url/ip/domain/email) defang edilmiş döner;
-        # veritabanında ham değer kalır (bkz. utils.defang_ioc).
+        # Analyst safety: network IoCs (url/ip/domain/email) are returned defanged;
+        # the raw value stays in the database (see utils.defang_ioc).
         findings = []
         for r in conn.execute(
             "SELECT source, kind, value, address, confidence, finding_id, verified "
@@ -313,7 +313,7 @@ def get_sample_details(sha256: str, db_path: str | None = None) -> dict[str, Any
         ):
             item = dict(r)
             item["finding_id"] = item["finding_id"] or ""
-            # NULL (eski satır / migrasyon öncesi) = doğrulanmış; yalnızca açık 0 "False"
+            # NULL (old row / pre-migration) = verified; only an explicit 0 means "False"
             item["verified"] = item["verified"] is None or bool(item["verified"])
             findings.append(defang_finding(item))
 

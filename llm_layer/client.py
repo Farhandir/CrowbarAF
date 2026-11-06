@@ -1,7 +1,7 @@
-"""Model-agnostik LLM istemcisi: Ollama ve OpenAI-uyumlu sunucular (vLLM).
+"""Model-agnostic LLM client: Ollama and OpenAI-compatible servers (vLLM).
 
-Dis bagimlilik yok (urllib). Boylece lokalde Ollama, kirali GPU'da vLLM,
-istenirse API ayni kodla kullanilir.
+No external dependencies (urllib). This lets local Ollama, vLLM on a rented GPU,
+and optionally an API all use the same code.
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class LLMClient:
         # None = unknown; True/False after the first attempt.
         self.json_mode_supported = json_mode_supported
 
-    # --- ortak ---
+    # --- shared ---
     def chat(self, messages: list[dict], json_mode: bool = True, temperature: float = 0.0) -> LLMResult:
         if self.provider == "ollama":
             return self._ollama(messages, json_mode, temperature)

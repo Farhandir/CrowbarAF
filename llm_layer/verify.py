@@ -1,16 +1,16 @@
-"""Kanit dogrulayici: LLM iddialarini **fonksiyon-yerel** koda/bulgulara baglar.
+"""Evidence verifier: binds LLM claims to **function-local** code/findings.
 
-Ilke (precision-first): "✅ dogrulandi" asla yanlis olmamali. Emin degilse
-"unverified" (⚠️) denir.
+Principle (precision-first): "verified" must never be wrong. If unsure,
+say "unverified".
 
-Dort kanit sinifi:
-  verified_observation  : iddianin kaniti, BU fonksiyonun kodundan birebir alinti
-  verified_claim        : kanit, BU fonksiyona YEREL bir deterministik bulguyla ortusuyor
-                          (bulgu adresi fonksiyonla esliyor VEYA bulgu degeri
-                           fonksiyonun kodunda geciyor)
-  file_level            : kanit DOSYADA var ama bu fonksiyona atfedilemiyor
-                          (fonksiyon atfi belirsiz)
-  unverified            : hicbir dayanak yok -> sari uyari ("emin degilim")
+Four evidence classes:
+  verified_observation  : the claim's evidence is a verbatim quote from THIS function's code
+  verified_claim        : the evidence overlaps with a deterministic finding LOCAL to THIS
+                          function (the finding address matches the function OR the
+                          finding value appears in the function's code)
+  file_level            : the evidence exists in the FILE but cannot be attributed to this
+                          function (function attribution unclear)
+  unverified            : no basis at all -> yellow warning ("not sure")
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def verify_claim(claim: Claim, code: str, findings: list[Finding],
     ev = _norm(claim.evidence)
     code_n = _norm(code)
 
-    # 1) kanit, bu fonksiyonun kodundan birebir alinti mi?
+    # 1) is the evidence a verbatim quote from this function's code?
     if len(ev) >= 4 and ev in code_n:
         return "verified_observation"
 
@@ -40,7 +40,7 @@ def verify_claim(claim: Claim, code: str, findings: list[Finding],
     if looks_like_instruction(claim.text) or looks_like_instruction(claim.evidence):
         return "unverified"
 
-    # 2) kanit bir bulguyla ortusuyor mu? Yerel ise verified_claim, degilse file_level.
+    # 2) does the evidence overlap a finding? If local -> verified_claim, else file_level.
     global_match = False
     for f in findings:
         val = _norm(f.value)
@@ -50,10 +50,10 @@ def verify_claim(claim: Claim, code: str, findings: list[Finding],
             bool(function_offset) and bool(f.address)
             and _norm(str(f.address)) == _norm(str(function_offset))
         )
-        token_local = val in code_n  # bulgunun degeri bu fonksiyonun kodunda geciyor
+        token_local = val in code_n  # the finding value appears in this function's code
         if addr_local or token_local:
             return "verified_claim"
-        global_match = True  # dosyada var ama bu fonksiyona baglanamadi
+        global_match = True  # present in the file but could not be linked to this function
 
     return "file_level" if global_match else "unverified"
 

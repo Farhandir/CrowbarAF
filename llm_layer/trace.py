@@ -1,7 +1,7 @@
-"""LLM analiz izi (trace): ne incelendi, ne atlandi, kac token, hangi iddia.
+"""LLM analysis trace: what was analyzed, what was skipped, how many tokens, which claim.
 
-Amac: LLM katmaninin "kara kutu" olmaktan cikmasi. Her kosu JSON olarak
-kaydedilir; insan-okunur raporu `experiments/trace_report.py` basar.
+Goal: stop the LLM layer from being a "black box". Each run is saved as JSON;
+the human-readable report is printed by `experiments/trace_report.py`.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class Tracer:
     totals: dict = field(default_factory=dict)
     _t0: float = field(default_factory=time.monotonic, repr=False)
 
-    # --- kayit ---
+    # --- recording ---
     def event(self, kind: str, **data) -> None:
         self.events.append({"elapsed_s": round(time.monotonic() - self._t0, 3),
                             "kind": kind, **data})
@@ -106,7 +106,7 @@ class Tracer:
         }
         self.event("finalize", **self.totals)
 
-    # --- cikti ---
+    # --- output ---
     def to_dict(self) -> dict:
         return {
             "run": {

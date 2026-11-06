@@ -93,7 +93,7 @@ def summarize_function(
         attempts = attempt + 1
         res = client.chat(messages)
         obj = _parse(res.content)
-        # Gercek prompt token sayisiyla karakter/token oranini kalibre et
+        # Calibrate the chars/token ratio with the actual prompt token count
         if res.prompt_tokens:
             DEFAULT_COUNTER.calibrate("\n".join(m["content"] for m in messages), res.prompt_tokens)
         if _valid(obj):

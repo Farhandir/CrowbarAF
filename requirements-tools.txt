@@ -1,10 +1,11 @@
-# Opsiyonel analiz araçları (pip ile kurulur).
-# Bunlar kurulmazsa ilgili düğümler çökmez; boş sonuç + log ile devam eder.
+# Optional analysis tools (installed with pip).
+# If these are not installed the related nodes do not crash; they continue with
+# empty results plus a log entry.
 #
 #   pip install -r requirements-tools.txt
 #
-# NOT: pyghidra burada DEĞİL — Ghidra kurulumunun içindeki wheel'den kurulur
-# (bkz. docs/SETUP.md).
+# NOTE: pyghidra is NOT here -- it is installed from the wheel bundled with the
+# Ghidra installation (see docs/SETUP.md).
 
 flare-capa>=10
 flare-floss>=3
@@ -12,9 +13,9 @@ yara-python>=4
 pyinstxtractor-ng>=2026.7
 decompyle3>=3.9
 
-# NOT: pyinstxtractor-ng (xdis>=6.3) ile decompyle3 (xdis<6.3) çakışabilir.
-# pycdc birincil .pyc decompiler olduğu için pratikte sorun değil; gerekirse
-# decompyle3'ü atlayıp yalnızca pycdc kullanın.
+# NOTE: pyinstxtractor-ng (xdis>=6.3) and decompyle3 (xdis<6.3) may conflict.
+# pycdc is the primary .pyc decompiler, so this is not a problem in practice;
+# if needed, skip decompyle3 and use only pycdc.
 
-# Opsiyonel TLSH; C derleyicisi yoksa bu satırı atlayabilirsiniz.
+# Optional TLSH; you can skip this line if you do not have a C compiler.
 py-tlsh>=4.7

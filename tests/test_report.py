@@ -1,4 +1,4 @@
-﻿"""report.py testleri (saf mantık, LLM gerekmez)."""
+﻿"""Tests for report.py (pure logic, no LLM required)."""
 from __future__ import annotations
 
 import report
@@ -15,7 +15,7 @@ def _state(findings=None, functions=None, capabilities=None):
     }
 
 
-def test_belirsiz_when_no_evidence():
+def test_unknown_when_no_evidence():
     rep = report.build(_state())
     assert rep["verdict"]["level"] == "unknown"
     assert rep["verdict"]["has_deterministic_evidence"] is False
@@ -31,7 +31,7 @@ def test_deterministic_evidence_raises_verdict():
 def test_floss_only_is_medium():
     rep = report.build(_state(findings=[{"source": "floss", "kind": "url", "value": "http://x"}]))
     assert rep["verdict"]["level"] == "medium"
-    assert "hxxp://x" in rep["tools"]["floss"]["ioc_findings"]  # defang edilmiş (tıklanamaz)
+    assert "hxxp://x" in rep["tools"]["floss"]["ioc_findings"]  # defanged (not clickable)
     assert "http://x" not in rep["tools"]["floss"]["ioc_findings"]
 
 
@@ -60,7 +60,7 @@ def test_ghidra_inventory_and_priority():
 
 def test_markdown_has_tool_sections_and_ai_separate():
     trace = {"functions": [{"offset": "0x1", "name": "f",
-                            "claims": [{"text": "iddia", "evidence": "e", "status": "unverified"}]}],
+                            "claims": [{"text": "claim", "evidence": "e", "status": "unverified"}]}],
              "totals": {"functions_analyzed": 1}}
     rep = report.build(_state(findings=[{"source": "yara", "kind": "rule", "value": "T"}]), trace)
     md = report.render_markdown(rep)
@@ -105,13 +105,13 @@ def test_state_verdict_is_rendered_with_coverage():
 
 
 # --------------------------------------------------------------------------- #
-# verified == False -> "(Unverified)" uyarısı
+# verified == False -> "(Unverified)" warning
 # --------------------------------------------------------------------------- #
 def test_unverified_ioc_is_flagged_in_markdown_html_and_json():
     rep = report.build(_state(findings=[
         {"source": "floss", "kind": "url", "value": "http://real.example/a", "verified": True},
         {"source": "floss", "kind": "url", "value": "http://ghost.example/b", "verified": False},
-        {"source": "floss", "kind": "ip", "value": "10.9.8.7"},  # eski state: alan yok -> doğrulanmış sayılır
+        {"source": "floss", "kind": "ip", "value": "10.9.8.7"},  # legacy state: field absent -> treated as verified
     ]))
     assert rep["tools"]["floss"]["ioc_unverified"] == ["hxxp://ghost[.]example/b"]
 
@@ -119,7 +119,7 @@ def test_unverified_ioc_is_flagged_in_markdown_html_and_json():
     lines = {ln for ln in md.splitlines() if ln.startswith("- **IoC:**")}
     flagged = [ln for ln in lines if "(Unverified)" in ln]
     assert len(flagged) == 1 and "hxxp://ghost[.]example/b" in flagged[0]
-    assert len(lines) == 3  # diğer iki IoC uyarısız
+    assert len(lines) == 3  # the other two IoCs have no warning
     assert "(Unverified)" in report.render_html(rep)
     assert "ioc_unverified" in report.render_json(rep)
 

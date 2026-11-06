@@ -1,33 +1,33 @@
 # @category CrowbarAF
-"""Ghidra analyzeHeadless -postScript betiği (PyGhidra / Python 3).
+"""Ghidra analyzeHeadless -postScript script (PyGhidra / Python 3).
 
-Argümanlar (sırayla): <ghidra_input_json_path> <out_json_path>
+Arguments (in order): <ghidra_input_json_path> <out_json_path>
 
   ghidra_input.json:
-    {"hints":      [{"offset": "0x401000", "rule": "..."}],          # capa adresleri
+    {"hints":      [{"offset": "0x401000", "rule": "..."}],          # capa addresses
      "findings":   [{"source": "import_combo", "value": "...", ...}], # state.findings
      "combo_apis": {"Process Injection Combo": ["virtualalloc", ...]}}
-  out.json: state.DecompiledFunction şemasına uygun sözlük listesi.
+  out.json: list of dictionaries matching the state.DecompiledFunction schema.
 
-Mantık:
-  1. Programdaki TÜM fonksiyonlar için ad, adres, size, callees ve priority hesaplanır
-     (decompile yapılmaz; ucuzdur).
-  2. Puanlama: capa hint +5, tehlikeli API +4, import combo API'si +4,
-     çok büyük fonksiyon -2, kütüphane/stub = 0 (``is_library_heuristic``: thunk/external,
-     ``__libc_``/``_Z``/``std::``/... önekleri, size < 16; is_library=True ve priority=0).
-     İstisna: entry/main ve kanıt taşıyan (capa/IoC) fonksiyonlar ad/boyut sezgisiyle
-     kütüphane sayılmaz (``SOFT_LIBRARY_REASONS``).
-  3. Decompile seçimi moda bağlıdır: auto (<=300 ise hepsi, büyükse 300),
-     all (hepsi) veya top (MAX_DECOMPILE). Puanlı fonksiyon yoksa fallback uygulanır.
-  4. Decompile edilenlerin doğrudan callee'leri ``c_code: ""`` ile (çağrı grafiği
-     bağlansın diye) çıktıya eklenir; diğer yüzlerce fonksiyon çıktıya girmez.
-  5. Adressiz IoC -> fonksiyon eşleme: ``findings``'teki ip/url/domain/registry/file/email
-     değerleri, programın tanımlı string'lerinde aranır (eşit veya string'in içinde geçen);
-     eşleşen string'e referans veren fonksiyonun ``iocs`` listesine değer eklenir ve
-     fonksiyon +3 puan alır (IoC sayısından bağımsız, fonksiyon başına bir kez).
+Logic:
+  1. For ALL functions in the program, name, address, size, callees and priority are computed
+     (no decompile; it is cheap).
+  2. Scoring: capa hint +5, dangerous API +4, import combo API +4,
+     very large function -2, library/stub = 0 (``is_library_heuristic``: thunk/external,
+     ``__libc_``/``_Z``/``std::``/... prefixes, size < 16; is_library=True and priority=0).
+     Exception: entry/main and evidence-bearing (capa/IoC) functions are not treated as
+     libraries by the name/size heuristic (``SOFT_LIBRARY_REASONS``).
+  3. Decompile selection depends on the mode: auto (all if <=300, else 300),
+     all (all) or top (MAX_DECOMPILE). If there are no scored functions, a fallback is applied.
+  4. Direct callees of decompiled functions are added to the output with ``c_code: ""`` (so the
+     call graph connects); the other hundreds of functions do not enter the output.
+  5. Address-less IoC -> function mapping: ip/url/domain/registry/file/email values in
+     ``findings`` are searched in the program's defined strings (equal or contained in the string);
+     the value is added to the ``iocs`` list of the function referencing the matching string, and
+     the function gets +3 points (once per function, regardless of the IoC count).
 
-Not: Saf mantık (puanlama/seçim) Ghidra olmadan da import edilip test edilebilir;
-``main()`` yalnızca Ghidra ortamında (``currentProgram`` varsa) çalışır.
+Note: pure logic (scoring/selection) can be imported and tested without Ghidra;
+``main()`` runs only in a Ghidra environment (when ``currentProgram`` is present).
 """
 
 import json
@@ -40,12 +40,12 @@ DANGEROUS_API_BONUS = 4
 IMPORT_COMBO_BONUS = 4
 LARGE_FUNCTION_BYTES = 10000
 LARGE_FUNCTION_PENALTY = 2
-IOC_REFERENCE_BONUS = 3  # fonksiyon bir IoC string'ine referans veriyorsa (kaç IoC olursa olsun bir kez)
+IOC_REFERENCE_BONUS = 3  # if the function references an IoC string (once, regardless of the number of IoCs)
 
-# findings içinde string->fonksiyon eşlemesine girecek bulgu türleri
+# finding types eligible for string->function mapping from findings
 IOC_KINDS = ("ip", "url", "domain", "registry", "file", "email")
-MIN_IOC_LENGTH = 4  # "a.b" gibi çok kısa değerler rastgele string'lerle eşleşmesin
-MAX_TARGET_IOCS = 2000  # aranacak IoC üst sınırı (string sayısı x IoC sayısı patlamasın)
+MIN_IOC_LENGTH = 4  # prevent very short values like "a.b" from matching random strings
+MAX_TARGET_IOCS = 2000  # upper bound on searched IoCs (avoid string count x IoC count explosion)
 MAX_IOCS_PER_FUNCTION = 20
 MAX_DEFINED_DATA = int(os.environ.get("CROWBAR_MAX_DEFINED_DATA", "2000000"))  # Listing fallback cap
 
@@ -54,22 +54,22 @@ FALLBACK_DECOMPILE = int(os.environ.get("CROWBAR_FALLBACK_DECOMPILE", "20"))
 DECOMPILE_MODE = os.environ.get("CROWBAR_DECOMPILE_MODE", "top").strip().lower()
 AUTO_ALL_CAP = int(os.environ.get("CROWBAR_AUTO_ALL_CAP", "300"))
 AUTO_TOP_N = int(os.environ.get("CROWBAR_AUTO_TOP_N", "300"))
-MAX_STUBS = 500  # c_code'suz callee kayıtlarının üst sınırı
+MAX_STUBS = 500  # upper bound on callee records without c_code
 
-# Kütüphane/derleyici sezgisi (is_library_heuristic). Önek eşleşmesi büyük/küçük harf duyarlı.
+# Library/compiler heuristic (is_library_heuristic). Prefix matching is case-sensitive.
 LIBRARY_NAME_PREFIXES = (
     "__libc_", "_Z", "std::", "__cxa_", "__gxx_", "j_", "CRT_", "golang.", "runtime.",
 )
-MIN_FUNCTION_BYTES = 16  # daha küçükler: padding, thunk veya işlevsiz RET
-# Sadece ad/boyut sezgisiyle (Ghidra bayrağı olmadan) kütüphane sayılan bir fonksiyon;
-# entry/main ise veya kanıt taşıyorsa (capa / IoC) kütüphane SAYILMAZ: "_Z" ile başlayan
-# kullanıcı C++ kodu ya da kısa ama IoC'ye referans veren fonksiyon sessizce 0'a düşmesin.
+MIN_FUNCTION_BYTES = 16  # smaller: padding, thunk or a do-nothing RET
+# A function considered a library only by the name/size heuristic (without a Ghidra flag);
+# if it is entry/main or carries evidence (capa / IoC) it is NOT considered a library: a user
+# C++ function starting with "_Z", or a short function referencing an IoC, must not silently drop to 0.
 SOFT_LIBRARY_REASONS = frozenset(("prefix", "size"))
 ENTRY_NAMES = frozenset(("main", "_start", "entry", "wmain"))
 MAX_CALLEES = 50
 MAX_XREFS = 50
 
-# Küçük harfli, alt-dize eşleşmesi (CreateProcessA/W/Ex gibi varyantları da yakalar)
+# Lowercase, substring matching (also catches variants such as CreateProcessA/W/Ex)
 # Windows: substring match (CreateProcessA/W/Ex variants)
 DANGEROUS_APIS_SUBSTRING = (
     "virtualalloc",
@@ -141,7 +141,7 @@ DANGEROUS_APIS = tuple(DANGEROUS_APIS_SUBSTRING) + tuple(sorted(DANGEROUS_APIS_E
 
 
 # --------------------------------------------------------------------------- #
-# Saf mantık (Ghidra gerektirmez)
+# Pure logic (does not require Ghidra)
 # --------------------------------------------------------------------------- #
 def base_name(name):
     """'<EXTERNAL>::VirtualAlloc' -> 'virtualalloc'."""
@@ -149,7 +149,7 @@ def base_name(name):
 
 
 def active_combo_apis(findings, combo_apis):
-    """Bulgulardaki import_combo kurallarının içerdiği API isimlerinin kümesi."""
+    """Set of API names contained in the import_combo rules present in findings."""
     apis = set()
     for finding in findings:
         if isinstance(finding, dict) and finding.get("source") == "import_combo":
@@ -159,7 +159,7 @@ def active_combo_apis(findings, combo_apis):
 
 
 def collect_target_iocs(findings):
-    """Bulgulardan (kind: ip/url/domain/registry/file/email) aranacak IoC değerlerinin kümesi."""
+    """Set of IoC values (kind: ip/url/domain/registry/file/email) to search, taken from findings."""
     targets = set()
     for finding in findings:
         if not isinstance(finding, dict) or finding.get("kind") not in IOC_KINDS:
@@ -173,15 +173,15 @@ def collect_target_iocs(findings):
 
 
 def build_ioc_index(target_iocs):
-    """[(küçük_harf, orijinal), ...] — her string için yeniden küçültme yapılmasın."""
+    """[(lowercase, original), ...] - avoids lowercasing again for every string."""
     return sorted((ioc.lower(), ioc) for ioc in target_iocs)
 
 
 def match_iocs(text, ioc_index):
-    """``text`` bir IoC'ye eşitse veya IoC'yi içeriyorsa eşleşen IoC'ler (orijinal yazımla).
+    """Matching IoCs (original spelling) if ``text`` equals or contains an IoC.
 
-    Büyük/küçük harf duyarsız (domain, registry yolu, URL). Ters yön (IoC içinde kısa string)
-    bilerek aranmaz: kısa string'ler yanlış pozitif üretir.
+    Case-insensitive (domain, registry path, URL). The reverse direction (short string inside an IoC)
+    is intentionally not searched: short strings produce false positives.
     """
     lowered = str(text).lower()
     if len(lowered.strip()) < MIN_IOC_LENGTH:
@@ -190,7 +190,7 @@ def match_iocs(text, ioc_index):
 
 
 def add_ioc_hits(hits, entry, iocs):
-    """``hits[entry]`` listesine IoC'leri tekrarsız ekler (fonksiyon başına en fazla MAX_IOCS_PER_FUNCTION)."""
+    """Adds IoCs to ``hits[entry]`` without duplicates (at most MAX_IOCS_PER_FUNCTION per function)."""
     bucket = hits.setdefault(entry, [])
     for ioc in iocs:
         if ioc not in bucket and len(bucket) < MAX_IOCS_PER_FUNCTION:
@@ -198,7 +198,7 @@ def add_ioc_hits(hits, entry, iocs):
 
 
 def _call(obj, method, default):
-    """``obj.method()`` çağırır; yoksa/hata verirse ``default`` (Ghidra nesneleri bazen patlar)."""
+    """Calls ``obj.method()``; returns ``default`` if missing/failing (Ghidra objects sometimes blow up)."""
     try:
         return getattr(obj, method)()
     except Exception:
@@ -206,13 +206,13 @@ def _call(obj, method, default):
 
 
 def is_entry_name(name):
-    """Giriş noktası/main benzeri ad (her zaman decompile edilir; kütüphane sayılmaz)."""
+    """Entry-point/main-like name (always decompiled; never considered a library)."""
     return str(name or "").strip().lower() in ENTRY_NAMES
 
 
 def library_reason(func, size):
-    """Fonksiyonun neden kütüphane/stub sayıldığı: ``""`` (sayılmadı) ya da
-    ``"thunk"`` | ``"external"`` | ``"prefix"`` | ``"size"`` (bu sırayla ilk eşleşen).
+    """Why the function is considered a library/stub: ``""`` (not considered) or
+    ``"thunk"`` | ``"external"`` | ``"prefix"`` | ``"size"`` (first match in that order).
     """
     if _call(func, "isThunk", False):
         return "thunk"
@@ -230,25 +230,25 @@ def library_reason(func, size):
 
 
 def is_library_heuristic(func, size):
-    """Kütüphane/derleyici/stub fonksiyonu mu? (``True`` => is_library, priority 0)
+    """Is this a library/compiler/stub function? (``True`` => is_library, priority 0)
 
-    ``True`` döner:
-      * Ghidra bayrağı: ``func.isThunk()`` veya ``func.isExternal()``;
-      * ad ``LIBRARY_NAME_PREFIXES`` öneklerinden biriyle başlıyorsa
+    Returns ``True`` when:
+      * Ghidra flag: ``func.isThunk()`` or ``func.isExternal()``;
+      * the name starts with one of the ``LIBRARY_NAME_PREFIXES``
         (``__libc_``, ``_Z``, ``std::``, ``__cxa_``, ``__gxx_``, ``j_``, ``CRT_``,
         ``golang.``, ``runtime.``);
-      * ``size < 16`` byte (padding / thunk / işlevsiz RET).
+      * ``size < 16`` bytes (padding / thunk / do-nothing RET).
 
-    Saf sezgidir. Kanıt taşıyan fonksiyonlar için istisna ``collect_records``'tadır
-    (``SOFT_LIBRARY_REASONS``).
+    This is a pure heuristic. The exception for evidence-bearing functions is in
+    ``collect_records`` (``SOFT_LIBRARY_REASONS``).
     """
     return bool(library_reason(func, size))
 
 
 def compute_priority(capa_hits, callee_names, size, is_library, combo_apis, ioc_hits=None):
-    """Fonksiyon öncelik puanı (kütüphane/thunk her zaman 0).
+    """Function priority score (libraries/thunks are always 0).
 
-    ``ioc_hits``: fonksiyonun string referansıyla kullandığı IoC'ler; doluysa +3 (bir kez).
+    ``ioc_hits``: IoCs the function uses via string references; if non-empty, +3 (once).
     """
     if is_library:
         return 0
@@ -293,7 +293,7 @@ def propagate_priority(records, hops=2):
 
 
 def effective_decompile_limit(total: int) -> int:
-    """Auto: <=AUTO_ALL_CAP ise hepsi, değilse AUTO_TOP_N; all: hepsi; top: MAX_DECOMPILE."""
+    """Auto: all if <=AUTO_ALL_CAP, else AUTO_TOP_N; all: all; top: MAX_DECOMPILE."""
     if DECOMPILE_MODE == "all":
         return max(1, total)
     if DECOMPILE_MODE == "auto":
@@ -302,16 +302,16 @@ def effective_decompile_limit(total: int) -> int:
 
 
 def plan_export(records):
-    """Kayıt listesinden (decompile edilecekler, c_code'suz callee kayıtları) seçer.
+    """Selects (functions to decompile, callee records without c_code) from the record list.
 
-    * mode=auto: <=300 fonksiyon ise hepsi; daha büyükse ilk 300.
-    * mode=all: tüm fonksiyonlar; mode=top: ilk MAX_DECOMPILE.
-    * Hiç puanlı fonksiyon yoksa: kütüphane olmayan en büyük FALLBACK_DECOMPILE fonksiyon.
-    * Seçilenlerin doğrudan (dahili) callee'leri stub olarak eklenir (en fazla MAX_STUBS).
+    * mode=auto: all if <=300 functions; otherwise the first 300.
+    * mode=all: all functions; mode=top: the first MAX_DECOMPILE.
+    * If there are no scored functions: the largest non-library FALLBACK_DECOMPILE functions.
+    * Direct (internal) callees of the selected functions are added as stubs (at most MAX_STUBS).
     """
     limit = effective_decompile_limit(len(records))
-    # Kütüphane/stub kaydı ne olursa olsun puan 0: Top-N'e girip boş yere decompile
-    # edilmesin, LLM token bütçesi harcamasın (propagate_priority sonrası da garanti).
+    # Library/stub records always have priority 0: keep them out of Top-N so they do not get
+    # decompiled for nothing and waste the LLM token budget (also guaranteed after propagate_priority).
     for r in records:
         if r.get("is_library"):
             r["priority"] = 0
@@ -349,7 +349,7 @@ def plan_export(records):
             if callee in seen:
                 continue
             target = by_offset.get(callee)
-            if target is None:  # harici (import) fonksiyon
+            if target is None:  # external (import) function
                 continue
             seen.add(callee)
             stubs.append(target)
@@ -364,12 +364,12 @@ def write_results(path, results):
 
 
 def read_input(path):
-    """(hints, findings, combo_apis, decoded_hints) döndürür; hata: boş değerler."""
+    """Returns (hints, findings, combo_apis, decoded_hints); on error: empty values."""
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except Exception as exc:
-        printerr("[export_functions] girdi okunamadi: " + str(exc))  # noqa: F821 (Ghidra)
+        printerr("[export_functions] failed to read input: " + str(exc))  # noqa: F821 (Ghidra)
         return [], [], {}, []
     if not isinstance(data, dict):
         return [], [], {}, []
@@ -387,15 +387,15 @@ def read_input(path):
 
 
 # --------------------------------------------------------------------------- #
-# Ghidra API'sine bağlı kısım
+# Part tied to the Ghidra API
 # --------------------------------------------------------------------------- #
 def fmt_addr(addr):
-    """Ghidra adresini '0x401000' biçimine çevirir (hint formatıyla tutarlı)."""
+    """Converts a Ghidra address to the '0x401000' form (consistent with the hint format)."""
     return "0x%x" % (int(addr.getOffset()) & 0xFFFFFFFFFFFFFFFF)
 
 
 def map_hints_to_functions(hints):
-    """Hint adreslerini içeren fonksiyonları bulur: {entry_str: [rule, ...]}."""
+    """Finds functions containing hint addresses: {entry_str: [rule, ...]}."""
     hits = {}
     for hint in hints:
         try:
@@ -409,7 +409,7 @@ def map_hints_to_functions(hints):
             if rule and rule not in rules:
                 rules.append(rule)
         except Exception as exc:
-            printerr("[export_functions] hint islenemedi: " + str(exc))  # noqa: F821
+            printerr("[export_functions] failed to process hint: " + str(exc))  # noqa: F821
     return hits
 
 
@@ -459,12 +459,12 @@ def _function_for_ref(ref, ref_manager, func_manager, depth=0):
 
 
 def map_iocs_to_functions(target_iocs):
-    """Programın tanımlı string'lerinde IoC arar; referans veren fonksiyonlara eşler.
+    """Searches for IoCs in the program's defined strings; maps them to referencing functions.
 
-    Dönüş: {fonksiyon_giriş_adresi: [ioc, ...]}. String'e gelen referansın kaynak
-    adresini içeren fonksiyon bulunur; doğrudan kod referansı yoksa veri/pointer
-    zinciri 3 hop'a kadar izlenir (global ``const char *u`` durumu). Hata olursa
-    o ana kadar bulunanlar döner.
+    Returns: {function_entry_address: [ioc, ...]}. The function containing the source
+    address of the reference to the string is found; if there is no direct code reference, the data/pointer
+    chain is followed up to 3 hops (the global ``const char *u`` case). On error, whatever was
+    found so far is returned.
     """
     hits = {}
     if not target_iocs:
@@ -502,9 +502,9 @@ def map_iocs_to_functions(target_iocs):
                             continue
                         add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), matched)
             except Exception as exc:
-                printerr("[export_functions] string islenemedi: " + str(exc))  # noqa: F821
+                printerr("[export_functions] failed to process string: " + str(exc))  # noqa: F821
     except Exception as exc:
-        printerr("[export_functions] IoC eslemesi basarisiz: " + str(exc))  # noqa: F821
+        printerr("[export_functions] IoC mapping failed: " + str(exc))  # noqa: F821
     if os.environ.get("CROWBAR_IOC_DEBUG"):
         printerr(f"[export_functions] ioc debug: seen={seen} matched_data={matched_data} "
                  f"refs={refs_seen} hits={len(hits)}")  # noqa: F821
@@ -541,11 +541,11 @@ def _ghidra_candidates(raw):
 
 
 def map_decoded_hints_to_functions(decoded_hints):
-    """FLOSS decoded/tight/stack metadata'sını fonksiyonlara bağlar.
+    """Binds FLOSS decoded/tight/stack metadata to functions.
 
-    ``function`` / ``decoded_at`` / ``program_counter`` adreslerini içeren
-    fonksiyonu bulur; decoder helper ise doğrudan çağıranları da (1 hop) ekler.
-    ``address`` verilmişse string referanslarını da izler.
+    Finds the function containing the ``function`` / ``decoded_at`` / ``program_counter``
+    addresses; if it is a decoder helper, also adds its direct callers (1 hop).
+    If ``address`` is given, string references are followed as well.
     """
     hits = {}
     if not decoded_hints:
@@ -581,12 +581,12 @@ def map_decoded_hints_to_functions(decoded_hints):
             for func in funcs:
                 add_ioc_hits(hits, fmt_addr(func.getEntryPoint()), [value])
     except Exception as exc:
-        printerr("[export_functions] decoded hint eslemesi basarisiz: " + str(exc))  # noqa: F821
+        printerr("[export_functions] decoded hint mapping failed: " + str(exc))  # noqa: F821
     return hits
 
 
 def get_callees(func):
-    """Çağrılan fonksiyonlar: (hex adresler, isimler). JSON'a sadece adresler yazılır."""
+    """Called functions: (hex addresses, names). Only addresses are written to JSON."""
     from ghidra.util.task import TaskMonitor
 
     addrs = []
@@ -601,12 +601,12 @@ def get_callees(func):
             if len(addrs) >= MAX_CALLEES:
                 break
     except Exception as exc:
-        printerr("[export_functions] callees alinamadi: " + str(exc))  # noqa: F821
+        printerr("[export_functions] failed to get callees: " + str(exc))  # noqa: F821
     return addrs, names
 
 
 def get_xrefs(func):
-    """Fonksiyona gelen referansların kaynak adresleri ('0x...'; tekil, en fazla MAX_XREFS)."""
+    """Source addresses of references to the function ('0x...'; unique, at most MAX_XREFS)."""
     xrefs = []
     try:
         ref_manager = currentProgram.getReferenceManager()  # noqa: F821 (Ghidra)
@@ -620,19 +620,19 @@ def get_xrefs(func):
             if len(xrefs) >= MAX_XREFS:
                 break
     except Exception as exc:
-        printerr("[export_functions] xrefs alinamadi: " + str(exc))  # noqa: F821
+        printerr("[export_functions] failed to get xrefs: " + str(exc))  # noqa: F821
     return xrefs
 
 
 def decompile(decomp, func):
-    """(c_code, warnings) döndürür. Decompiler hata mesajı boş değilse uyarıya eklenir."""
+    """Returns (c_code, warnings). Decompiler error messages, if non-empty, are added to warnings."""
     warnings = []
     try:
         res = decomp.decompileFunction(func, DECOMPILE_TIMEOUT_SECONDS, monitor)  # noqa: F821
     except Exception as exc:
         return "", ["decompile exception: " + str(exc)]
     if res is None:
-        return "", ["decompiler sonuc dondurmedi"]
+        return "", ["decompiler returned no result"]
 
     message = res.getErrorMessage()
     if message is not None and str(message).strip():
@@ -641,16 +641,16 @@ def decompile(decomp, func):
         warnings.append("decompile timeout")
 
     if not res.decompileCompleted():
-        return "", warnings or ["decompile tamamlanamadi"]
+        return "", warnings or ["decompile did not complete"]
     decompiled = res.getDecompiledFunction()
     code = str(decompiled.getC()) if decompiled is not None else ""
     return code, warnings
 
 
 def collect_records(hits, combo_apis, ioc_hits=None):
-    """TÜM fonksiyonlar için decompile'sız kayıt (ad, adres, size, callees, priority) üretir.
+    """Produces a decompile-free record (name, address, size, callees, priority) for ALL functions.
 
-    ``ioc_hits``: {giriş_adresi: [ioc, ...]} (``map_iocs_to_functions`` çıktısı).
+    ``ioc_hits``: {entry_address: [ioc, ...]} (output of ``map_iocs_to_functions``).
     """
     ioc_hits = ioc_hits or {}
     records = []
@@ -675,8 +675,8 @@ def collect_records(hits, combo_apis, ioc_hits=None):
 
             reason = library_reason(func, size)
             is_library = bool(reason)
-            # Kanıt/entry istisnası: ad/boyut sezgisi tek başına kanıt taşıyan veya entry/main
-            # fonksiyonu kütüphane yapmaz (Ghidra thunk/external bayrağı yine kesindir).
+            # Evidence/entry exception: the name/size heuristic alone does not make an entry/main
+            # function or one carrying evidence a library (the Ghidra thunk/external flag is still definitive).
             if reason in SOFT_LIBRARY_REASONS and (
                     is_entry or is_entry_name(func.getName()) or capa_hits or iocs):
                 is_library = False
@@ -698,7 +698,7 @@ def collect_records(hits, combo_apis, ioc_hits=None):
                 "_func": func,
             })
         except Exception as exc:
-            printerr("[export_functions] fonksiyon puanlanamadi: " + str(exc))  # noqa: F821
+            printerr("[export_functions] failed to score function: " + str(exc))  # noqa: F821
     return records
 
 
@@ -707,7 +707,7 @@ def main():
 
     args = getScriptArgs()  # noqa: F821 (Ghidra)
     if len(args) < 2:
-        printerr("Kullanim: export_functions.py <ghidra_input_json_path> <out_json_path>")  # noqa: F821
+        printerr("Usage: export_functions.py <ghidra_input_json_path> <out_json_path>")  # noqa: F821
         return
     input_json_path, out_json_path = args[0], args[1]
 
@@ -721,12 +721,12 @@ def main():
         decoded_hits = map_decoded_hints_to_functions(decoded_hints)
         for entry, values in decoded_hits.items():
             add_ioc_hits(ioc_hits, entry, values)
-        println("[export_functions] %d fonksiyon IoC/decoded string'ine referans veriyor" % len(ioc_hits))  # noqa: F821
+        println("[export_functions] %d functions reference an IoC/decoded string" % len(ioc_hits))  # noqa: F821
 
         records = collect_records(hits, combo_set, ioc_hits)
         propagate_priority(records)
         chosen, stubs = plan_export(records)
-        println("[export_functions] %d fonksiyon tarandi (%d kutuphane/stub), %d decompile edilecek, %d stub" % (  # noqa: F821
+        println("[export_functions] scanned %d functions (%d library/stub), %d to decompile, %d stubs" % (  # noqa: F821
             len(records), sum(1 for r in records if r["is_library"]), len(chosen), len(stubs)))
 
         decomp = DecompInterface()
@@ -743,16 +743,16 @@ def main():
             record.pop("is_entry", None)
             results.append(record)
     except Exception as exc:
-        printerr("[export_functions] beklenmeyen hata: " + str(exc))  # noqa: F821
+        printerr("[export_functions] unexpected error: " + str(exc))  # noqa: F821
 
-    # Hata olsa bile (boş da olsa) çıktı dosyasını her zaman yaz
+    # Always write the output file, even on error (even if empty)
     write_results(out_json_path, results)
-    println("[export_functions] %d kayit yazildi: %s" % (len(results), out_json_path))  # noqa: F821
+    println("[export_functions] wrote %d records: %s" % (len(results), out_json_path))  # noqa: F821
 
 
 try:
-    currentProgram  # noqa: B018, F821 (Ghidra tarafından enjekte edilir)
+    currentProgram  # noqa: B018, F821 (injected by Ghidra)
 except NameError:
-    pass  # Ghidra dışında import edildi (testler): main() çalıştırma
+    pass  # imported outside Ghidra (tests): do not run main()
 else:
     main()

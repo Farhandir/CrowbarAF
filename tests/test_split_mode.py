@@ -50,7 +50,7 @@ def test_state_roundtrip_and_permissions(tmp_path, monkeypatch):
     written = ha.write_state(loaded, out)
     assert written == out
     assert out.is_file()
-    # POSIX izin bitleri Windows'ta uygulanmaz (chmod sessizce etkisiz); orada atla.
+    # POSIX permission bits are not enforced on Windows (chmod is silently a no-op); skip there.
     if os.name != "nt":
         assert (out.stat().st_mode & 0o777) == 0o600
 
@@ -112,13 +112,13 @@ def test_host_cli_refuses_skip_llm_env(monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------- #
-# host_analyze --db: split mod sonuçlarının SQLite'a yazılması
+# host_analyze --db: writing split-mode results to SQLite
 # --------------------------------------------------------------------------- #
 SHA = "ab" * 32
 
 
 def _merged_state() -> AgentState:
-    """Host'ta LLM + politika bittikten sonraki state (verdict, rapor, llm_summary)."""
+    """State after the host-side LLM and policy stages (verdict, report, llm_summary)."""
     return AgentState(
         file_path="/vm/sample.bin",
         sample=SampleInfo(sha256=SHA, file_type="ELF", route="native", packer="none", arch="x86-64"),
@@ -160,7 +160,7 @@ def test_persist_state_requires_sha256(tmp_path):
     path = str(tmp_path / "x.db")
     with pytest.raises(ValueError, match="sha256"):
         ha.persist_state(AgentState(file_path="x"), path)
-    assert not os.path.exists(path)  # anahtarsız satır / boş DB oluşmaz
+    assert not os.path.exists(path)  # no keyless row / empty DB is created
 
 
 def _write_state_file(tmp_path) -> str:
@@ -170,7 +170,7 @@ def _write_state_file(tmp_path) -> str:
 
 
 def test_cli_db_flag_persists(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(ha, "analyze_state", lambda st, **kw: st)  # LLM yok
+    monkeypatch.setattr(ha, "analyze_state", lambda st, **kw: st)  # no LLM
     dbp = str(tmp_path / "cli.db")
     rc = ha.main(["--state", _write_state_file(tmp_path), "--out", str(tmp_path / "o.json"),
                   "--db", dbp])
@@ -206,4 +206,4 @@ def test_cli_db_failure_returns_error_but_keeps_state_file(tmp_path, monkeypatch
     rc = ha.main(["--state", str(p), "--out", str(out), "--db", str(tmp_path / "d.db")])
     assert rc == 1
     assert "sha256" in capsys.readouterr().err
-    assert out.is_file()  # LLM sonucu DB hatası yüzünden kaybolmaz
+    assert out.is_file()  # the LLM result is not lost because of a DB error

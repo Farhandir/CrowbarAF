@@ -50,7 +50,7 @@ BEHAVIOR_KEYWORDS = {
 
 
 def finding_id(f: Finding) -> str:
-    if f.finding_id:  # nodes.compute_finding_id: DB/state ile aynı kimlik
+    if f.finding_id:  # nodes.compute_finding_id: same identity as DB/state
         return f.finding_id
     raw = f"{f.source}|{f.kind}|{f.value}|{f.address}"
     return "f_" + hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
@@ -105,8 +105,8 @@ def apply_fail_closed(summary: FunctionSummary, fn: FunctionInfo,
     critical = [f for f in relevant if is_critical_finding(f)]
     if not critical:
         return summary
-    # Doğrulanmamış (binary'de bulunamayan) kritik bulgu da "temiz" kararını geçersiz kılar
-    # (fail-closed: unknown), ama dosya kararında malicious üretemez (compute_verdict).
+    # An unverified (not found in the binary) critical finding also invalidates a "clean" decision
+    # (fail-closed: unknown), but cannot produce malicious in the file verdict (compute_verdict).
     summary.suspicious = None
     summary.fail_closed = True
     note = ("fail-closed: critical finding present" if any(f.verified for f in critical)

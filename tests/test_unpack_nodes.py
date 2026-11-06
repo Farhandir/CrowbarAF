@@ -1,4 +1,4 @@
-"""unpack_python_node ve unpack_dotnet_node için birim testleri (araçlar sahte)."""
+"""Unit tests for unpack_python_node and unpack_dotnet_node (tools are fake)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def _ok(cmd, stdout="", code=0, stderr=""):
 
 def _no_tools(monkeypatch):
     def boom(*a, **k):
-        raise AssertionError("araç çağrılmamalı")
+        raise AssertionError("tool must not be called")
 
     monkeypatch.setattr(nodes.subprocess, "run", boom)
 
@@ -63,7 +63,7 @@ class TestFindMainPyc:
         assert _find_main_pyc(d, "x", "") is None
 
     def test_missing_dir(self, tmp_path) -> None:
-        assert _find_main_pyc(str(tmp_path / "yok"), "x", "") is None
+        assert _find_main_pyc(str(tmp_path / "missing"), "x", "") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -108,9 +108,9 @@ class TestUnpackPython:
         extractor_cmd, extractor_kwargs = calls[0]
         assert extractor_cmd == ["pyinstxtractor", os.path.abspath(src)]
         assert extractor_kwargs["timeout"] == 60
-        assert extractor_kwargs["cwd"] != str(tmp_path)  # örneğin yanı kirletilmez
+        assert extractor_kwargs["cwd"] != str(tmp_path)  # the directory next to the sample is not polluted
         assert calls[1][0][0] == "pycdc" and calls[1][1]["timeout"] == 60
-        assert not os.path.exists(extractor_kwargs["cwd"])  # temp temizlendi
+        assert not os.path.exists(extractor_kwargs["cwd"])  # temp directory cleaned up
         assert list(tmp_path.iterdir()) == [src]
 
     def test_falls_back_to_decompyle3(self, tmp_path, monkeypatch) -> None:
@@ -168,7 +168,7 @@ class TestUnpackDotnet:
                 open(cmd[3], "wb").write(b"clean")
                 return _ok(cmd)
             if cmd[0] == "ilspycmd":
-                assert os.path.exists(cmd[1])  # temizlenmiş dosya ilspycmd'ye verilirken var
+                assert os.path.exists(cmd[1])  # cleaned file exists when passed to ilspycmd
                 return _ok(cmd, stdout="class Program { }\n")
             raise AssertionError(cmd)
 
@@ -180,7 +180,7 @@ class TestUnpackDotnet:
         assert calls[0][0] == ["de4dot", str(src), "-o", clean]
         assert calls[0][1]["timeout"] == 60
         assert calls[1][0] == ["ilspycmd", clean]
-        assert not os.path.exists(clean)  # artefakt bırakılmaz
+        assert not os.path.exists(clean)  # no artifact is left behind
         assert list(tmp_path.iterdir()) == [src]
 
     def test_stale_clean_file_removed_before_run(self, tmp_path, monkeypatch) -> None:
@@ -215,7 +215,7 @@ class TestUnpackDotnet:
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd[0])
-            return _ok(cmd)  # başarılı görünür ama dosya yok
+            return _ok(cmd)  # looks successful but no file exists
 
         monkeypatch.setattr(nodes.subprocess, "run", fake_run)
         assert unpack_dotnet_node(_state(tmp_path / "a.exe", "dotnet")) == {"route_flag": "native"}

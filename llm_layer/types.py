@@ -1,7 +1,7 @@
-"""LLM katmaninin veri sozlesmesi (pipeline <-> LLM).
+"""Data contract of the LLM layer (pipeline <-> LLM).
 
-Bu tipler, CrowbarAF pipeline'inin urettigi `functions` ve `findings`
-yapisinin LLM katmanindaki karsiligidir.
+These types are the LLM-layer counterparts of the `functions` and `findings`
+structures produced by the CrowbarAF pipeline.
 """
 from __future__ import annotations
 
@@ -10,19 +10,19 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Finding:
-    """Deterministik bir arac bulgusu (capa, floss, import, ioc...)."""
+    """A deterministic tool finding (capa, floss, import, ioc...)."""
     source: str                 # capa | floss | import | ioc | yara | entropy
     kind: str                   # capability | string | import_combo | ioc | ...
     value: str
     address: str | None = None
     confidence: float = 1.0
-    finding_id: str = ""        # nodes.finding_id (md5[:8]); boşsa verdict kendi kimliğini üretir
-    verified: bool = True       # False: metin IoC'si binary'de bulunamadı (kanıt olarak güvenilmez)
+    finding_id: str = ""        # nodes.finding_id (md5[:8]); if empty the verdict produces its own id
+    verified: bool = True       # False: text IoC was not found in the binary (not reliable as evidence)
 
 
 @dataclass
 class FunctionInfo:
-    """Ghidra'dan gelen fonksiyon (LLM'in asil girdisi)."""
+    """Function from Ghidra (the LLM's main input)."""
     offset: str
     name: str = ""
     c_code: str = ""
@@ -32,13 +32,13 @@ class FunctionInfo:
     callees: list[str] = field(default_factory=list)
     xrefs: list[str] = field(default_factory=list)
     decompile_warnings: list[str] = field(default_factory=list)
-    # Ghidra string xref eşlemesi: bu fonksiyonun string referansıyla kullandığı IoC değerleri
+    # Ghidra string xref mapping: IoC values this function uses via string references
     iocs: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Claim:
-    """LLM'in bir iddiasi + kaniti."""
+    """An LLM claim + its evidence."""
     text: str
     evidence: str = ""
     # verified_claim | verified_observation | unverified
@@ -47,7 +47,7 @@ class Claim:
 
 @dataclass
 class FunctionSummary:
-    """Bir fonksiyon icin sabit semali ozet (yukari tasinan 'not')."""
+    """Fixed-schema summary for one function (a 'note' carried upward)."""
     offset: str
     summary: str = ""
     suspicious: bool | None = None
@@ -58,7 +58,7 @@ class FunctionSummary:
     fail_closed: bool = False  # LLM said benign, but a critical finding overrode it
 
     def note(self) -> str:
-        """Ust fonksiyona tasinacak kisa not (sabit ve dar)."""
+        """Short note to carry up to the parent function (fixed and narrow)."""
         flag = "SUSPICIOUS" if self.suspicious else "benign"
         return f"[{self.name_or_offset()}] {flag}: {self.summary}"[:300]
 

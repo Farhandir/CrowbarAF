@@ -1,9 +1,9 @@
-"""LangGraph düğümleri (şimdilik stub).
+"""LangGraph nodes (stubs for now).
 
-Kurallar:
-  * Her düğüm ``AgentState`` alır, sadece güncellenecek alanları ``dict`` olarak döndürür.
-  * Dış araç (subprocess/CLI) entegrasyonu adım adım ekleniyor: şu an sadece capa hazır,
-    diğerlerinin yerleri ``TODO`` ile işaretli.
+Rules:
+  * Each node receives ``AgentState`` and returns only the fields to update as a ``dict``.
+  * External tool (subprocess/CLI) integration is being added step by step: only capa is
+    ready for now; the rest are marked with ``TODO``.
 """
 
 from __future__ import annotations
@@ -21,12 +21,12 @@ from typing import Any
 
 try:
     import pefile
-except ImportError:  # kurulu değilse PE yardımcıları boş sonuç döner, akış çökmez
+except ImportError:  # if not installed, PE helpers return empty results; the flow does not crash
     pefile = None  # type: ignore[assignment]
 
 try:
     import tlsh
-except ImportError:  # kurulu değilse (py-tlsh) compute_tlsh "" döner, akış çökmez
+except ImportError:  # if not installed (py-tlsh), compute_tlsh returns ""; the flow does not crash
     tlsh = None  # type: ignore[assignment]
 
 import db
@@ -41,15 +41,15 @@ FLOSS_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_FLOSS_TIMEOUT", "300"))
 DIE_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_DIE_TIMEOUT", "60"))
 UPX_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_UPX_TIMEOUT", "60"))
 UNPACKED_SUFFIX = ".unpacked"
-CLEAN_SUFFIX = ".clean"  # de4dot çıktısı
+CLEAN_SUFFIX = ".clean"  # de4dot output
 PYTHON_TOOL_TIMEOUT_SECONDS = 60  # pyinstxtractor, pycdc/decompyle3
 DOTNET_TOOL_TIMEOUT_SECONDS = 60  # de4dot
-DOTNET_DECOMPILE_TIMEOUT_SECONDS = 120  # ilspycmd (büyük assembly'ler daha uzun sürer)
+DOTNET_DECOMPILE_TIMEOUT_SECONDS = 120  # ilspycmd (large assemblies take longer)
 SHA256_CHUNK_SIZE = 1024 * 1024  # 1 MiB
-YARA_RULES_ENV = "CROWBAR_YARA_RULES"  # run_yara'da rules_dir verilmezse kullanılır
-CAPA_RULES_ENV = "CAPA_RULES"  # capa -r için kural dizini; boşsa capa'nın gömülü kuralları denenir
+YARA_RULES_ENV = "CROWBAR_YARA_RULES"  # used by run_yara when rules_dir is not given
+CAPA_RULES_ENV = "CAPA_RULES"  # rule directory for capa -r; if empty, capa's built-in rules are tried
 
-# YARA kuralının "kesin bilinen zararlı" sayılması için meta alanı (ör. meta: confidence = "known_malware")
+# YARA rule meta field for treating a rule as "definitely known malware" (e.g. meta: confidence = "known_malware")
 KNOWN_MALWARE_META_KEY = "classification"
 KNOWN_MALWARE_META_VALUE = "known_malware"
 
@@ -58,38 +58,38 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-# Araç profili: "deep" (varsayılan; capa + FLOSS + Ghidra çalışır) veya "core" (hızlı tarama:
-# capa, FLOSS ve Ghidra atlanır). DIE, YARA, pefile/readelf, unpacker'lar ve TLSH her iki
-# profilde de çalışır.
+# Tool profile: "deep" (default; runs capa + FLOSS + Ghidra) or "core" (quick scan:
+# skips capa, FLOSS and Ghidra). DIE, YARA, pefile/readelf, unpackers and TLSH run in
+# both profiles.
 TOOL_PROFILE_ENV = "CROWBAR_TOOL_PROFILE"
 TOOL_PROFILES = ("core", "deep")
 DEFAULT_TOOL_PROFILE = "deep"
 
 
 def get_tool_profile() -> str:
-    """``CROWBAR_TOOL_PROFILE`` değerini (her çağrıda) okur: ``"core"`` | ``"deep"``.
+    """Reads ``CROWBAR_TOOL_PROFILE`` (on every call): ``"core"`` | ``"deep"``.
 
-    Boşsa ``deep``. Tanınmayan değer (yazım hatası) uyarıyla ``deep``'e düşer; yani
-    sessizce daha az analiz yapılmaz.
+    Empty means ``deep``. An unrecognized value (typo) falls back to ``deep`` with a
+    warning, so analysis is never silently reduced.
     """
     raw = os.getenv(TOOL_PROFILE_ENV, "").strip().lower()
     if not raw:
         return DEFAULT_TOOL_PROFILE
     if raw in TOOL_PROFILES:
         return raw
-    logger.warning("[tool_profile] bilinmeyen %s=%r; '%s' kullanılıyor (geçerli: %s)",
+    logger.warning("[tool_profile] unknown %s=%r; using '%s' (valid: %s)",
                    TOOL_PROFILE_ENV, raw, DEFAULT_TOOL_PROFILE, ", ".join(TOOL_PROFILES))
     return DEFAULT_TOOL_PROFILE
 
 
 # --------------------------------------------------------------------------- #
-# Yardımcı (saf) mantık: dış araç gerektirmez, test edilebilir.
+# Helper (pure) logic: requires no external tools and is testable.
 # --------------------------------------------------------------------------- #
 def decide_route(die_info: dict[str, Any], yara_results: list[dict[str, Any]]) -> RouteFlag:
-    """DIE ve YARA sonuçlarına göre ``route_flag`` belirler.
+    """Determines ``route_flag`` from DIE and YARA results.
 
-    ``die_info``: ``run_die`` çıktısı (``packer``, ``language``, ``compiler``,
-    ``detected`` vb.). Boş dict geçerlidir ve ``native`` yolunu verir.
+    ``die_info``: output of ``run_die`` (``packer``, ``language``, ``compiler``,
+    ``detected``, etc.). An empty dict is valid and yields the ``native`` path.
     """
     for match in yara_results:
         meta = match.get("meta", {})
@@ -104,13 +104,13 @@ def decide_route(die_info: dict[str, Any], yara_results: list[dict[str, Any]]) -
         return "python"
     if ".net" in haystack or "dotnet" in haystack or "c#" in haystack:
         return "dotnet"
-    return "native"  # varsayılan: UPX vb. paketleyici kontrolü yapılacak yol
+    return "native"  # default: path that checks for packers such as UPX
 
 
 def compute_sha256(file_path: str) -> str:
-    """Dosyanın SHA-256 özetini (hex) bellek dostu şekilde, parça parça okuyarak hesaplar.
+    """Computes the file's SHA-256 digest (hex) in a memory-friendly way, reading in chunks.
 
-    Dosya okunamazsa hata loglanır ve boş string döner.
+    If the file cannot be read, the error is logged and an empty string is returned.
     """
     digest = hashlib.sha256()
     try:
@@ -118,7 +118,7 @@ def compute_sha256(file_path: str) -> str:
             for chunk in iter(lambda: fh.read(SHA256_CHUNK_SIZE), b""):
                 digest.update(chunk)
     except OSError as exc:
-        logger.error("[entry_node] sha256 hesaplanamadı: %s", exc)
+        logger.error("[entry_node] failed to compute sha256: %s", exc)
         return ""
     return digest.hexdigest()
 
@@ -141,7 +141,7 @@ _ARCH_NORMALIZE = {
 
 
 def _normalize_file_type(raw: Any) -> str:
-    """DIE ``filetype`` değerini (PE32, PE64, ELF64, ...) sözleşme biçimine indirger."""
+    """Reduces the DIE ``filetype`` value (PE32, PE64, ELF64, ...) to the contract form."""
     text = str(raw or "").strip()
     upper = text.upper()
     if upper.startswith("PE"):
@@ -162,11 +162,11 @@ def _normalize_arch(raw: str) -> str | None:
 
 
 def _parse_die_report(report: dict[str, Any]) -> dict[str, Any]:
-    """Ham ``diec --json`` çıktısından sample/rota bilgilerini ayıklar (saf mantık).
+    """Extracts sample/route information from raw ``diec --json`` output (pure logic).
 
-    Dönüş anahtarları: ``file_type``, ``packer``, ``arch`` (varsa), ``compiler``,
-    ``language`` (varsa) ve ``detected`` (tüm tespit isimleri, rota kararı için).
-    Beklenmeyen yapıda ``{}`` döner. Paketleyici tespit edilmediyse ``packer`` = ``"none"``.
+    Return keys: ``file_type``, ``packer``, ``arch`` (if present), ``compiler``,
+    ``language`` (if present) and ``detected`` (all detection names, for routing).
+    Returns ``{}`` for an unexpected structure. If no packer is detected, ``packer`` = ``"none"``.
     """
     detects = report.get("detects")
     if not isinstance(detects, list) or not detects or not isinstance(detects[0], dict):
@@ -210,10 +210,10 @@ def _parse_die_report(report: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_die(file_path: str) -> dict[str, Any]:
-    """``diec --json <file_path>`` çalıştırır; ``file_type``/``arch``/``packer`` (+ compiler) döndürür.
+    """Runs ``diec --json <file_path>``; returns ``file_type``/``arch``/``packer`` (+ compiler).
 
-    Araç yoksa, zaman aşımı, sıfır olmayan çıkış kodu veya geçersiz JSON durumunda
-    çökmez; hata loglanır ve ``{}`` döndürülür.
+    If the tool is missing, or on timeout, a non-zero exit code or invalid JSON, it does
+    not crash; the error is logged and ``{}`` is returned.
     """
     try:
         proc = subprocess.run(
@@ -226,21 +226,21 @@ def run_die(file_path: str) -> dict[str, Any]:
             check=False,
         )
         if proc.returncode != 0:
-            stderr = proc.stderr.strip() or "stderr boş"
-            msg = f"diec {proc.returncode} koduyla çıktı: {stderr}"
+            stderr = proc.stderr.strip() or "stderr empty"
+            msg = f"diec exited with code {proc.returncode}: {stderr}"
         else:
             report = json.loads(proc.stdout)
             if isinstance(report, dict):
                 return _parse_die_report(report)
-            msg = "diec beklenmeyen JSON yapısı döndürdü (dict değil)"
+            msg = "diec returned an unexpected JSON structure (not a dict)"
     except subprocess.TimeoutExpired:
-        msg = f"diec {DIE_TIMEOUT_SECONDS} saniye içinde tamamlanamadı (timeout)"
+        msg = f"diec did not finish within {DIE_TIMEOUT_SECONDS} seconds (timeout)"
     except FileNotFoundError as exc:
-        msg = f"diec veya hedef dosya bulunamadı: {exc}"
+        msg = f"diec or the target file was not found: {exc}"
     except json.JSONDecodeError as exc:
-        msg = f"diec çıktısı JSON olarak ayrıştırılamadı: {exc}"
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        msg = f"diec çalıştırılırken beklenmeyen hata: {type(exc).__name__}: {exc}"
+        msg = f"diec output could not be parsed as JSON: {exc}"
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        msg = f"unexpected error while running diec: {type(exc).__name__}: {exc}"
 
     logger.error("[entry_node] %s", msg)
     return {}
@@ -250,11 +250,11 @@ def run_die(file_path: str) -> dict[str, Any]:
 # YARA
 # --------------------------------------------------------------------------- #
 def run_yara(file_path: str, rules_dir: str = "") -> list[dict[str, Any]]:
-    """YARA kurallarını dosyaya uygular; ``[{"rule", "tags", "meta"}]`` döndürür.
+    """Applies YARA rules to the file; returns ``[{"rule", "tags", "meta"}]``.
 
-    ``yara-python`` kurulu değilse veya kural dizini verilmemişse/bulunamazsa
-    ``[]`` döner (stub davranışı). ``rules_dir`` boşsa ``CROWBAR_YARA_RULES``
-    ortam değişkeni kullanılır.
+    Returns ``[]`` if ``yara-python`` is not installed or the rule directory is not
+    given/found (stub behavior). If ``rules_dir`` is empty, the ``CROWBAR_YARA_RULES``
+    environment variable is used.
     """
     rules_dir = rules_dir or os.environ.get(YARA_RULES_ENV, "")
     if not rules_dir:
@@ -263,7 +263,7 @@ def run_yara(file_path: str, rules_dir: str = "") -> list[dict[str, Any]]:
     try:
         import yara  # type: ignore[import-not-found]
     except ImportError:
-        logger.warning("[entry_node] yara-python kurulu değil; YARA taraması atlandı")
+        logger.warning("[entry_node] yara-python is not installed; YARA scan skipped")
         return []
 
     try:
@@ -279,25 +279,25 @@ def run_yara(file_path: str, rules_dir: str = "") -> list[dict[str, Any]]:
             {"rule": m.rule, "tags": list(m.tags), "meta": dict(m.meta)}
             for m in rules.match(file_path)
         ]
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.error("[entry_node] YARA hatası: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.error("[entry_node] YARA error: %s: %s", type(exc).__name__, exc)
         return []
 
 
 # --------------------------------------------------------------------------- #
-# Ön tarama
+# Pre-scan
 # --------------------------------------------------------------------------- #
 def entry_node(state: AgentState) -> dict[str, Any]:
-    """SHA-256 + DIE + YARA ön taraması yapar; ``sample`` ve ``route_flag`` değerlerini belirler."""
+    """Performs the SHA-256 + DIE + YARA pre-scan; sets ``sample`` and ``route_flag``."""
     logger.info("[entry_node] %s", state.file_path)
 
     sha256 = compute_sha256(state.file_path)
-    die_info = run_die(state.file_path)  # araç yoksa/hata durumunda {}
-    yara_results = run_yara(state.file_path)  # kural/kütüphane yoksa []
+    die_info = run_die(state.file_path)  # {} if the tool is missing/an error occurs
+    yara_results = run_yara(state.file_path)  # [] if no rules/library
 
     route = decide_route(die_info, yara_results)
 
-    # DIE bilgi vermediyse SampleInfo varsayılanları ("unknown") korunur
+    # If DIE gave no information, SampleInfo defaults ("unknown") are kept
     updated_sample = state.sample.model_copy(
         update={
             "sha256": sha256 or state.sample.sha256,
@@ -312,18 +312,19 @@ def entry_node(state: AgentState) -> dict[str, Any]:
         "sample": updated_sample,
         "route_flag": route,
         "yara_results": yara_results,
-        # fast_track static_feature_node'u atlar; YARA kanıtı yine de findings'e girsin
+        # fast_track skips static_feature_node; YARA evidence should still reach findings
         "findings": merge_findings(state.findings, yara_findings(yara_results)),
     }
 
 
 # --------------------------------------------------------------------------- #
-# Unpack düğümleri
+# Unpack nodes
 # --------------------------------------------------------------------------- #
 def _run_tool(cmd: list[str], timeout: int, cwd: str | None = None) -> subprocess.CompletedProcess[str] | None:
-    """Harici aracı çalıştırır. Yalnızca ``returncode == 0`` ise sonucu döndürür; aksi halde ``None``.
+    """Runs an external tool. Returns the result only if ``returncode == 0``; otherwise ``None``.
 
-    Araç yoksa, timeout olursa veya sıfır olmayan kodla çıkarsa hata loglanır; asla fırlatmaz.
+    If the tool is missing, times out or exits with a non-zero code, the error is logged;
+    it never raises.
     """
     try:
         proc = subprocess.run(
@@ -337,28 +338,28 @@ def _run_tool(cmd: list[str], timeout: int, cwd: str | None = None) -> subproces
             check=False,
         )
     except subprocess.TimeoutExpired:
-        logger.warning("[unpack] %s %d saniye içinde tamamlanamadı (timeout)", cmd[0], timeout)
+        logger.warning("[unpack] %s did not finish within %d seconds (timeout)", cmd[0], timeout)
         return None
     except FileNotFoundError as exc:
-        logger.warning("[unpack] %s bulunamadı: %s", cmd[0], exc)
+        logger.warning("[unpack] %s not found: %s", cmd[0], exc)
         return None
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[unpack] %s çalıştırılamadı: %s: %s", cmd[0], type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[unpack] %s could not be run: %s: %s", cmd[0], type(exc).__name__, exc)
         return None
 
     if proc.returncode != 0:
-        tail = (proc.stderr.strip() or proc.stdout.strip() or "çıktı yok")[-300:]
-        logger.warning("[unpack] %s %s koduyla çıktı: %s", cmd[0], proc.returncode, tail)
+        tail = (proc.stderr.strip() or proc.stdout.strip() or "no output")[-300:]
+        logger.warning("[unpack] %s exited with code %s: %s", cmd[0], proc.returncode, tail)
         return None
     return proc
 
 
 def _find_main_pyc(extracted_dir: str, exe_stem: str, extractor_stdout: str) -> str | None:
-    """pyinstxtractor çıktı klasöründeki uygulamanın ana ``.pyc`` dosyasını bulur.
+    """Finds the application's main ``.pyc`` file in the pyinstxtractor output folder.
 
-    Sıra: (1) exe adıyla aynı olan, (2) pyinstxtractor'ın "Possible entry point"
-    olarak bildirdiği, (3) en büyük uygulama .pyc'si. PyInstaller'ın kendi
-    ``pyi*`` yardımcı betikleri her zaman elenir.
+    Order: (1) one matching the exe name, (2) the one pyinstxtractor reports as the
+    "Possible entry point", (3) the largest application .pyc. PyInstaller's own
+    ``pyi*`` helper scripts are always excluded.
     """
     try:
         names = sorted(
@@ -383,7 +384,7 @@ def _find_main_pyc(extracted_dir: str, exe_stem: str, extractor_stdout: str) -> 
 
 
 def _decompile_pyc(pyc_path: str) -> str:
-    """``pycdc``, başarısız olursa ``decompyle3`` ile .pyc'yi Python kaynağına çevirir; yoksa ``""``."""
+    """Converts a .pyc to Python source with ``pycdc``, falling back to ``decompyle3``; else ``""``."""
     for tool in ("pycdc", "decompyle3"):
         proc = _run_tool([tool, pyc_path], PYTHON_TOOL_TIMEOUT_SECONDS)
         if proc is not None and proc.stdout.strip():
@@ -392,11 +393,11 @@ def _decompile_pyc(pyc_path: str) -> str:
 
 
 def _extract_python_source(file_path: str) -> str:
-    """PyInstaller exe'sinden ana betiğin Python kaynağını çıkarır; başarısızsa ``""``."""
+    """Extracts the main script's Python source from a PyInstaller exe; ``""`` on failure."""
     temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     try:
         abs_path = os.path.abspath(file_path)
-        # pyinstxtractor çıktısını çalışma dizinine yazar: orijinal dosyanın yanını kirletmesin
+        # pyinstxtractor writes its output into the working directory: keep it away from the original file
         proc = _run_tool(["pyinstxtractor", abs_path], PYTHON_TOOL_TIMEOUT_SECONDS, cwd=temp.name)
         if proc is None:
             return ""
@@ -404,27 +405,27 @@ def _extract_python_source(file_path: str) -> str:
         base = os.path.basename(abs_path)
         extracted_dir = os.path.join(temp.name, base + "_extracted")
         if not os.path.isdir(extracted_dir):
-            logger.warning("[unpack_python_node] pyinstxtractor çıktı klasörü bulunamadı: %s", extracted_dir)
+            logger.warning("[unpack_python_node] pyinstxtractor output folder not found: %s", extracted_dir)
             return ""
 
         pyc_path = _find_main_pyc(extracted_dir, os.path.splitext(base)[0], proc.stdout)
         if pyc_path is None:
-            logger.warning("[unpack_python_node] ana .pyc dosyası bulunamadı")
+            logger.warning("[unpack_python_node] main .pyc file not found")
             return ""
         return _decompile_pyc(pyc_path)
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[unpack_python_node] beklenmeyen hata: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[unpack_python_node] unexpected error: %s: %s", type(exc).__name__, exc)
         return ""
     finally:
         temp.cleanup()
 
 
 def unpack_python_node(state: AgentState) -> dict[str, Any]:
-    """pyinstxtractor + pycdc/decompyle3: PyInstaller exe'sinden Python kaynağı çıkarır.
+    """pyinstxtractor + pycdc/decompyle3: extracts Python source from a PyInstaller exe.
 
-    Rota ``python`` değilse ``{}`` döner. Herhangi bir adım başarısız olursa
-    (araç yok, timeout, kaynak çıkmadı) ``{"route_flag": "native"}`` döner; böylece
-    ``deep_inspection_node`` Ghidra'yı çalıştırabilir (native fallback).
+    Returns ``{}`` if the route is not ``python``. If any step fails (tool missing,
+    timeout, no source produced) it returns ``{"route_flag": "native"}`` so that
+    ``deep_inspection_node`` can run Ghidra (native fallback).
     """
     logger.info("[unpack_python_node]")
     if state.sample.route != "python":
@@ -432,33 +433,33 @@ def unpack_python_node(state: AgentState) -> dict[str, Any]:
 
     code = _extract_python_source(state.file_path)
     if not code.strip():
-        logger.warning("[unpack_python_node] kaynak çıkarılamadı; native fallback")
+        logger.warning("[unpack_python_node] could not extract source; native fallback")
         return {"route_flag": "native"}
     func = DecompiledFunction(offset="", name="main_script", priority=10, c_code=code)
     return {"source_code": [func]}
 
 
 def _extract_dotnet_source(file_path: str) -> str:
-    """de4dot ile temizleyip ilspycmd ile C# kaynağı üretir; başarısızsa ``""``."""
+    """Cleans with de4dot and produces C# source with ilspycmd; ``""`` on failure."""
     clean_path = file_path + CLEAN_SUFFIX
     try:
         if os.path.exists(clean_path):
-            os.remove(clean_path)  # önceki çalıştırmadan kalan çıktı
+            os.remove(clean_path)  # leftover output from a previous run
 
         if _run_tool(["de4dot", file_path, "-o", clean_path], DOTNET_TOOL_TIMEOUT_SECONDS) is None:
             return ""
         if not os.path.isfile(clean_path):
-            logger.warning("[unpack_dotnet_node] de4dot çıktı dosyası üretmedi")
+            logger.warning("[unpack_dotnet_node] de4dot did not produce an output file")
             return ""
 
-        # Not: ``-p`` (proje modu) ``-o <klasör>`` gerektirir; stdout modu tek parça C# verir.
+        # Note: ``-p`` (project mode) requires ``-o <folder>``; stdout mode emits a single C# file.
         proc = _run_tool(["ilspycmd", clean_path], DOTNET_DECOMPILE_TIMEOUT_SECONDS)
         return proc.stdout if proc is not None and proc.stdout.strip() else ""
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[unpack_dotnet_node] beklenmeyen hata: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[unpack_dotnet_node] unexpected error: %s: %s", type(exc).__name__, exc)
         return ""
     finally:
-        # Orijinal örneğin yanında artefakt bırakma (file_path değişmediği için gerekmiyor)
+        # Do not leave artifacts next to the original sample (not needed since file_path is unchanged)
         try:
             if os.path.exists(clean_path):
                 os.remove(clean_path)
@@ -467,11 +468,11 @@ def _extract_dotnet_source(file_path: str) -> str:
 
 
 def unpack_dotnet_node(state: AgentState) -> dict[str, Any]:
-    """de4dot (deobfuscation) + ilspycmd (decompile): .NET assembly'den C# kaynağı çıkarır.
+    """de4dot (deobfuscation) + ilspycmd (decompile): extracts C# source from a .NET assembly.
 
-    Rota ``dotnet`` değilse ``{}`` döner. Herhangi bir adım başarısız olursa
-    (araç yok, timeout, kaynak çıkmadı) ``{"route_flag": "native"}`` döner; böylece
-    ``deep_inspection_node`` Ghidra'yı çalıştırabilir (native fallback).
+    Returns ``{}`` if the route is not ``dotnet``. If any step fails (tool missing,
+    timeout, no source produced) it returns ``{"route_flag": "native"}`` so that
+    ``deep_inspection_node`` can run Ghidra (native fallback).
     """
     logger.info("[unpack_dotnet_node]")
     if state.sample.route != "dotnet":
@@ -479,18 +480,18 @@ def unpack_dotnet_node(state: AgentState) -> dict[str, Any]:
 
     code = _extract_dotnet_source(state.file_path)
     if not code.strip():
-        logger.warning("[unpack_dotnet_node] kaynak çıkarılamadı; native fallback")
+        logger.warning("[unpack_dotnet_node] could not extract source; native fallback")
         return {"route_flag": "native"}
     func = DecompiledFunction(offset="", name="dotnet_source", priority=10, c_code=code)
     return {"source_code": [func]}
 
 
 def unpack_native_node(state: AgentState) -> dict[str, Any]:
-    """UPX paketli örnekleri açar; sonraki düğümler için ``file_path``'i günceller.
+    """Unpacks UPX-packed samples; updates ``file_path`` for subsequent nodes.
 
-    Packer UPX değilse hiçbir şey yapmaz (``{}``). Unpack başarısız olursa
-    (araç yok, timeout, bozuk başlık) çökmez; orijinal dosyayla devam edilir.
-    ``sample.sha256`` orijinal dosyanın kimliğini korur (bu düğüm ona dokunmaz).
+    Does nothing (``{}``) if the packer is not UPX. If unpacking fails (tool missing,
+    timeout, corrupt header) it does not crash; the original file is used.
+    ``sample.sha256`` keeps the identity of the original file (this node does not touch it).
     """
     logger.info("[unpack_native_node]")
 
@@ -499,15 +500,15 @@ def unpack_native_node(state: AgentState) -> dict[str, Any]:
 
     unpacked_path = state.file_path + UNPACKED_SUFFIX
     if _run_upx_unpack(state.file_path, unpacked_path):
-        logger.info("[unpack_native_node] UPX açıldı: %s", unpacked_path)
+        logger.info("[unpack_native_node] UPX unpacked: %s", unpacked_path)
         return {"file_path": unpacked_path}
     return {}
 
 
 def _run_upx_unpack(src: str, dst: str) -> bool:
-    """``upx -d -o <dst> <src>`` çalıştırır; başarıda ``True`` döner. Hata durumunda hiç fırlatmaz."""
+    """Runs ``upx -d -o <dst> <src>``; returns ``True`` on success. Never raises on error."""
     try:
-        # UPX var olan çıktı dosyasının üzerine yazmayı reddeder; önceki çalıştırmadan kalanı temizle
+        # UPX refuses to overwrite an existing output file; clean up leftovers from a previous run
         if os.path.exists(dst):
             os.remove(dst)
 
@@ -522,17 +523,17 @@ def _run_upx_unpack(src: str, dst: str) -> bool:
         )
         if proc.returncode == 0 and os.path.isfile(dst):
             return True
-        stderr = (proc.stderr.strip() or proc.stdout.strip() or "çıktı yok")[-300:]
-        msg = f"upx {proc.returncode} koduyla çıktı (veya çıktı dosyası yok): {stderr}"
+        stderr = (proc.stderr.strip() or proc.stdout.strip() or "no output")[-300:]
+        msg = f"upx exited with code {proc.returncode} (or the output file is missing): {stderr}"
     except subprocess.TimeoutExpired:
-        msg = f"upx {UPX_TIMEOUT_SECONDS} saniye içinde tamamlanamadı (timeout)"
+        msg = f"upx did not finish within {UPX_TIMEOUT_SECONDS} seconds (timeout)"
     except FileNotFoundError as exc:
-        msg = f"upx bulunamadı: {exc}"
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        msg = f"upx çalıştırılırken beklenmeyen hata: {type(exc).__name__}: {exc}"
+        msg = f"upx not found: {exc}"
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        msg = f"unexpected error while running upx: {type(exc).__name__}: {exc}"
 
-    logger.warning("[unpack_native_node] %s; orijinal dosyayla devam ediliyor", msg)
-    # Yarım kalmış çıktıyı bırakma
+    logger.warning("[unpack_native_node] %s; continuing with the original file", msg)
+    # Do not leave a partial output behind
     try:
         if os.path.exists(dst):
             os.remove(dst)
@@ -542,43 +543,43 @@ def _run_upx_unpack(src: str, dst: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Statik analiz
+# Static analysis
 # --------------------------------------------------------------------------- #
 def static_feature_node(state: AgentState) -> dict[str, Any]:
-    """FLOSS + capa + pefile (import/entropy); tüm bulguları ``findings`` altında toplar."""
+    """FLOSS + capa + pefile (imports/entropy); collects all findings under ``findings``."""
     profile = get_tool_profile()
-    logger.info("[static_feature_node] profil=%s", profile)
+    logger.info("[static_feature_node] profile=%s", profile)
 
     if profile == "core":
-        # Hızlı tarama: ağır araçlar (FLOSS, capa) hiç çalıştırılmaz; boş sonuç gibi davranılır.
+        # Quick scan: heavy tools (FLOSS, capa) are not run at all; treat as empty results.
         floss_iocs, floss_hints = [], []
         capabilities, ghidra_hints = {}, []
     else:
-        floss_iocs, floss_hints = run_floss_with_hints(state.file_path)  # hata: ([], [])
-        # Hata/timeout durumunda: ({"error": ...}, [])
+        floss_iocs, floss_hints = run_floss_with_hints(state.file_path)  # on error: ([], [])
+        # On error/timeout: ({"error": ...}, [])
         capabilities, ghidra_hints = run_capa(state.file_path)
         capabilities, ghidra_hints = _filter_trivial_capa(capabilities, ghidra_hints)
 
-    # Ham import listesi findings'e GİRMEZ (gürültü); yalnızca combo eşleşmesi ve imphash için kullanılır.
-    imports = extract_imports(state.file_path)  # PE: pefile, ELF: readelf; aksi halde []
-    imphash = compute_imphash(state.file_path, imports)  # PE: pefile imphash, ELF: MD5(imports); yoksa ""
-    tlsh_hash = compute_tlsh(state.file_path)  # kütüphane yok / dosya < 50 bayt -> ""
-    entropy = section_entropy(state.file_path)  # PE: pefile, ELF: readelf -S; aksi halde {}
+    # The raw import list does NOT go into findings (noise); it is used only for combo matching and imphash.
+    imports = extract_imports(state.file_path)  # PE: pefile, ELF: readelf; otherwise []
+    imphash = compute_imphash(state.file_path, imports)  # PE: pefile imphash, ELF: MD5(imports); else ""
+    tlsh_hash = compute_tlsh(state.file_path)  # library missing / file < 50 bytes -> ""
+    entropy = section_entropy(state.file_path)  # PE: pefile, ELF: readelf -S; otherwise {}
     entropy_source = "elf_entropy" if is_elf(state.file_path) else "pefile_entropy"
     combos = match_import_combos(imports)
 
-    # PE metadata: dosya tek kez yüklenir, üç yardımcıya aynı nesne verilir
+    # PE metadata: the file is loaded once, and the same object is given to all three helpers
     pe = _load_pe(state.file_path)
     pe_metadata: list[Finding] = []
     try:
         pe_metadata = pe_metadata_findings(pe)
-    except Exception as exc:  # noqa: BLE001 - metadata hatası analizin geri kalanını düşürmemeli
-        logger.warning("[static_feature_node] PE metadata okunamadı: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - a metadata error must not bring down the rest of the analysis
+        logger.warning("[static_feature_node] could not read PE metadata: %s: %s", type(exc).__name__, exc)
     finally:
         if pe is not None:
             pe.close()
 
-    # Mevcut değerlere ekle, tekilleştir
+    # Add to existing values, deduplicate
     extracted_strings = _unique([*state.extracted_strings, *floss_iocs])
 
     new_findings = build_findings(
@@ -599,7 +600,7 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
         "capabilities": capabilities,
         "ghidra_hints": ghidra_hints,
         "floss_hints": floss_hints,
-        # kimlik + varlık kontrolü: FLOSS decoded/stack/tight değerleri (floss_hints) hariç tutulur
+        # identity + existence check: FLOSS decoded/stack/tight values (floss_hints) are excluded
         "findings": finalize_findings(
             merge_findings(state.findings, new_findings),
             state.file_path,
@@ -609,24 +610,24 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# pefile: importlar, section entropy, import kombinasyonları
+# pefile: imports, section entropy, import combinations
 # --------------------------------------------------------------------------- #
 HIGH_ENTROPY_THRESHOLD = 7.0
 ELF_MAGIC = b"\x7fELF"
 READELF_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_READELF_TIMEOUT", "30"))
 
-# `readelf --wide --dyn-syms` satırı:
+# `readelf --wide --dyn-syms` line:
 #   "    12: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND ptrace@GLIBC_2.2.5 (2)"
-# Gruplar: (Type, Name). Ndx = UND olanlar dışarıdan (libc/ld.so) import edilen sembollerdir.
+# Groups: (Type, Name). Entries with Ndx = UND are symbols imported from outside (libc/ld.so).
 _READELF_UND_RE = re.compile(
     r"^\s*\d+:\s+[0-9A-Fa-f]+\s+\d+\s+(?P<type>\w+)\s+\w+\s+\w+\s+UND\s+(?P<name>\S+)"
 )
-# Veri sembolleri (stdout, environ...) ve NOTYPE zayıf sembolleri (__gmon_start__) fonksiyon import'u değildir.
+# Data symbols (stdout, environ...) and NOTYPE weak symbols (__gmon_start__) are not function imports.
 _ELF_IMPORT_TYPES = frozenset({"FUNC", "IFUNC", "GNU_IFUNC"})
 
 
 def is_elf(file_path: str) -> bool:
-    """Dosyanın ilk 4 byte'ı ``\\x7fELF`` mi? Okunamıyorsa ``False``."""
+    """Are the file's first 4 bytes ``\\x7fELF``? ``False`` if it cannot be read."""
     try:
         with open(file_path, "rb") as fh:
             return fh.read(len(ELF_MAGIC)) == ELF_MAGIC
@@ -635,9 +636,9 @@ def is_elf(file_path: str) -> bool:
 
 
 def parse_readelf_dynsyms(output: str) -> list[str]:
-    """``readelf --wide --dyn-syms`` çıktısından UND fonksiyon isimlerini ayıklar (saf mantık).
+    """Extracts UND function names from ``readelf --wide --dyn-syms`` output (pure logic).
 
-    Sürüm eki (``@GLIBC_2.2.5``) atılır; tekilleştirilir, sıra korunur.
+    Version suffixes (``@GLIBC_2.2.5``) are stripped; results are deduplicated, order preserved.
     """
     names: list[str] = []
     for line in output.splitlines():
@@ -651,10 +652,11 @@ def parse_readelf_dynsyms(output: str) -> list[str]:
 
 
 def extract_elf_imports(file_path: str) -> list[str]:
-    """ELF dinamik sembol tablosundaki (UND) import edilen fonksiyon isimlerini döndürür.
+    """Returns imported function names (UND) from the ELF dynamic symbol table.
 
-    ``readelf`` yoksa, timeout olursa, sıfırdan farklı kodla çıkarsa veya başka bir hata olursa
-    hata loglanır ve ``[]`` döner. Statik bağlı ELF'te dinamik sembol tablosu olmadığından ``[]`` döner.
+    If ``readelf`` is missing, times out, exits non-zero or another error occurs,
+    the error is logged and ``[]`` is returned. Statically linked ELF files have no
+    dynamic symbol table, so ``[]`` is returned.
     """
     cmd = ["readelf", "--wide", "--dyn-syms", file_path]
     try:
@@ -666,33 +668,33 @@ def extract_elf_imports(file_path: str) -> list[str]:
             errors="replace",
             timeout=READELF_TIMEOUT_SECONDS,
             check=False,
-            env={**os.environ, "LC_ALL": "C"},  # sütun biçimi yerelden bağımsız olsun
+            env={**os.environ, "LC_ALL": "C"},  # make the column format locale-independent
         )
     except FileNotFoundError:
-        logger.warning("[static_feature_node] readelf bulunamadı; ELF importları atlanıyor")
+        logger.warning("[static_feature_node] readelf not found; skipping ELF imports")
         return []
     except subprocess.TimeoutExpired:
-        logger.warning("[static_feature_node] readelf %d saniye içinde bitmedi (timeout)", READELF_TIMEOUT_SECONDS)
+        logger.warning("[static_feature_node] readelf did not finish within %d seconds (timeout)", READELF_TIMEOUT_SECONDS)
         return []
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[static_feature_node] readelf çalıştırılamadı: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[static_feature_node] readelf could not be run: %s: %s", type(exc).__name__, exc)
         return []
 
     if proc.returncode != 0:
         logger.warning(
-            "[static_feature_node] readelf %d koduyla çıktı: %s", proc.returncode, (proc.stderr or "").strip()[:200]
+            "[static_feature_node] readelf exited with code %d: %s", proc.returncode, (proc.stderr or "").strip()[:200]
         )
         return []
     return parse_readelf_dynsyms(proc.stdout or "")
 
 
 def extract_imports(file_path: str) -> list[str]:
-    """Dosyanın import ettiği API/fonksiyon isimlerini döndürür (tekilleştirilmiş, sıra korunur).
+    """Returns the API/function names imported by the file (deduplicated, order preserved).
 
-    * İlk 4 byte ``\\x7fELF`` ise ``readelf --wide --dyn-syms`` ile UND semboller (``extract_elf_imports``).
-    * Aksi halde pefile ile PE import tablosu.
+    * If the first 4 bytes are ``\\x7fELF``, UND symbols via ``readelf --wide --dyn-syms`` (``extract_elf_imports``).
+    * Otherwise the PE import table via pefile.
 
-    Geçerli bir PE/ELF değilse, araç yoksa veya dosya okunamazsa ``[]`` döner.
+    Returns ``[]`` if it is not a valid PE/ELF, the tool is missing or the file cannot be read.
     """
     if is_elf(file_path):
         return extract_elf_imports(file_path)
@@ -705,13 +707,13 @@ def extract_imports(file_path: str) -> list[str]:
         names: list[str] = []
         for entry in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []) or []:
             for imp in entry.imports:
-                if imp.name:  # sadece ordinal ile içe aktarılanlar atlanır
+                if imp.name:  # ordinal-only imports are skipped
                     names.append(imp.name.decode("utf-8", errors="replace"))
         return _unique(names)
     except pefile.PEFormatError:
         return []
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[static_feature_node] import okunamadı: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[static_feature_node] could not read imports: %s: %s", type(exc).__name__, exc)
         return []
     finally:
         if pe is not None:
@@ -721,9 +723,9 @@ def extract_imports(file_path: str) -> list[str]:
 PE_MAGIC = b"MZ"
 ENTROPY_READ_CHUNK = 1024 * 1024  # 1 MiB
 
-# `readelf -S -W` bölüm satırı:
+# `readelf -S -W` section line:
 #   "  [ 1] .interp           PROGBITS        00000000004002a8 0002a8 00001c 00   A  0   0  1"
-# Gruplar: Nr, Name, Type, (Address), Off, Size  (Off/Size hex)
+# Groups: Nr, Name, Type, (Address), Off, Size  (Off/Size hex)
 _READELF_SECTION_RE = re.compile(
     r"^\s*\[\s*(?P<nr>\d+)\]\s+(?P<name>\S+)\s+(?P<type>\S+)\s+[0-9A-Fa-f]+\s+"
     r"(?P<off>[0-9A-Fa-f]+)\s+(?P<size>[0-9A-Fa-f]+)\s"
@@ -731,7 +733,7 @@ _READELF_SECTION_RE = re.compile(
 
 
 def is_pe(file_path: str) -> bool:
-    """Dosyanın ilk 2 byte'ı ``MZ`` mi? Okunamıyorsa ``False``."""
+    """Are the file's first 2 bytes ``MZ``? ``False`` if it cannot be read."""
     try:
         with open(file_path, "rb") as fh:
             return fh.read(len(PE_MAGIC)) == PE_MAGIC
@@ -751,7 +753,7 @@ def _entropy_from_counts(counts: Any, total: int) -> float:
 
 
 def shannon_entropy(data: bytes) -> float:
-    """Bayt dizisinin Shannon entropy değeri (0.0 – 8.0). Boş veri için 0.0."""
+    """Shannon entropy of the byte array (0.0 - 8.0). 0.0 for empty data."""
     if not data:
         return 0.0
     counts = [0] * 256
@@ -761,10 +763,10 @@ def shannon_entropy(data: bytes) -> float:
 
 
 def file_range_entropy(file_path: str, offset: int, size: int) -> float | None:
-    """Dosyada ``offset``'ten ``size`` bayt okuyup Shannon entropy hesaplar.
+    """Reads ``size`` bytes from ``offset`` in the file and computes Shannon entropy.
 
-    Büyük bölümlerde belleği şişirmemek için parça parça okunur. Okunabilen bayt yoksa
-    (offset dosya dışında, ``size`` 0) veya dosya okunamıyorsa ``None``.
+    It is read in chunks to avoid bloating memory for large sections. Returns ``None``
+    if no bytes can be read (offset outside the file, ``size`` 0) or the file cannot be read.
     """
     if offset < 0 or size <= 0:
         return None
@@ -790,10 +792,10 @@ def file_range_entropy(file_path: str, offset: int, size: int) -> float | None:
 
 
 def parse_readelf_sections(output: str) -> list[tuple[str, int, int]]:
-    """``readelf -S -W`` çıktısından ``(ad, dosya_offset, boyut)`` listesi çıkarır (saf mantık).
+    """Extracts a ``(name, file_offset, size)`` list from ``readelf -S -W`` output (pure logic).
 
-    Offset/boyut hex'ten tam sayıya çevrilir. Dosyada yer kaplamayan bölümler (``NULL``, ``NOBITS``/.bss,
-    Nr=0) ve boyutu 0 olanlar atlanır.
+    Offset/size are converted from hex to integers. Sections that take no space in the file
+    (``NULL``, ``NOBITS``/.bss, Nr=0) and those with size 0 are skipped.
     """
     sections: list[tuple[str, int, int]] = []
     for line in output.splitlines():
@@ -807,7 +809,7 @@ def parse_readelf_sections(output: str) -> list[tuple[str, int, int]]:
 
 
 def _elf_section_entropy(file_path: str) -> dict[str, float]:
-    """ELF bölümlerinin entropy değerleri (``readelf -S -W`` + dosyadan bayt okuma). Hata → ``{}``."""
+    """Entropy values of ELF sections (``readelf -S -W`` + reading bytes from the file). Error -> ``{}``."""
     cmd = ["readelf", "-S", "-W", file_path]
     try:
         proc = subprocess.run(
@@ -821,16 +823,16 @@ def _elf_section_entropy(file_path: str) -> dict[str, float]:
             env={**os.environ, "LC_ALL": "C"},
         )
     except FileNotFoundError:
-        logger.warning("[static_feature_node] readelf bulunamadı; ELF entropy atlanıyor")
+        logger.warning("[static_feature_node] readelf not found; skipping ELF entropy")
         return {}
     except subprocess.TimeoutExpired:
-        logger.warning("[static_feature_node] readelf -S %d saniye içinde bitmedi (timeout)", READELF_TIMEOUT_SECONDS)
+        logger.warning("[static_feature_node] readelf -S did not finish within %d seconds (timeout)", READELF_TIMEOUT_SECONDS)
         return {}
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[static_feature_node] readelf -S çalıştırılamadı: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[static_feature_node] readelf -S could not be run: %s: %s", type(exc).__name__, exc)
         return {}
     if proc.returncode != 0:
-        logger.warning("[static_feature_node] readelf -S %d koduyla çıktı", proc.returncode)
+        logger.warning("[static_feature_node] readelf -S exited with code %d", proc.returncode)
         return {}
 
     result: dict[str, float] = {}
@@ -847,18 +849,18 @@ def _elf_section_entropy(file_path: str) -> dict[str, float]:
 
 
 def compute_imphash(file_path: str, imports: list[str]) -> str:
-    """Import özeti (aile gruplama anahtarı).
+    """Import digest (family grouping key).
 
-    * PE (``MZ``): ``pefile`` ``get_imphash()``; hata/pefile yok → ``""``.
-    * ELF (``\\x7fELF``): ``md5(",".join(sorted(imports)))`` (import listesi boşsa ``""``). Sıralama,
-      farklı bağlayıcı/derleyici sıralamalarında aynı import kümesinin aynı özeti vermesini sağlar.
-    * Diğer dosyalar → ``""``.
+    * PE (``MZ``): ``pefile`` ``get_imphash()``; error/no pefile -> ``""``.
+    * ELF (``\\x7fELF``): ``md5(",".join(sorted(imports)))`` (``""`` if the import list is empty). Sorting
+      ensures the same import set yields the same digest across different linker/compiler orderings.
+    * Other files -> ``""``.
     """
     if is_elf(file_path):
         names = sorted(n for n in imports if isinstance(n, str) and n)
         if not names:
             return ""
-        return hashlib.md5(",".join(names).encode()).hexdigest()  # noqa: S324 - güvenlik amaçlı değil, gruplama anahtarı
+        return hashlib.md5(",".join(names).encode()).hexdigest()  # noqa: S324 - not for security, a grouping key
     if is_pe(file_path):
         if pefile is None:
             return ""
@@ -867,8 +869,8 @@ def compute_imphash(file_path: str, imports: list[str]) -> str:
             pe = pefile.PE(file_path, fast_load=True)
             pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]])
             return pe.get_imphash() or ""
-        except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-            logger.warning("[static_feature_node] imphash hesaplanamadı: %s: %s", type(exc).__name__, exc)
+        except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+            logger.warning("[static_feature_node] could not compute imphash: %s: %s", type(exc).__name__, exc)
             return ""
         finally:
             if pe is not None:
@@ -876,16 +878,16 @@ def compute_imphash(file_path: str, imports: list[str]) -> str:
     return ""
 
 
-TLSH_MIN_BYTES = 50  # TLSH'nin alt sınırı: daha kısa girdiden hash üretilemez
-TLSH_MAX_FILE_BYTES = 256 * 1024 * 1024  # bellekte tamamı okunur; bundan büyük dosyalar atlanır
+TLSH_MIN_BYTES = 50  # TLSH lower bound: shorter input cannot produce a hash
+TLSH_MAX_FILE_BYTES = 256 * 1024 * 1024  # read entirely into memory; larger files are skipped
 
 
 def compute_tlsh(file_path: str) -> str:
-    """Dosyanın TLSH (bulanık) hash'i; benzer örnekleri gruplamak için.
+    """The file's TLSH (fuzzy) hash; used to group similar samples.
 
-    ``""`` döner: ``py-tlsh`` kurulu değil, dosya okunamadı, dosya ``TLSH_MIN_BYTES``
-    (50) bayttan küçük (veya ``TLSH_MAX_FILE_BYTES``'tan büyük), ya da TLSH yeterli
-    varyans bulamadı (``TNULL``/boş). Hiçbir koşulda istisna fırlatmaz.
+    Returns ``""`` if ``py-tlsh`` is not installed, the file cannot be read, the file is
+    smaller than ``TLSH_MIN_BYTES`` (50) bytes (or larger than ``TLSH_MAX_FILE_BYTES``),
+    or TLSH finds insufficient variance (``TNULL``/empty). Never raises an exception.
     """
     if tlsh is None:
         return ""
@@ -898,8 +900,8 @@ def compute_tlsh(file_path: str) -> str:
         if len(data) < TLSH_MIN_BYTES:
             return ""
         digest = tlsh.hash(data)
-    except Exception as exc:  # noqa: BLE001 - hash hatası analizi düşürmemeli
-        logger.warning("[static_feature_node] tlsh hesaplanamadı: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - a hash error must not bring down the analysis
+        logger.warning("[static_feature_node] could not compute tlsh: %s: %s", type(exc).__name__, exc)
         return ""
     if isinstance(digest, bytes):
         digest = digest.decode("ascii", "ignore")
@@ -908,12 +910,12 @@ def compute_tlsh(file_path: str) -> str:
 
 
 def section_entropy(file_path: str) -> dict[str, float]:
-    """Section'ların Shannon entropy değerlerini döndürür: ``{".text": 6.2, ...}``.
+    """Returns the Shannon entropy values of sections: ``{".text": 6.2, ...}``.
 
-    * ELF (``\\x7fELF``): ``readelf -S -W`` ile bölüm offset/boyutu, dosyadan okunan baytlar üzerinden hesap.
-    * Aksi halde pefile ile PE section'ları.
+    * ELF (``\\x7fELF``): section offset/size via ``readelf -S -W``, computed over bytes read from the file.
+    * Otherwise PE sections via pefile.
 
-    Aynı isimli section'lar ``name#2`` biçiminde ayrıştırılır. Geçerli PE/ELF değilse ``{}``.
+    Sections with the same name are disambiguated as ``name#2``. ``{}`` if not a valid PE/ELF.
     """
     if is_elf(file_path):
         return _elf_section_entropy(file_path)
@@ -933,8 +935,8 @@ def section_entropy(file_path: str) -> dict[str, float]:
         return result
     except pefile.PEFormatError:
         return {}
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.warning("[static_feature_node] entropy hesaplanamadı: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.warning("[static_feature_node] could not compute entropy: %s: %s", type(exc).__name__, exc)
         return {}
     finally:
         if pe is not None:
@@ -942,11 +944,11 @@ def section_entropy(file_path: str) -> dict[str, float]:
 
 
 # --------------------------------------------------------------------------- #
-# PE metadata: Authenticode varlığı, versiyon bilgisi, manifest ayrıcalık seviyesi
+# PE metadata: Authenticode presence, version info, manifest privilege level
 # --------------------------------------------------------------------------- #
 RT_MANIFEST = 24
 _DEFAULT_SECURITY_DIRECTORY_INDEX = 4  # IMAGE_DIRECTORY_ENTRY_SECURITY
-# Çıktı sırası bu listeyle belirlenir
+# Output order is determined by this list
 PE_VERSION_KEYS = (
     "OriginalFilename",
     "CompanyName",
@@ -955,8 +957,8 @@ PE_VERSION_KEYS = (
     "ProductName",
     "FileVersion",
 )
-PE_VERSION_VALUE_MAX = 200  # örnekten gelen değer: bağlamı şişirmesin
-# Windows'un kabul ettiği tek üç değer; örnekten gelen başka bir metin bulguya girmez.
+PE_VERSION_VALUE_MAX = 200  # sample-derived value: keep it from bloating the context
+# The only three values Windows accepts; any other sample-derived text is not added as a finding.
 _EXECUTION_LEVELS = {
     "asinvoker": "asInvoker",
     "highestavailable": "highestAvailable",
@@ -968,10 +970,10 @@ _EXECUTION_LEVEL_RE = re.compile(
 
 
 def _load_pe(file_path: str) -> Any | None:
-    """Dosyayı pefile ile TEK kez yükler (import + resource dizinleri ayrıştırılmış).
+    """Loads the file ONCE with pefile (import + resource directories parsed).
 
-    ELF, geçersiz PE (``PEFormatError``), okunamayan dosya veya ``pefile`` yoksa ``None``.
-    Dönen nesneyi çağıran kapatmalıdır (``pe.close()``).
+    ``None`` for ELF, an invalid PE (``PEFormatError``), an unreadable file or when
+    ``pefile`` is missing. The caller must close the returned object (``pe.close()``).
     """
     if pefile is None or is_elf(file_path):
         return None
@@ -985,25 +987,25 @@ def _load_pe(file_path: str) -> Any | None:
             ]
         )
         return pe
-    except Exception as exc:  # noqa: BLE001 - PEFormatError dahil; iş akışı hiçbir koşulda çökmemeli
+    except Exception as exc:  # noqa: BLE001 - including PEFormatError; the workflow must never crash
         if pe is not None:
             pe.close()
-        if type(exc).__name__ != "PEFormatError":  # PE olmayan dosya beklenen durum; sessiz geç
-            logger.warning("[static_feature_node] PE yüklenemedi: %s: %s", type(exc).__name__, exc)
+        if type(exc).__name__ != "PEFormatError":  # a non-PE file is expected; fail silently
+            logger.warning("[static_feature_node] could not load PE: %s: %s", type(exc).__name__, exc)
         return None
 
 
 def check_authenticode(pe: Any) -> bool:
-    """Güvenlik (sertifika) veri dizininin ``VirtualAddress`` değeri 0'dan büyükse ``True``.
+    """``True`` if the security (certificate) data directory's ``VirtualAddress`` is greater than 0.
 
-    Bu yalnızca imzanın **varlığını** söyler; geçerliliği doğrulanmaz. Hata durumunda ``False``.
+    This only reports the **presence** of a signature; its validity is not verified. ``False`` on error.
     """
     try:
         index = pefile.DIRECTORY_ENTRY.get("IMAGE_DIRECTORY_ENTRY_SECURITY", _DEFAULT_SECURITY_DIRECTORY_INDEX)
         directories = pe.OPTIONAL_HEADER.DATA_DIRECTORY
         return index < len(directories) and directories[index].VirtualAddress > 0
     except Exception as exc:  # noqa: BLE001
-        logger.debug("[static_feature_node] authenticode okunamadı: %s: %s", type(exc).__name__, exc)
+        logger.debug("[static_feature_node] could not read authenticode: %s: %s", type(exc).__name__, exc)
         return False
 
 
@@ -1014,15 +1016,15 @@ def _to_text(value: Any) -> str:
 
 
 def extract_pe_version_info(pe: Any) -> list[str]:
-    """``StringFileInfo`` değerlerini ``["OriginalFilename: calc.exe", ...]`` olarak döndürür.
+    """Returns ``StringFileInfo`` values as ``["OriginalFilename: calc.exe", ...]``.
 
-    Yalnızca ``PE_VERSION_KEYS`` içindeki alanlar alınır (sıra sabit), boş değerler atlanır, her değer
-    ``PE_VERSION_VALUE_MAX`` karakterle sınırlanır. Versiyon bilgisi yoksa veya hata olursa ``[]``.
+    Only fields in ``PE_VERSION_KEYS`` are taken (fixed order), empty values are skipped, and each
+    value is limited to ``PE_VERSION_VALUE_MAX`` characters. ``[]`` if there is no version info or an error occurs.
     """
     try:
         values: dict[str, str] = {}
         for info in getattr(pe, "FileInfo", None) or []:
-            # Yeni pefile: FileInfo = [[entry, ...], ...]; eski sürümler düz liste verebilir
+            # Newer pefile: FileInfo = [[entry, ...], ...]; older versions may return a flat list
             for entry in info if isinstance(info, (list, tuple)) else [info]:
                 if _to_text(getattr(entry, "Key", b"")) != "StringFileInfo":
                     continue
@@ -1033,7 +1035,7 @@ def extract_pe_version_info(pe: Any) -> list[str]:
                             values[key] = value[:PE_VERSION_VALUE_MAX]
         return [f"{key}: {values[key]}" for key in PE_VERSION_KEYS if key in values]
     except Exception as exc:  # noqa: BLE001
-        logger.debug("[static_feature_node] versiyon bilgisi okunamadı: %s: %s", type(exc).__name__, exc)
+        logger.debug("[static_feature_node] could not read version info: %s: %s", type(exc).__name__, exc)
         return []
 
 
@@ -1044,19 +1046,19 @@ def _decode_manifest(raw: bytes) -> str:
 
 
 def parse_execution_level(manifest_xml: str) -> str:
-    """Manifest XML'inden ``requestedExecutionLevel level="..."`` değerini çıkarır.
+    """Extracts the ``requestedExecutionLevel level="..."`` value from manifest XML.
 
-    Yalnızca Windows'un tanıdığı değerler (asInvoker, highestAvailable, requireAdministrator) döner;
-    başka bir metin veya eşleşme yoksa ``""``.
+    Only values Windows recognizes (asInvoker, highestAvailable, requireAdministrator) are returned;
+    ``""`` if there is no other text or match.
     """
     match = _EXECUTION_LEVEL_RE.search(manifest_xml or "")
     return _EXECUTION_LEVELS.get(match.group(1).strip().lower(), "") if match else ""
 
 
 def extract_pe_manifest(pe: Any) -> str:
-    """RT_MANIFEST (tip 24) kaynağındaki ``requestedExecutionLevel`` değerini döndürür.
+    """Returns the ``requestedExecutionLevel`` value from the RT_MANIFEST (type 24) resource.
 
-    Kaynak dizini, manifest veya seviye yoksa ya da hata olursa ``""``.
+    ``""`` if there is no resource directory, manifest or level, or an error occurs.
     """
     try:
         resources = getattr(pe, "DIRECTORY_ENTRY_RESOURCE", None)
@@ -1073,12 +1075,12 @@ def extract_pe_manifest(pe: Any) -> str:
                         return level
         return ""
     except Exception as exc:  # noqa: BLE001
-        logger.debug("[static_feature_node] manifest okunamadı: %s: %s", type(exc).__name__, exc)
+        logger.debug("[static_feature_node] could not read manifest: %s: %s", type(exc).__name__, exc)
         return ""
 
 
 def pe_metadata_findings(pe: Any) -> list[Finding]:
-    """Yüklü ``pe`` nesnesinden (yeniden I/O yapmadan) ``pe_metadata`` bulgularını üretir."""
+    """Produces ``pe_metadata`` findings from the loaded ``pe`` object (without re-reading I/O)."""
     if pe is None:
         return []
     findings: list[Finding] = []
@@ -1094,9 +1096,9 @@ def pe_metadata_findings(pe: Any) -> list[Finding]:
 
 
 def match_import_combos(imports: list[str]) -> list[str]:
-    """Şüpheli import kombinasyonlarını döndürür (büyük/küçük harf duyarsız).
+    """Returns suspicious import combinations (case-insensitive).
 
-    Örn. VirtualAlloc + WriteProcessMemory + CreateRemoteThread -> ``["Process Injection Combo"]``.
+    E.g. VirtualAlloc + WriteProcessMemory + CreateRemoteThread -> ``["Process Injection Combo"]``.
     """
     present = {name.lower() for name in imports if isinstance(name, str)}
     return [
@@ -1110,7 +1112,7 @@ def match_import_combos(imports: list[str]) -> list[str]:
 # findings
 # --------------------------------------------------------------------------- #
 def _ioc_kind(text: str) -> str:
-    """FLOSS IoC metninin türünü belirler: url | ip | registry | file."""
+    """Determines the type of a FLOSS IoC string: url | ip | registry | file."""
     if _URL_RE.search(text):
         return "url"
     if _IPV4_RE.search(text):
@@ -1156,16 +1158,16 @@ def build_findings(
     pe_metadata: list[Finding] | None = None,
     tlsh_hash: str = "",
 ) -> list[Finding]:
-    """Araç çıktılarını ``Finding`` listesine çevirir (saf mantık).
+    """Converts tool outputs into a ``Finding`` list (pure logic).
 
-    Sıra, bağlam bütçesi daraldığında en değerli kanıtlar önde kalsın diye:
+    The order keeps the most valuable evidence first when the context budget shrinks:
     yara, capa, import combo, imphash, tlsh, entropy, floss.
-    Ham import listesi bilerek bulgu üretmez; yalnızca eşleşen combolar ve ``imphash`` gider.
-    ``entropy_source``: PE için ``pefile_entropy``, ELF için ``elf_entropy``.
+    The raw import list intentionally produces no findings; only the matched combos and ``imphash`` are included.
+    ``entropy_source``: ``pefile_entropy`` for PE, ``elf_entropy`` for ELF.
     """
     findings: list[Finding] = yara_findings(yara_results)
 
-    # capa: adresli eşleşmeler (ghidra_hints) + adresi olmayan kurallar + ATT&CK/MBC
+    # capa: matches with addresses (ghidra_hints) + rules without an address + ATT&CK/MBC
     hints = [h for h in ghidra_hints
              if isinstance(h, dict) and h.get("rule") and not _capa_is_trivial(h["rule"])]
     hinted_rules = {str(h["rule"]) for h in hints}
@@ -1188,7 +1190,7 @@ def build_findings(
     if imphash:
         findings.append(Finding(source="imphash", kind="grouping_key", value=imphash))
 
-    if tlsh_hash:  # bulanık hash: benzer örnekleri gruplamak için (karar kanıtı değil)
+    if tlsh_hash:  # fuzzy hash: for grouping similar samples (not decision evidence)
         findings.append(Finding(source="tlsh", kind="grouping_key", value=tlsh_hash))
 
     findings.extend(pe_metadata or [])
@@ -1205,22 +1207,22 @@ def build_findings(
 
 
 # --------------------------------------------------------------------------- #
-# Bulgu bütünlüğü: kimlik + "binary'de gerçekten var mı?" kontrolü
+# Finding integrity: identity + "does it really exist in the binary?" check
 # --------------------------------------------------------------------------- #
-# Dosya içinden metin olarak çıkarıldığı için raw byte'larda aranabilen IoC türleri.
+# IoC types that can be searched in raw bytes because they are extracted as text from the file.
 VERIFIABLE_IOC_KINDS = frozenset({"ip", "url", "domain", "email"})
 VERIFIABLE_SOURCES = frozenset({"floss"})
-MAX_VERIFY_VALUES = 500  # tekil değer üst sınırı (her biri tüm dosyada aranır); fazlası kontrol edilmez
+MAX_VERIFY_VALUES = 500  # upper bound on unique values (each is searched in the whole file); extras are not checked
 
 
 def compute_finding_id(f: Finding) -> str:
-    """Deterministik bulgu kimliği: ``md5(source_kind_value_address)[:8]``."""
+    """Deterministic finding ID: ``md5(source_kind_value_address)[:8]``."""
     raw = f"{f.source}_{f.kind}_{f.value}_{f.address}"
-    return hashlib.md5(raw.encode("utf-8", "replace")).hexdigest()[:8]  # noqa: S324 - kimlik, güvenlik değil
+    return hashlib.md5(raw.encode("utf-8", "replace")).hexdigest()[:8]  # noqa: S324 - identity, not security
 
 
 def _verifiable(f: Finding, dynamic_values: frozenset[str]) -> bool:
-    """Statik olarak çıkarılmış, aranabilir metin IoC'si mi? (FLOSS decoded/stack/tight hariç)."""
+    """Is this a statically extracted, searchable text IoC? (excludes FLOSS decoded/stack/tight)."""
     return (
         (f.source or "").lower() in VERIFIABLE_SOURCES
         and (f.kind or "").lower() in VERIFIABLE_IOC_KINDS
@@ -1230,10 +1232,10 @@ def _verifiable(f: Finding, dynamic_values: frozenset[str]) -> bool:
 
 
 def string_in_file(path: str, values: list[str]) -> dict[str, bool] | None:
-    """Her ``value`` dosyanın raw byte'larında (UTF-8 veya UTF-16LE) geçiyor mu?
+    """Does each ``value`` occur in the file's raw bytes (UTF-8 or UTF-16LE)?
 
-    Dosya bir kez ``mmap`` ile eşlenir (belleğe yüklenmez). Dosya okunamıyorsa ``None``
-    (kontrol edilemedi) döner; bu durumda hiçbir bulgu ``verified=False`` yapılmaz.
+    The file is mapped once with ``mmap`` (not loaded into memory). Returns ``None`` if the file
+    cannot be read (could not be checked); in that case no finding is marked ``verified=False``.
     """
     import mmap
 
@@ -1242,7 +1244,7 @@ def string_in_file(path: str, values: list[str]) -> dict[str, bool] | None:
         with open(path, "rb") as fh:
             try:
                 data = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
-            except ValueError:  # boş dosya mmap edilemez
+            except ValueError:  # an empty file cannot be mmap'ed
                 data = b""
             try:
                 for value in values:
@@ -1252,7 +1254,7 @@ def string_in_file(path: str, values: list[str]) -> dict[str, bool] | None:
                 if not isinstance(data, bytes):
                     data.close()
     except OSError as exc:
-        logger.warning("[static_feature_node] bulgu doğrulaması için dosya okunamadı: %s", exc)
+        logger.warning("[static_feature_node] could not read the file for finding verification: %s", exc)
         return None
     return result
 
@@ -1262,14 +1264,14 @@ def finalize_findings(
     file_path: str,
     dynamic_values: frozenset[str] | set[str] = frozenset(),
 ) -> list[Finding]:
-    """Her bulguya ``finding_id`` atar ve statik metin IoC'lerini dosya byte'larında doğrular.
+    """Assigns ``finding_id`` to every finding and verifies static text IoCs against the file bytes.
 
-    * ``finding_id``: ``compute_finding_id`` (her bulgu).
-    * ``verified=False``: FLOSS'un **statik** ip/url/domain/email string'i, dosyanın hiçbir
-      yerinde UTF-8 veya UTF-16LE olarak geçmiyorsa. FLOSS decoded/stack/tight string'leri
-      (``dynamic_values``; çalışma anında oluştuğu için dosyada düz metin olmaz) ve diğer
-      tüm türler kontrol edilemez: ``verified`` değeri değişmez (``True`` kalır). Daha önce
-      ``False`` olan bulgu hiçbir zaman ``True``'ya çevrilmez.
+    * ``finding_id``: ``compute_finding_id`` (every finding).
+    * ``verified=False``: when FLOSS's **static** ip/url/domain/email string does not occur
+      anywhere in the file as UTF-8 or UTF-16LE. FLOSS decoded/stack/tight strings
+      (``dynamic_values``; generated at runtime, so they are not plaintext in the file) and all
+      other types cannot be checked: their ``verified`` value is unchanged (stays ``True``).
+      A finding already ``False`` is never turned back into ``True``.
     """
     dynamic = frozenset(dynamic_values)
     targets: list[str] = []
@@ -1277,7 +1279,7 @@ def finalize_findings(
         if f.verified and _verifiable(f, dynamic) and f.value not in targets:
             targets.append(f.value)
     if len(targets) > MAX_VERIFY_VALUES:
-        logger.warning("[static_feature_node] %d IoC değeri doğrulanacak; ilk %d kontrol edilir",
+        logger.warning("[static_feature_node] %d IoC values to verify; checking the first %d",
                        len(targets), MAX_VERIFY_VALUES)
         targets = targets[:MAX_VERIFY_VALUES]
     found = string_in_file(file_path, targets) if targets else {}
@@ -1292,7 +1294,7 @@ def finalize_findings(
 
 
 def merge_findings(existing: list[Finding], new: list[Finding]) -> list[Finding]:
-    """Mevcut bulgulara yenilerini ekler; (source, kind, value, address) bazında tekilleştirir."""
+    """Adds new findings to existing ones; deduplicates by (source, kind, value, address)."""
     seen: set[tuple[str, str, str, str]] = set()
     merged: list[Finding] = []
     for f in [*existing, *new]:
@@ -1306,7 +1308,7 @@ def merge_findings(existing: list[Finding], new: list[Finding]) -> list[Finding]
 # --------------------------------------------------------------------------- #
 # FLOSS
 # --------------------------------------------------------------------------- #
-# Katı IoC filtresi: bir metin bu kalıplardan en az birine uymazsa elenir.
+# Strict IoC filter: a text is dropped unless it matches at least one of these patterns.
 _IPV4_RE = re.compile(
     r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?!\d|\.\d)"
 )
@@ -1323,7 +1325,7 @@ _IOC_PATTERNS = (_IPV4_RE, _URL_RE, _FILE_EXT_RE, _REGISTRY_RE)
 
 
 def filter_iocs(strings_list: list[str]) -> list[str]:
-    """IP, URL, dosya uzantısı veya registry yolu içeren metinleri tutar (tekilleştirilmiş)."""
+    """Keeps texts containing an IP, URL, file extension or registry path (deduplicated)."""
     kept = [
         s
         for s in strings_list
@@ -1333,15 +1335,15 @@ def filter_iocs(strings_list: list[str]) -> list[str]:
 
 
 def _collect_floss_strings(report: dict[str, Any]) -> list[str]:
-    """FLOSS JSON'undan decoded, stack, tight ve static string metinlerini toplar.
+    """Collects decoded, stack, tight and static string texts from FLOSS JSON.
 
-    ``run_floss`` çıktıyı ``filter_iocs`` ile süzdüğü için static string'lerin
-    gürültüsü gelmez; düz metin C2 URL'leri ancak bu yolla bulguya girer.
-    Girdiler hem ``{"string": "..."}`` nesnesi hem de düz string olabilir.
+    Since ``run_floss`` filters the output with ``filter_iocs``, static string noise does
+    not come through; plaintext C2 URLs only become findings this way.
+    Entries may be either ``{"string": "..."}`` objects or plain strings.
     """
     strings_section = report.get("strings")
     if not isinstance(strings_section, dict):
-        strings_section = report  # bazı sürümlerde anahtarlar kök seviyesinde olabilir
+        strings_section = report  # on some versions the keys may be at the root level
 
     pool: list[str] = []
     for key in ("decoded_strings", "stack_strings", "tight_strings", "static_strings"):
@@ -1356,11 +1358,11 @@ def _collect_floss_strings(report: dict[str, Any]) -> list[str]:
 
 
 def _collect_floss_hints(report: dict[str, Any]) -> list[dict[str, Any]]:
-    """Decoded/tight/stack string'lerin fonksiyon/adres metadata'sını toplar.
+    """Collects function/address metadata for decoded/tight/stack strings.
 
-    ``function`` (tight/stack), ``decoded_at`` (decoded), ``program_counter`` ve
-    ``address`` alanlarından hangisi varsa saklanır. Sadece IoC filtrenden geçen
-    değerler döner; böylece gürültü artmaz.
+    Any of the ``function`` (tight/stack), ``decoded_at`` (decoded), ``program_counter`` and
+    ``address`` fields that is present is stored. Only values that pass the IoC filter are
+    returned, so noise does not increase.
     """
     strings_section = report.get("strings")
     if not isinstance(strings_section, dict):
@@ -1400,9 +1402,9 @@ def _filter_hints_by_iocs(hints: list[dict[str, Any]], iocs: list[str]) -> list[
 
 
 def run_floss_with_hints(file_path: str) -> tuple[list[str], list[dict[str, Any]]]:
-    """``floss -j`` çalıştırır; (filtrelenmiş IoC'ler, decoded-string hints) döndürür.
+    """Runs ``floss -j``; returns (filtered IoCs, decoded-string hints).
 
-    Hata durumunda ``([], [])`` döner; akış çökmez.
+    Returns ``([], [])`` on error; the flow does not crash.
     """
     try:
         proc = subprocess.run(
@@ -1415,24 +1417,24 @@ def run_floss_with_hints(file_path: str) -> tuple[list[str], list[dict[str, Any]
             check=False,
         )
         if proc.returncode != 0:
-            stderr = proc.stderr.strip() or "stderr boş"
-            msg = f"floss {proc.returncode} koduyla çıktı: {stderr}"
+            stderr = proc.stderr.strip() or "stderr empty"
+            msg = f"floss exited with code {proc.returncode}: {stderr}"
         else:
             report = json.loads(proc.stdout)
             if not isinstance(report, dict):
-                msg = "floss beklenmeyen JSON yapısı döndürdü (dict değil)"
+                msg = "floss returned an unexpected JSON structure (not a dict)"
             else:
                 iocs = filter_iocs(_collect_floss_strings(report))
                 hints = _filter_hints_by_iocs(_collect_floss_hints(report), iocs)
                 return iocs, hints
     except subprocess.TimeoutExpired:
-        msg = f"floss {FLOSS_TIMEOUT_SECONDS} saniye içinde tamamlanamadı (timeout)"
+        msg = f"floss did not finish within {FLOSS_TIMEOUT_SECONDS} seconds (timeout)"
     except FileNotFoundError as exc:
-        msg = f"floss veya hedef dosya bulunamadı: {exc}"
+        msg = f"floss or the target file was not found: {exc}"
     except json.JSONDecodeError as exc:
-        msg = f"floss çıktısı JSON olarak ayrıştırılamadı: {exc}"
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        msg = f"floss çalıştırılırken beklenmeyen hata: {type(exc).__name__}: {exc}"
+        msg = f"floss output could not be parsed as JSON: {exc}"
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        msg = f"unexpected error while running floss: {type(exc).__name__}: {exc}"
 
     logger.error("[static_feature_node] %s", msg)
     return [], []
@@ -1444,17 +1446,17 @@ def run_floss(file_path: str) -> list[str]:
 
 
 def _unique(items: list[str]) -> list[str]:
-    """Sırayı koruyarak tekilleştirir."""
+    """Deduplicates while preserving order."""
     return list(dict.fromkeys(items))
 
 
 def _format_capa_entry(entry: Any, kind: str) -> str | None:
-    """capa ``meta.attack`` / ``meta.mbc`` girdisini okunabilir tek satıra çevirir.
+    """Converts a capa ``meta.attack`` / ``meta.mbc`` entry into a readable single line.
 
     ATT&CK: "T1055.012 - Process Injection::Process Hollowing (Defense Evasion)"
     MBC:    "B0001.025 - Debugger Detection::Software Breakpoints (Anti-Behavioral Analysis)"
 
-    Eski capa sürümlerindeki düz string girdiler olduğu gibi kabul edilir.
+    Plain string entries from older capa versions are accepted as-is.
     """
     if isinstance(entry, str):
         return entry.strip() or None
@@ -1475,7 +1477,7 @@ def _format_capa_entry(entry: Any, kind: str) -> str | None:
         name = f"{name}::{sub}" if name else sub
 
     if not (ident or name):
-        # Yapı beklenenden farklı: "parsed" listesine düş.
+        # Structure differs from what was expected: fall back to the "parsed" list.
         parsed = entry.get("parsed")
         if isinstance(parsed, list) and parsed:
             return " :: ".join(str(p) for p in parsed)
@@ -1486,11 +1488,11 @@ def _format_capa_entry(entry: Any, kind: str) -> str | None:
 
 
 def summarize_capa(report: dict[str, Any]) -> dict[str, list[str]]:
-    """Ham capa JSON'unu LLM bağlamına uygun, küçük bir özete indirger.
+    """Reduces raw capa JSON to a small summary suitable for the LLM context.
 
-    Sadece kural isimlerini, MITRE ATT&CK ve MBC girdilerini alır; ``matches``
-    (mantık/eşleşme ağaçları) gibi büyük alanlar atılır. Beklenmeyen yapılarda
-    hata fırlatmaz, ilgili kısmı atlar.
+    It takes only rule names, MITRE ATT&CK and MBC entries; large fields such as
+    ``matches`` (logic/match trees) are discarded. It does not raise on unexpected
+    structures and skips the relevant part.
     """
     rules = report.get("rules")
     if not isinstance(rules, dict):
@@ -1524,15 +1526,15 @@ def summarize_capa(report: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def _parse_capa_address(raw: Any) -> int | None:
-    """capa adres temsillerini (farklı sürümler) tek bir int sanal adrese çevirir.
+    """Converts capa address representations (different versions) into a single int virtual address.
 
-    Desteklenen biçimler:
+    Supported forms:
       * ``{"type": "absolute", "value": 4198400}`` (capa >= 5/7)
-      * ``["absolute", 4198400]`` (ara sürümler)
-      * ``4198400`` / ``"4198400"`` / ``"0x401000"`` (eski sürümler)
+      * ``["absolute", 4198400]`` (intermediate versions)
+      * ``4198400`` / ``"4198400"`` / ``"0x401000"`` (older versions)
 
-    Spesifik bir bellek adresi olmayanlar (``file``, ``no address``, ``relative``,
-    ``token`` vb. tipler) için ``None`` döner.
+    Returns ``None`` for entries that have no specific memory address (``file``,
+    ``no address``, ``relative``, ``token``, etc. types).
     """
     value: Any = raw
     if isinstance(raw, dict):
@@ -1558,7 +1560,7 @@ def _parse_capa_address(raw: Any) -> int | None:
 
 
 def _rule_match_addresses(rule: dict[str, Any]) -> list[int]:
-    """Bir capa kuralının ``matches`` / ``locations`` yapısındaki adresleri toplar."""
+    """Collects addresses from a capa rule's ``matches`` / ``locations`` structure."""
     addresses: list[int] = []
 
     def add(raw: Any) -> None:
@@ -1568,11 +1570,11 @@ def _rule_match_addresses(rule: dict[str, Any]) -> list[int]:
 
     matches = rule.get("matches")
     if isinstance(matches, dict):
-        # Eski sürümler: {"<adres>": {...eşleşme ağacı...}}
+        # Older versions: {"<address>": {...match tree...}}
         for key in matches:
             add(key)
     elif isinstance(matches, list):
-        # Yeni sürümler: [[<adres>, {...eşleşme ağacı...}], ...]
+        # Newer versions: [[<address>, {...match tree...}], ...]
         for item in matches:
             if isinstance(item, (list, tuple)) and item:
                 add(item[0])
@@ -1586,7 +1588,7 @@ def _rule_match_addresses(rule: dict[str, Any]) -> list[int]:
 
 
 def _is_file_scope(meta: dict[str, Any]) -> bool:
-    """Kural dosya seviyesinde (global) mi eşleşiyor?"""
+    """Does the rule match at file level (global)?"""
     scope = meta.get("scope")
     if scope is None:
         scopes = meta.get("scopes")
@@ -1595,12 +1597,12 @@ def _is_file_scope(meta: dict[str, Any]) -> bool:
 
 
 def extract_ghidra_hints(report: dict[str, Any]) -> list[dict[str, str]]:
-    """Ham capa JSON'undan Ghidra'ya iletilecek hedef adresleri çıkarır.
+    """Extracts target addresses to pass to Ghidra from raw capa JSON.
 
-    Dönüş: ``[{"offset": "0x401000", "rule": "encrypt data using AES"}, ...]``
-    ``(offset, rule)`` çiftleri tekilleştirilir. Dosya seviyesinde (global)
-    eşleşen veya spesifik bir bellek adresi olmayan kurallar atlanır.
-    Beklenmeyen yapılarda hata fırlatmaz, ilgili kısmı atlar.
+    Returns: ``[{"offset": "0x401000", "rule": "encrypt data using AES"}, ...]``
+    ``(offset, rule)`` pairs are deduplicated. Rules that match at file level (global)
+    or have no specific memory address are skipped. It does not raise on unexpected
+    structures and skips the relevant part.
     """
     rules = report.get("rules")
     if not isinstance(rules, dict):
@@ -1625,16 +1627,16 @@ def extract_ghidra_hints(report: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def run_capa(file_path: str) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    """``capa -j <file_path>`` çalıştırır; ``(özet, ghidra_hints)`` ikilisi döndürür.
+    """Runs ``capa -j <file_path>``; returns the ``(summary, ghidra_hints)`` pair.
 
-    Başarıda:
-      * özet: ``{"matched_rules": [...], "mitre_attack": [...], "malware_behavior": [...]}``
+    On success:
+      * summary: ``{"matched_rules": [...], "mitre_attack": [...], "malware_behavior": [...]}``
       * ghidra_hints: ``[{"offset": "0x401000", "rule": "..."}, ...]``
-    Hata durumunda (zaman aşımı, capa/dosya bulunamadı, sıfır olmayan çıkış kodu,
-    geçersiz JSON) uygulama çökmez; ``({"error": "<mesaj>"}, [])`` döndürülür.
+    On error (timeout, capa/file not found, non-zero exit code, invalid JSON) the
+    application does not crash; ``({"error": "<message>"}, [])`` is returned.
     """
     try:
-        # capa 10 gömülü kural içermez; kural dizini env'den verilir (yoksa capa kendi hatasını döndürür)
+        # capa 10 has no embedded rules; the rule directory is given via env (otherwise capa returns its own error)
         rules = os.environ.get(CAPA_RULES_ENV, "")
         cmd = ["capa", "-j"]
         if rules:
@@ -1650,44 +1652,44 @@ def run_capa(file_path: str) -> tuple[dict[str, Any], list[dict[str, str]]]:
             check=False,
         )
         if proc.returncode != 0:
-            stderr = proc.stderr.strip() or "stderr boş"
-            return {"error": f"capa {proc.returncode} koduyla çıktı: {stderr}"}, []
+            stderr = proc.stderr.strip() or "stderr empty"
+            return {"error": f"capa exited with code {proc.returncode}: {stderr}"}, []
 
         result = json.loads(proc.stdout)
         if not isinstance(result, dict):
-            return {"error": "capa beklenmeyen JSON yapısı döndürdü (dict değil)"}, []
+            return {"error": "capa returned an unexpected JSON structure (not a dict)"}, []
         return summarize_capa(result), extract_ghidra_hints(result)
 
     except subprocess.TimeoutExpired:
-        msg = f"capa {CAPA_TIMEOUT_SECONDS} saniye içinde tamamlanamadı (timeout)"
+        msg = f"capa did not finish within {CAPA_TIMEOUT_SECONDS} seconds (timeout)"
     except FileNotFoundError as exc:
-        msg = f"capa veya hedef dosya bulunamadı: {exc}"
+        msg = f"capa or the target file was not found: {exc}"
     except json.JSONDecodeError as exc:
-        msg = f"capa çıktısı JSON olarak ayrıştırılamadı: {exc}"
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        msg = f"capa çalıştırılırken beklenmeyen hata: {type(exc).__name__}: {exc}"
+        msg = f"capa output could not be parsed as JSON: {exc}"
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        msg = f"unexpected error while running capa: {type(exc).__name__}: {exc}"
 
     logger.error("[static_feature_node] %s", msg)
     return {"error": msg}, []
 
 
 def deep_inspection_node(state: AgentState) -> dict[str, Any]:
-    """Ghidra (headless) ile derin inceleme / decompile.
+    """Deep inspection / decompile with Ghidra (headless).
 
-    capa hint'leri ve ``state.findings`` (import combo vb.) Ghidra'ya öncelik
-    puanlaması için iletilir. Hata/timeout durumunda ``run_ghidra`` ``[]`` döner.
+    capa hints and ``state.findings`` (import combos etc.) are passed to Ghidra for
+    priority scoring. On error/timeout ``run_ghidra`` returns ``[]``.
 
-    Ghidra koruyucusu: unpack düğümleri kaynak kodu zaten çıkardıysa
-    (``source_code`` dolu) veya rota ``native`` değilse Ghidra çalıştırılmaz;
-    böylece Python/C# kaynağı decompile çıktısıyla ezilmez.
+    Ghidra guard: if the unpack nodes already produced source code
+    (``source_code`` is non-empty) or the route is not ``native``, Ghidra is not run,
+    so Python/C# source is not overwritten by decompile output.
     """
     logger.info("[deep_inspection_node]")
     if get_tool_profile() == "core":
-        logger.info("[deep_inspection_node] atlandı (%s=core: Ghidra çalıştırılmaz)", TOOL_PROFILE_ENV)
+        logger.info("[deep_inspection_node] skipped (%s=core: Ghidra is not run)", TOOL_PROFILE_ENV)
         return {}
     if state.source_code or state.route_flag != "native":
         logger.info(
-            "[deep_inspection_node] atlandı (source_code=%d, route_flag=%s)",
+            "[deep_inspection_node] skipped (source_code=%d, route_flag=%s)",
             len(state.source_code),
             state.route_flag,
         )
@@ -1699,60 +1701,60 @@ def deep_inspection_node(state: AgentState) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# AI ajanları (Ollama)
+# AI agents (Ollama)
 # --------------------------------------------------------------------------- #
 def ai_extractor_agent(state: AgentState) -> dict[str, Any]:
-    """FLOSS stringlerini temizler, IoC (IP, URL, domain, ...) çıkarır."""
+    """Cleans FLOSS strings and extracts IoCs (IP, URL, domain, ...)."""
     logger.info("[ai_extractor_agent]")
-    # IoC cikarimi deterministik yapilir (filter_iocs); LLM'e birakilmaz.
+    # IoC extraction is deterministic (filter_iocs); it is not left to the LLM.
     iocs = dict(state.iocs)
     iocs.setdefault("ioc", _unique([s for s in state.extracted_strings if filter_iocs([s])]))
     return {"iocs": iocs}
 
 
 def ai_reverser_agent(state: AgentState) -> dict[str, Any]:
-    """Decompile edilmiş kodu okuyup niyet tespiti yapar (LLM katmanı).
+    """Reads decompiled code and determines intent (LLM layer).
 
-    ``CROWBAR_SKIP_LLM=1`` (veya ``main.py --no-llm``) ile hiçbir LLM
-    istemcisi oluşturulmaz; offline VM deterministik state üretir.
+    With ``CROWBAR_SKIP_LLM=1`` (or ``main.py --no-llm``) no LLM client is
+    created; an offline VM produces deterministic state.
     """
     logger.info("[ai_reverser_agent]")
     if _env_flag("CROWBAR_SKIP_LLM"):
-        logger.info("[ai_reverser_agent] atlandı (CROWBAR_SKIP_LLM=1)")
+        logger.info("[ai_reverser_agent] skipped (CROWBAR_SKIP_LLM=1)")
         return {}
     from llm_layer.nodes import run_reverser
     return run_reverser(state)
 
 
 def ai_supervisor_agent(state: AgentState) -> dict[str, Any]:
-    """Tüm verileri birleştirip nihai JSON/Markdown raporunu üretir."""
+    """Combines all data and produces the final JSON/Markdown report."""
     logger.info("[ai_supervisor_agent]")
     from llm_layer.nodes import run_supervisor
     return run_supervisor(state)
 
 
 # --------------------------------------------------------------------------- #
-# Kalıcılık
+# Persistence
 # --------------------------------------------------------------------------- #
 def db_writer_node(state: AgentState) -> dict[str, Any]:
-    """Analiz sonuçlarını SQLite'a yazar (samples, findings, functions, calls, llm_claims).
+    """Writes analysis results to SQLite (samples, findings, functions, calls, llm_claims).
 
-    ``sample.sha256`` boşsa (dosya okunamadı) hiçbir şey yazılmaz. Veritabanı
-    hataları akışı çökertmez; loglanır. State değiştirilmez (``{}``).
+    If ``sample.sha256`` is empty (file could not be read), nothing is written. Database
+    errors do not crash the flow; they are logged. State is not modified (``{}``).
     """
     logger.info("[db_writer_node]")
     if _env_flag("CROWBAR_SKIP_DB"):
-        logger.info("[db_writer_node] atlandı (CROWBAR_SKIP_DB=1)")
+        logger.info("[db_writer_node] skipped (CROWBAR_SKIP_DB=1)")
         return {}
     sha256 = state.sample.sha256
     if not sha256:
-        logger.warning("[db_writer_node] sha256 boş; veritabanına yazılmadı")
+        logger.warning("[db_writer_node] sha256 is empty; not written to the database")
         return {}
 
     try:
-        # init_db -> sample -> findings -> functions/calls (llm_summary dahil)
-        # -> llm_claims (rapor ve/veya verdict); split mod (host_analyze --db) ile ortak.
+        # init_db -> sample -> findings -> functions/calls (including llm_summary)
+        # -> llm_claims (report and/or verdict); shared with split mode (host_analyze --db).
         db.save_analysis(state)
-    except Exception as exc:  # noqa: BLE001 - kalıcılık hatası analiz sonucunu düşürmemeli
-        logger.error("[db_writer_node] veritabanı hatası: %s: %s", type(exc).__name__, exc)
+    except Exception as exc:  # noqa: BLE001 - a persistence error must not bring down the analysis result
+        logger.error("[db_writer_node] database error: %s: %s", type(exc).__name__, exc)
     return {}

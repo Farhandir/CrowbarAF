@@ -143,8 +143,8 @@ def _run_offline_job(
                 sha = ""
         warning = ""
         if validation.functions == 0:
-            warning = ("0 functions: Ghidra/decompile çalışmadı. GHIDRA_INSTALL_DIR, "
-                       "analyzeHeadless ve VM repo/venv yolunu kontrol edin.")
+            warning = ("0 functions: Ghidra/decompile did not run. Check GHIDRA_INSTALL_DIR, "
+                       "analyzeHeadless and the VM repo/venv paths.")
         _job_update(
             job_id, status="done", stage="done",
             result={
@@ -240,11 +240,11 @@ def _run_host_job(
         llm_failures = (merged.verdict or {}).get("analysis_failures") or []
         warning = ""
         if no_functions:
-            warning = ("0 functions: LLM çağrılmadı; verdict yalnızca deterministik "
-                       "bulgulardan hesaplandı. Offline analizi Ghidra ile düzeltip yeniden koşun.")
+            warning = ("0 functions: LLM was not called; the verdict was computed from "
+                       "deterministic findings only. Fix the offline analysis with Ghidra and re-run.")
         elif llm_failures:
-            warning = (f"{len(llm_failures)} function LLM çağrısı başarısız; verdict yalnızca "
-                       "deterministik bulgulardan hesaplandı. Provider/base URL/API key'i kontrol edin.")
+            warning = (f"{len(llm_failures)} function LLM calls failed; the verdict was computed from "
+                       "deterministic findings only. Check the provider/base URL/API key.")
         _job_update(
             job_id, status="done", stage="done",
             result={

@@ -1,9 +1,10 @@
-"""Token tahmini ve butce yardimcilari.
+"""Token estimation and budget helpers.
 
-Gercek tokenizer modelden modele degisir. Burada:
-  * varsayilan: karakter/4 tahmini
-  * `TokenCounter.calibrate`: Ollama/OpenAI yanitindaki gercek prompt token
-    sayisiyla orani gunceller (EMA). Boylece butce olcumu modele gore kalibre olur.
+The real tokenizer varies by model. Here:
+  * default: chars/4 estimate
+  * `TokenCounter.calibrate`: updates the ratio with the actual prompt token
+    count from the Ollama/OpenAI response (EMA). This calibrates the budget
+    measurement per model.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ class TokenCounter:
         return max(1, int(len(text) / self.chars_per_token + 0.999))
 
     def calibrate(self, text: str, actual_tokens: int) -> None:
-        """Gercek token sayisiyla orani gunceller (usul usul, EMA)."""
+        """Update the ratio with the actual token count (gradually, via EMA)."""
         if not text or not actual_tokens:
             return
         ratio = len(text) / float(actual_tokens)
@@ -44,8 +45,8 @@ def estimate_tokens(text: str) -> int:
     return DEFAULT_COUNTER.estimate(text)
 
 
-def truncate_to_tokens(text: str, max_tokens: int, marker: str = "\n/* ... kisaltildi ... */\n") -> str:
-    """Basi ve sonu koruyarak kirpar (sinyal genelde iki ucta olur)."""
+def truncate_to_tokens(text: str, max_tokens: int, marker: str = "\n/* ... truncated ... */\n") -> str:
+    """Truncate while keeping the head and tail (the signal is usually at both ends)."""
     if max_tokens <= 0:
         return ""
     max_chars = int(max_tokens * DEFAULT_COUNTER.chars_per_token)

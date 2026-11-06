@@ -1,4 +1,4 @@
-"""Yerel Ollama LLM fabrikası. Hiçbir veri buluta çıkmaz."""
+"""Local Ollama LLM factory. No data leaves the machine."""
 
 from __future__ import annotations
 
