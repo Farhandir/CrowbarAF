@@ -186,6 +186,7 @@ def test_transport_remote_sample_skips_host_copy(tmp_path, monkeypatch):
     monkeypatch.setattr(transport, "cleanup", lambda p: calls.append(("cleanup", p)))
 
     transport.run_offline(None, str(out), remote_sample="/home/kali/Desktop/mirai.elf")
-    assert any(c[0] == "run" and c[1] == "/bin/test" for c in calls)
+    assert any(c[0] == "run" and c[1].endswith("/.venv/bin/python") for c in calls)
+    assert not any(c[0] == "run" and c[1] == "/bin/test" for c in calls)
     assert any(c[0] == "copyfrom" for c in calls)
     assert out.is_file()

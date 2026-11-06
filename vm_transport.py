@@ -158,7 +158,8 @@ class GuestControlTransport:
             self.copyto(str(local_sample), remote_dir)
         else:
             # The sample already exists inside the VM; never copy it to the host.
-            self.run("/bin/test", ["-f", remote_sample], timeout=60)
+            # Do not run /bin/test here: some Guest Additions versions reject it.
+            pass
         try:
             self.run(
                 self.python,
