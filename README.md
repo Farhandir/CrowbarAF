@@ -16,6 +16,10 @@
   Ollama / vLLM / OpenCode Go
 </p>
 
+<p align="center">
+  Attack/measurement companion: <a href="https://github.com/arifs122/Gaslighter">Gaslighter</a>
+</p>
+
 ---
 
 ## Why
@@ -190,8 +194,9 @@ flowchart LR
 
 - **CrowbarAF** (this repo) — the defense: analysis, context budgeting,
   evidence verification, fail-closed verdicts.
-- **Gaslighter** — the attack: obfuscation, prompt injection, decoys, packing,
-  paraphrase/encoded instructions, and the measurement harness.
+- **[Gaslighter](https://github.com/arifs122/Gaslighter)** (public) — the attack:
+  obfuscation, prompt injection, decoys, packing, paraphrase/encoded
+  instructions, and the measurement harness.
 - **`results/archive/`** — comparable records: same dataset + config, raw
   outputs, and the honest limits of each run.
 
