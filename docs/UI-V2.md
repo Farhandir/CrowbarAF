@@ -59,6 +59,9 @@ Gereksinimler:
 
 - SQLite'taki analizler.
 - Satıra tıklayınca verdict, rapor ve bulgular.
+- Detaydan **HTML rapor indir**, **Markdown rapor indir** ve **JSON indir**.
+- Rapor `report.py` ile üretilir; HTML sürümü tablo/rozet düzeninde, script içermez,
+  IoC'ler defang edilir.
 - Offline state ile LLM sonucunu aynı örnek hash'i üzerinden karşılaştırabilirsiniz.
 
 ### 4. Setup

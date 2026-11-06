@@ -128,3 +128,15 @@ def test_no_unverified_marker_when_everything_is_verified():
     rep = report.build(_state(findings=[{"source": "floss", "kind": "url", "value": "http://x", "verified": True}]))
     assert rep["tools"]["floss"]["ioc_unverified"] == []
     assert "(Unverified)" not in report.render_markdown(rep)
+
+
+def test_render_html_is_a_real_escaped_report():
+    rep = report.build(_state(findings=[
+        {"source": "floss", "kind": "url", "value": "http://x/<script>alert(1)</script>"}
+    ]))
+    out = report.render_html(rep)
+    assert "<html" in out and "CrowbarAF Analysis Report" in out
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+    assert "<pre>" not in out or "FLOSS" in out
+    assert "⚠️" not in out

@@ -190,3 +190,35 @@ def test_transport_remote_sample_skips_host_copy(tmp_path, monkeypatch):
     assert not any(c[0] == "run" and c[1] == "/bin/test" for c in calls)
     assert any(c[0] == "copyfrom" for c in calls)
     assert out.is_file()
+
+
+def test_offline_job_report_download(tmp_path, monkeypatch):
+    monkeypatch.setattr(web_v2, "UPLOAD_DIR", tmp_path / "samples")
+    monkeypatch.setattr(web_v2, "STATE_DIR", tmp_path / "states")
+    web_v2.UPLOAD_DIR.mkdir()
+    web_v2.STATE_DIR.mkdir()
+    state_template = AgentState(file_path="sample.bin").model_dump_json(indent=2)
+
+    def fake_run_offline(self, sample_path, out_path, **kwargs):
+        Path(out_path).write_text(state_template, encoding="utf-8")
+        Path(out_path).chmod(0o600)
+        return out_path
+
+    monkeypatch.setattr(GuestControlTransport, "run_offline", fake_run_offline)
+    client = _client()
+    sample = tmp_path / "sample.bin"
+    sample.write_bytes(b"MZ harmless")
+    res = client.post(
+        "/api/v2/offline",
+        files={"file": ("sample.bin", sample.read_bytes(), "application/octet-stream")},
+        data={"vm_name": "vm", "vm_user": "kali", "vm_password": "secret",
+              "repo_dir": "/repo", "profile": "deep"},
+    )
+    job_id = res.json()["job_id"]
+    html = client.get(f"/api/v2/jobs/{job_id}/report?format=html")
+    assert html.status_code == 200
+    assert "CrowbarAF Analysis Report" in html.text
+    assert "<script" not in html.text
+    md = client.get(f"/api/v2/jobs/{job_id}/report?format=md")
+    assert md.status_code == 200
+    assert "CrowbarAF" in md.text

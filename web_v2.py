@@ -21,10 +21,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 import db
 import host_analyze
+import report
 from llm_layer.client import LLMClient
 from sandbox.validate_state import validate_state
 from state import AgentState
@@ -396,6 +397,67 @@ def job_state(job_id: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="state not found")
     return FileResponse(path, media_type="application/json", filename=name)
+
+
+def _db_report_state(sha256: str) -> dict[str, Any]:
+    detail = db.get_sample_details(sha256)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="sample not found")
+    return {
+        "sample": detail.get("sample") or {},
+        "findings": detail.get("findings") or [],
+        "source_code": detail.get("functions") or [],
+        "analysis_report": detail.get("supervisor_report") or "",
+        "verdict": detail.get("verdict") or {},
+    }
+
+
+def _job_report_state(job_id: str) -> dict[str, Any]:
+    job = _job_get(job_id)
+    if job.get("status") != "done":
+        raise HTTPException(status_code=409, detail="job is not done")
+    name = (job.get("result") or {}).get("state_file") or ""
+    if not re.fullmatch(r"[a-f0-9]{32}(\.llm)?\.json", name):
+        raise HTTPException(status_code=404, detail="state not found")
+    path = STATE_DIR / name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="state not found")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"cannot read state: {exc}") from exc
+
+
+def _report_response(state: dict[str, Any], fmt: str) -> Response:
+    fmt = (fmt or "html").lower()
+    if fmt not in ("html", "md", "json"):
+        raise HTTPException(status_code=400, detail="format must be html, md or json")
+    rep = report.build(state)
+    sha = str((state.get("sample") or {}).get("sha256") or "")
+    name = (sha[:16] or "report")
+    if fmt == "html":
+        return Response(
+            content=report.render_html(rep), media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{name}.html"'},
+        )
+    if fmt == "md":
+        return Response(
+            content=report.render_markdown(rep), media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{name}.md"'},
+        )
+    return Response(content=report.render_json(rep), media_type="application/json")
+
+
+@router.get("/api/v2/reports/{sha256}")
+def sample_report(sha256: str, format: str = "html") -> Response:
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", sha256):
+        raise HTTPException(status_code=404, detail="sample not found")
+    return _report_response(_db_report_state(sha256.lower()), format)
+
+
+@router.get("/api/v2/jobs/{job_id}/report")
+def job_report(job_id: str, format: str = "html") -> Response:
+    return _report_response(_job_report_state(job_id), format)
 
 
 @router.get("/api/v2/state/{filename}")

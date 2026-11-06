@@ -229,6 +229,15 @@ function stateLink(jobId, stateFile) {
   return el("a", { href, class: "chip", text: "state.json indir" });
 }
 
+function reportLinks(jobId) {
+  return [
+    el("a", { href: "/api/v2/jobs/" + encodeURIComponent(jobId) + "/report?format=html",
+              class: "chip", text: "HTML rapor indir" }),
+    el("a", { href: "/api/v2/jobs/" + encodeURIComponent(jobId) + "/report?format=md",
+              class: "chip", text: "Markdown rapor indir" }),
+  ];
+}
+
 function pollJob(jobId, kind) {
   const statusId = kind === "offline" ? "#offStatus" : "#hostStatus";
   const resultId = kind === "offline" ? "#offResult" : "#hostResult";
@@ -247,7 +256,7 @@ function pollJob(jobId, kind) {
       box.append(el("div", { class: "kv" }, el("b", { text: "SHA-256" }), el("code", { text: r.sha256 || "—" })));
       if (kind === "host") box.append(el("div", { class: "kv" }, el("b", { text: "Karar" }),
         badge(typeof r.verdict === "string" ? { verdict: r.verdict } : r)));
-      box.append(el("div", { class: "kv" }, stateLink(jobId, r.state_file)));
+      box.append(el("div", { class: "kv" }, stateLink(jobId, r.state_file), ...reportLinks(jobId)));
       if (kind === "host" && r.sha256) {
         box.append(el("div", { class: "kv" }, el("a", { href: "/api/samples/" + encodeURIComponent(r.sha256), text: "API detayı" })));
         loadHistory();
@@ -338,6 +347,13 @@ async function showHistory(sha) {
     box.append(el("div", { class: "kv" }, el("code", { text: f.source + "/" + f.kind + ": " + f.value }),
       f.verified === false ? el("span", { class: "chip", text: "Unverified" }) : null));
   }
+  box.append(el("div", { class: "row" },
+    el("a", { href: "/api/v2/reports/" + encodeURIComponent(body.sample.sha256) + "?format=html",
+              class: "chip", text: "HTML rapor indir" }),
+    el("a", { href: "/api/v2/reports/" + encodeURIComponent(body.sample.sha256) + "?format=md",
+              class: "chip", text: "Markdown rapor indir" }),
+    el("a", { href: "/api/v2/reports/" + encodeURIComponent(body.sample.sha256) + "?format=json",
+              class: "chip", text: "JSON indir" })));
 }
 
 async function setupCheck() {

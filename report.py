@@ -260,16 +260,163 @@ def render_markdown(rep: dict) -> str:
     return "\n".join(L)
 
 
-def render_html(rep: dict) -> str:
-    body = html.escape(render_markdown(rep))
-    color = {"high": "#c0392b", "medium": "#e67e22", "unknown": "#7f8c8d"}.get(rep["verdict"]["level"], "#7f8c8d")
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>CrowbarAF {rep['identity']['sha256'][:12]}</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#222}}
-pre{{background:#f6f8fa;padding:1rem;border-radius:8px;white-space:pre-wrap;word-break:break-word}}
-.badge{{display:inline-block;padding:.2rem .6rem;border-radius:6px;color:#fff;background:{color};font-weight:600}}</style>
-</head><body><p>Verdict: <span class="badge">{html.escape(rep['verdict']['level'])}</span></p><pre>{body}</pre></body></html>"""
+def _esc(value) -> str:
+    return html.escape(str(value if value is not None else ""))
 
+
+def _table(headers: list[str], rows: list[list[str]]) -> str:
+    head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
+    return f'<div class="table-wrap"><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
+
+
+def render_html(rep: dict) -> str:
+    """Readable, self-contained HTML report (no scripts, no external assets)."""
+    ident = rep["identity"]
+    v = rep["verdict"]
+    t = rep["tools"]
+    level = str(v.get("level") or "unknown")
+    color = {"high": "#b42318", "medium": "#b54708", "unknown": "#667085"}.get(level, "#667085")
+    parts: list[str] = []
+    parts.append(f'<header><div><h1>CrowbarAF Analysis Report</h1>'
+                 f'<p class="muted">Generated {_esc(rep.get("generated_at", ""))}</p></div>'
+                 f'<span class="badge" style="background:{color}">{_esc(level)}</span></header>')
+    parts.append('<section class="card"><h2>Identity</h2><div class="grid">')
+    for label, key in (("SHA-256", "sha256"), ("File type", "file_type"),
+                       ("Architecture", "arch"), ("Packer", "packer"),
+                       ("Route", "route")):
+        parts.append(f'<div><span class="label">{_esc(label)}</span><code>{_esc(ident.get(key, ""))}</code></div>')
+    parts.append("</div></section>")
+
+    state = v.get("state") or ""
+    parts.append('<section class="card"><h2>Verdict</h2>')
+    parts.append(f'<p><span class="badge" style="background:{color}">{_esc(level)}</span> '
+                 + (f'<code>{_esc(state)}</code>' if state else "") + '</p>')
+    if v.get("note"):
+        parts.append(f'<p>{_esc(v["note"])}</p>')
+    cov = v.get("coverage") or {}
+    if cov:
+        ratio = float(cov.get("ratio", 0) or 0)
+        parts.append(f'<p class="muted">Coverage: {_esc(cov.get("analyzed", 0))}/{_esc(cov.get("total", 0))} '
+                     f'({ratio:.0%}); decompiled: {_esc(cov.get("decompiled", "?"))}; '
+                     f'skipped: {_esc(cov.get("skipped", "?"))}</p>')
+    if v.get("unknown_reasons"):
+        parts.append('<h3>Unknown reasons</h3><ul>' + "".join(f"<li>{_esc(x)}</li>" for x in v["unknown_reasons"]) + "</ul>")
+    if v.get("next_actions"):
+        parts.append('<h3>Next actions</h3><ul>' + "".join(f"<li>{_esc(x)}</li>" for x in v["next_actions"]) + "</ul>")
+    parts.append("</section>")
+
+    parts.append('<section class="card"><h2>Deterministic evidence</h2>')
+    yara = t.get("yara") or []
+    parts.append(f'<h3>YARA ({len(yara)})</h3>')
+    parts.append(_table(["Rule", "Address"], [[_esc(y.get("rule", "")), f"<code>{_esc(y.get('address', ''))}</code>"] for y in yara]) if yara else '<p class="empty">No YARA matches.</p>')
+    capa = t.get("capa") or {}
+    capa_rows = ([[_esc("rule"), _esc(x)] for x in capa.get("matched_rules", [])]
+                 + [[_esc("ATT&CK"), _esc(x)] for x in capa.get("mitre_attack", [])]
+                 + [[_esc("MBC"), _esc(x)] for x in capa.get("malware_behavior", [])])
+    parts.append(f'<h3>capa ({len(capa_rows)})</h3>')
+    parts.append(_table(["Type", "Value"], capa_rows) if capa_rows else '<p class="empty">No capabilities found.</p>')
+    floss = t.get("floss") or {}
+    parts.append(f'<h3>FLOSS ({_esc(floss.get("string_count", 0))} strings)</h3>')
+    unverified = set(floss.get("ioc_unverified") or [])
+    ioc_rows = []
+    for x in floss.get("ioc_findings") or []:
+        flag = ' <span class="warn">(Unverified)</span>' if x in unverified else ""
+        ioc_rows.append([f"<code>{_esc(x)}</code>{flag}"])
+    if ioc_rows:
+        parts.append(_table(["IoC"], ioc_rows))
+    strings = floss.get("strings") or []
+    if strings:
+        parts.append('<details><summary>String sample</summary><pre>' + _esc("\n".join(str(x) for x in strings[:50])) + '</pre></details>')
+    parts.append("</section>")
+
+    imports = t.get("imports") or {}
+    parts.append('<section class="card"><h2>Imports and grouping</h2>')
+    meta = []
+    if imports.get("imphash"):
+        meta.append(f'<div><span class="label">imphash</span><code>{_esc(imports["imphash"])}</code></div>')
+    if imports.get("tlsh"):
+        meta.append(f'<div><span class="label">TLSH</span><code>{_esc(imports["tlsh"])}</code></div>')
+    if meta:
+        parts.append('<div class="grid">' + "".join(meta) + "</div>")
+    if imports.get("combos"):
+        parts.append('<h3>Import combinations</h3><ul>' + "".join(f"<li>{_esc(x)}</li>" for x in imports["combos"]) + "</ul>")
+    parts.append(f'<p class="muted">Imports: {_esc(imports.get("import_count", 0))}</p>')
+    if imports.get("list"):
+        parts.append('<details><summary>Import list</summary><pre>' + _esc("\n".join(str(x) for x in imports["list"][:80])) + '</pre></details>')
+    parts.append("</section>")
+
+    g = t.get("ghidra") or {}
+    parts.append('<section class="card"><h2>Ghidra functions</h2>')
+    parts.append(f'<p class="muted">Functions: {_esc(g.get("function_count", 0))}; '
+                 f'decompiled: {_esc(g.get("decompiled", 0))}; '
+                 f'call edges: {_esc(g.get("call_edges", 0))}; '
+                 f'warnings: {_esc(g.get("decompile_warnings", 0))}</p>')
+    rows = []
+    for fn in (g.get("prioritized") or [])[:100]:
+        summary = fn.get("llm_summary") or ""
+        rows.append([f"<code>{_esc(fn.get('offset', ''))}</code>", _esc(fn.get("name", "")),
+                     _esc(fn.get("priority", 0)), _esc(fn.get("size", 0)),
+                     "yes" if fn.get("interesting") else "-", _esc(summary[:220])])
+    parts.append(_table(["Offset", "Name", "Priority", "Size", "Interesting", "LLM summary"], rows)
+                 if rows else '<p class="empty">No functions.</p>')
+    parts.append("</section>")
+
+    ai = rep.get("ai")
+    if ai:
+        parts.append('<section class="card"><h2>AI commentary</h2><p class="warn">Model output is not authoritative; verify against evidence.</p>')
+        claims = ai.get("claims") or []
+        for status, title in CLAIM_GROUPS:
+            bucket = [c for c in claims if c.get("status") == status]
+            if not bucket:
+                continue
+            parts.append(f"<h3>{_esc(title)} ({len(bucket)})</h3><ul>")
+            for c in bucket[:50]:
+                parts.append(f"<li><code>{_esc(c.get('offset', ''))}</code> {_esc(str(c.get('text', ''))[:240])}</li>")
+            parts.append("</ul>")
+        if not claims:
+            parts.append('<p class="empty">No claims.</p>')
+        parts.append("</section>")
+
+    parts.append('<section class="card"><h2>Limitations</h2><ul>')
+    for x in rep.get("limitations") or []:
+        parts.append(f"<li>{_esc(x)}</li>")
+    parts.append("</ul></section>")
+    parts.append('<footer>CrowbarAF - deterministic evidence first. No result here is a guarantee of safety.</footer>')
+
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrowbarAF report - {_esc(ident.get('sha256', '')[:16])}</title>
+<style>
+:root {{ --bg:#f5f7fb; --card:#fff; --text:#1d2939; --muted:#667085; --line:#e4e7ec; }}
+* {{ box-sizing:border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--text); font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }}
+header {{ max-width:1100px; margin:0 auto; padding:28px 24px 8px; display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }}
+h1 {{ margin:0; font-size:24px; letter-spacing:-.2px; }}
+h2 {{ margin:0 0 12px; font-size:16px; }}
+h3 {{ margin:18px 0 8px; font-size:14px; }}
+main {{ max-width:1100px; margin:0 auto; padding:0 24px 40px; }}
+.card {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-top:14px; box-shadow:0 1px 2px rgba(16,24,40,.04); }}
+.grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }}
+.label {{ display:block; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; }}
+code {{ font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12.5px; overflow-wrap:anywhere; }}
+pre {{ background:#0f172a; color:#e2e8f0; border-radius:8px; padding:12px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:420px; overflow:auto; }}
+.table-wrap {{ overflow:auto; }}
+table {{ width:100%; border-collapse:collapse; }}
+th, td {{ text-align:left; padding:7px 9px; border-bottom:1px solid var(--line); vertical-align:top; }}
+th {{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }}
+tr:last-child td {{ border-bottom:0; }}
+.badge {{ display:inline-block; padding:4px 10px; border-radius:999px; color:#fff; font-weight:700; }}
+.muted {{ color:var(--muted); }}
+.warn {{ color:#b54708; font-weight:600; }}
+.empty {{ color:var(--muted); }}
+details {{ margin-top:10px; }} summary {{ cursor:pointer; color:var(--muted); }}
+footer {{ max-width:1100px; margin:0 auto; padding:18px 24px 40px; color:var(--muted); font-size:12px; }}
+@media print {{ body {{ background:#fff; }} .card {{ box-shadow:none; break-inside:avoid; }} details {{ display:block; }} }}
+</style></head><body>
+{''.join(parts)}
+</body></html>"""
 
 def _from_db(sha256: str) -> dict:
     import db
