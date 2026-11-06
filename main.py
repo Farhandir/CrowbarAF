@@ -470,6 +470,8 @@ def main() -> None:
     parser.add_argument("--out", help="State JSON dosyası (verilmezse stdout)")
     parser.add_argument("--profile", choices=("core", "deep"), help="Araç profili: core/deep")
     parser.add_argument("--max-decompile", type=int, help="Ghidra top-N decompile")
+    parser.add_argument("--decompile-mode", choices=("auto", "all", "top"), default="auto",
+                        help="auto: <=300 hepsi, büyükse 300; all: hepsi; top: --max-decompile")
     parser.add_argument("--ghidra-timeout", type=int, help="Ghidra timeout (saniye)")
     parser.add_argument("--capa-timeout", type=int, help="capa timeout (saniye)")
     parser.add_argument("--floss-timeout", type=int, help="FLOSS timeout (saniye)")
@@ -484,6 +486,8 @@ def main() -> None:
         os.environ["CROWBAR_TOOL_PROFILE"] = args.profile
     if args.max_decompile is not None:
         os.environ["CROWBAR_MAX_DECOMPILE"] = str(args.max_decompile)
+    if args.decompile_mode:
+        os.environ["CROWBAR_DECOMPILE_MODE"] = args.decompile_mode
     if args.ghidra_timeout is not None:
         os.environ["CROWBAR_GHIDRA_TIMEOUT"] = str(args.ghidra_timeout)
     if args.capa_timeout is not None:

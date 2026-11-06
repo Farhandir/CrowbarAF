@@ -17,8 +17,8 @@ Mantık:
      ``__libc_``/``_Z``/``std::``/... önekleri, size < 16; is_library=True ve priority=0).
      İstisna: entry/main ve kanıt taşıyan (capa/IoC) fonksiyonlar ad/boyut sezgisiyle
      kütüphane sayılmaz (``SOFT_LIBRARY_REASONS``).
-  3. Sadece en yüksek puanlı ilk MAX_DECOMPILE (100) fonksiyon decompile edilir.
-     Puanlı fonksiyon yoksa en büyük birkaç fonksiyon (FALLBACK_DECOMPILE) denenir.
+  3. Decompile seçimi moda bağlıdır: auto (<=300 ise hepsi, büyükse 300),
+     all (hepsi) veya top (MAX_DECOMPILE). Puanlı fonksiyon yoksa fallback uygulanır.
   4. Decompile edilenlerin doğrudan callee'leri ``c_code: ""`` ile (çağrı grafiği
      bağlansın diye) çıktıya eklenir; diğer yüzlerce fonksiyon çıktıya girmez.
   5. Adressiz IoC -> fonksiyon eşleme: ``findings``'teki ip/url/domain/registry/file/email
@@ -51,6 +51,9 @@ MAX_DEFINED_DATA = int(os.environ.get("CROWBAR_MAX_DEFINED_DATA", "2000000"))  #
 
 MAX_DECOMPILE = int(os.environ.get("CROWBAR_MAX_DECOMPILE", "100"))  # Top-N
 FALLBACK_DECOMPILE = int(os.environ.get("CROWBAR_FALLBACK_DECOMPILE", "20"))
+DECOMPILE_MODE = os.environ.get("CROWBAR_DECOMPILE_MODE", "top").strip().lower()
+AUTO_ALL_CAP = int(os.environ.get("CROWBAR_AUTO_ALL_CAP", "300"))
+AUTO_TOP_N = int(os.environ.get("CROWBAR_AUTO_TOP_N", "300"))
 MAX_STUBS = 500  # c_code'suz callee kayıtlarının üst sınırı
 
 # Kütüphane/derleyici sezgisi (is_library_heuristic). Önek eşleşmesi büyük/küçük harf duyarlı.
@@ -289,13 +292,24 @@ def propagate_priority(records, hops=2):
             break
 
 
+def effective_decompile_limit(total: int) -> int:
+    """Auto: <=AUTO_ALL_CAP ise hepsi, değilse AUTO_TOP_N; all: hepsi; top: MAX_DECOMPILE."""
+    if DECOMPILE_MODE == "all":
+        return max(1, total)
+    if DECOMPILE_MODE == "auto":
+        return max(1, total if total <= AUTO_ALL_CAP else AUTO_TOP_N)
+    return max(1, MAX_DECOMPILE)
+
+
 def plan_export(records):
     """Kayıt listesinden (decompile edilecekler, c_code'suz callee kayıtları) seçer.
 
-    * priority > 0 olanlar, puana göre azalan (eşitlikte küçük fonksiyon önce), ilk MAX_DECOMPILE.
+    * mode=auto: <=300 fonksiyon ise hepsi; daha büyükse ilk 300.
+    * mode=all: tüm fonksiyonlar; mode=top: ilk MAX_DECOMPILE.
     * Hiç puanlı fonksiyon yoksa: kütüphane olmayan en büyük FALLBACK_DECOMPILE fonksiyon.
     * Seçilenlerin doğrudan (dahili) callee'leri stub olarak eklenir (en fazla MAX_STUBS).
     """
+    limit = effective_decompile_limit(len(records))
     # Kütüphane/stub kaydı ne olursa olsun puan 0: Top-N'e girip boş yere decompile
     # edilmesin, LLM token bütçesi harcamasın (propagate_priority sonrası da garanti).
     for r in records:
@@ -307,7 +321,7 @@ def plan_export(records):
     seen = set()
 
     def add(r):
-        if r["offset"] not in seen and len(chosen) < MAX_DECOMPILE:
+        if r["offset"] not in seen and len(chosen) < limit:
             chosen.append(r)
             seen.add(r["offset"])
 
@@ -323,7 +337,8 @@ def plan_export(records):
     else:
         pool = [r for r in records if not r["is_library"] and 0 < r["size"] <= LARGE_FUNCTION_BYTES]
         pool.sort(key=lambda r: (-r["size"], r["offset"]))
-        for r in pool[:FALLBACK_DECOMPILE]:
+        fallback_limit = min(FALLBACK_DECOMPILE, limit) if DECOMPILE_MODE == "top" else limit
+        for r in pool[:min(len(pool), fallback_limit)]:
             add(r)
 
     by_offset = {r["offset"]: r for r in records}

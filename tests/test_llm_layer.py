@@ -953,3 +953,37 @@ def test_fail_closed_empty_address_critical():
     out = apply_fail_closed(_summary("0x401000", False), fn, findings)
     assert out.suspicious is None
     assert out.fail_closed is True
+
+
+def test_llm_high_confidence_promotes_multiple_behavior_functions():
+    fns = [_fn(f"0x{i}", "code") for i in range(1, 4)]
+    summaries = {
+        f"0x{i}": FunctionSummary(offset=f"0x{i}", summary="persistence and network behavior",
+                                  suspicious=True, behaviors=["persistence", "network"])
+        for i in range(1, 4)
+    }
+    v = compute_verdict(fns, [], summaries)
+    assert v["verdict"] == "malicious"
+    assert v["counts"]["llm_high_confidence"] is True
+    assert v["counts"]["behavior_classes"] >= 2
+
+
+def test_llm_high_confidence_requires_three_functions():
+    fns = [_fn("0x1", "code"), _fn("0x2", "code")]
+    summaries = {
+        f"0x{i}": FunctionSummary(offset=f"0x{i}", summary="persistence and network",
+                                  suspicious=True, behaviors=["persistence", "network"])
+        for i in range(1, 3)
+    }
+    v = compute_verdict(fns, [], summaries)
+    assert v["verdict"] == "needs_review"
+
+
+def test_coverage_counts_undecompiled_functions_and_all_unknown_fails_closed():
+    fns = [_fn("0x1", "code"), _fn("0x2", ""), _fn("0x3", "")]
+    summaries = {"0x1": FunctionSummary(offset="0x1", summary="", suspicious=None)}
+    v = compute_verdict(fns, [], summaries)
+    assert v["coverage"]["total"] == 3
+    assert v["coverage"]["decompiled"] == 1
+    assert v["coverage"]["skipped"] == 2
+    assert v["verdict"] == "unknown"

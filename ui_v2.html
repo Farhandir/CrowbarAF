@@ -100,7 +100,12 @@
         <div><label>VM şifresi</label><input id="vmPass" type="password" autocomplete="off"></div>
         <div><label>VM repo yolu</label><input id="vmRepo" value="/home/kali/Desktop/CrowbarAF"></div>
         <div><label>Profil</label><select id="profile"><option value="deep">deep</option><option value="core">core</option></select></div>
-        <div><label>Max decompile</label><input id="maxDec" type="number" value="100" min="1" max="1000"></div>
+        <div><label>Decompile modu</label><select id="decompileMode">
+          <option value="auto">Auto (≤300 hepsi, büyükse 300)</option>
+          <option value="all">All (tümü)</option>
+          <option value="top">Top N (aşağıdaki sayı)</option>
+        </select></div>
+        <div><label>Max decompile (Top N)</label><input id="maxDec" type="number" value="100" min="1" max="5000"></div>
         <div><label>Ghidra timeout (sn)</label><input id="ghidraT" type="number" value="1200" min="30"></div>
         <div><label>capa timeout (sn)</label><input id="capaT" type="number" value="300" min="30"></div>
         <div><label>FLOSS timeout (sn)</label><input id="flossT" type="number" value="300" min="30"></div>
@@ -267,7 +272,7 @@ async function offlineRun() {
   form.append("vm_path", mode === "vm" ? $("#vmPath").value.trim() : "");
   if (mode === "host") form.append("file", file);
   for (const [k, id] of [["vm_name","#vmName"],["vm_user","#vmUser"],["vm_password","#vmPass"],
-                         ["repo_dir","#vmRepo"],["profile","#profile"],["max_decompile","#maxDec"],
+                         ["repo_dir","#vmRepo"],["profile","#profile"],["decompile_mode","#decompileMode"],["max_decompile","#maxDec"],
                          ["ghidra_timeout","#ghidraT"],["capa_timeout","#capaT"],["floss_timeout","#flossT"],
                          ["ghidra_dir","#ghidraDir"],["capa_rules","#capaRules"],["yara_rules","#yaraRules"]]) {
     form.append(k, $(id).value);

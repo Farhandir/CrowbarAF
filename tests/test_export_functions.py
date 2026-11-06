@@ -799,3 +799,21 @@ class TestLibraryScoringAndExclusion:
         fake_ghidra(_Program([], {}, [_Func(0x401000, size=64, name="FUN_t", thunk=True)]))
         (rec,) = ef.collect_records({"0x401000": ["rule"]}, set(), {"0x401000": ["10.0.0.1"]})
         assert rec["is_library"] is True and rec["priority"] == 0
+
+
+class TestAutoDecompile:
+    def test_auto_decompiles_all_under_cap(self, monkeypatch) -> None:
+        monkeypatch.setattr(ef, "DECOMPILE_MODE", "auto")
+        monkeypatch.setattr(ef, "AUTO_ALL_CAP", 300)
+        monkeypatch.setattr(ef, "AUTO_TOP_N", 300)
+        records = [_rec(f"0x{i}", priority=1) for i in range(170)]
+        chosen, _ = ef.plan_export(records)
+        assert len(chosen) == 170
+
+    def test_auto_caps_large_programs(self, monkeypatch) -> None:
+        monkeypatch.setattr(ef, "DECOMPILE_MODE", "auto")
+        monkeypatch.setattr(ef, "AUTO_ALL_CAP", 300)
+        monkeypatch.setattr(ef, "AUTO_TOP_N", 300)
+        records = [_rec(f"0x{i}", priority=1) for i in range(301)]
+        chosen, _ = ef.plan_export(records)
+        assert len(chosen) == 300

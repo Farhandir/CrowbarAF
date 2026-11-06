@@ -14,6 +14,7 @@ escalates the verdict to needs_review (and still overrides a benign LLM verdict)
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 
 from .types import Finding, FunctionInfo, FunctionSummary
@@ -32,6 +33,20 @@ HIGH_AUTHORITY = {"yara"}
 # Dual-use / supporting signals: they can require review, not a malicious verdict.
 MEDIUM_AUTHORITY = {"capa", "import_combo", "ioc"}
 CONFIDENCE_FLOOR = 0.7
+LLM_MIN_SUSPICIOUS = int(os.getenv("CROWBAR_LLM_MIN_SUSPICIOUS", "3"))
+LLM_MIN_BEHAVIORS = int(os.getenv("CROWBAR_LLM_MIN_BEHAVIORS", "2"))
+LLM_MIN_COVERAGE = float(os.getenv("CROWBAR_LLM_MIN_COVERAGE", "0.6"))
+
+# LLM summaries are one signal; multiple distinct behavior classes are required
+# before a single-source LLM verdict may be promoted to malicious.
+BEHAVIOR_KEYWORDS = {
+    "persistence": ("persist", "cron", "systemd", "rc.local", "watchdog", "init"),
+    "execution": ("exec", "system(", "shell", "spawn", "fork", "subprocess"),
+    "network": ("socket", "connect", "c2", "http", "dns", "bot", "network"),
+    "process": ("kill", "process", "pid", "locker", "watchdog"),
+    "file": ("file", "unlink", "delete", "hidden", "copy", "drop"),
+    "memory": ("mmap", "memory", "inject", "virtualalloc", "protect"),
+}
 
 
 def finding_id(f: Finding) -> str:
@@ -115,9 +130,13 @@ def compute_verdict(
     summaries = summaries or {}
     tool_failures = [x for x in (tool_failures or []) if x]
     analysis_failures = [x for x in (analysis_failures or []) if x]
-    analyzable = [f for f in functions if (f.c_code or "").strip() and not f.is_library]
-    analyzed = [f for f in analyzable if f.offset in summaries]
-    total = len(analyzable)
+    # Coverage is over the whole analyzed surface, not only decompiled functions.
+    # Empty c_code records are call-graph stubs; they still count as skipped
+    # functions so a 100/170 run cannot be reported as 100% coverage.
+    total_functions = [f for f in functions if not f.is_library]
+    decompiled = [f for f in total_functions if (f.c_code or "").strip()]
+    analyzed = [f for f in decompiled if f.offset in summaries]
+    total = len(total_functions)
     coverage = round(len(analyzed) / total, 3) if total else 0.0
 
     susp = [f for f in analyzed if summaries[f.offset].suspicious is True]
@@ -154,6 +173,25 @@ def compute_verdict(
     strong = signals & {"llm", "yara", "c2"}
     two_signal = len(signals) >= 2 and bool(strong)
 
+    # LLM-only high-confidence tier: several suspicious functions and multiple
+    # distinct behavior classes, with enough coverage. This is still one source;
+    # it is deliberately gated and configurable, not a replacement for C.
+    behavior_classes: set[str] = set()
+    for fn in susp:
+        summary = summaries[fn.offset]
+        for behavior in (summary.behaviors or []):
+            norm = re.sub(r"\s+", " ", str(behavior).strip().lower())
+            if norm:
+                behavior_classes.add(norm)
+        text = (summary.summary or "").lower()
+        for label, words in BEHAVIOR_KEYWORDS.items():
+            if any(word in text for word in words):
+                behavior_classes.add(label)
+    llm_high = (require_two_signals and bool(susp)
+                and len(susp) >= LLM_MIN_SUSPICIOUS
+                and len(behavior_classes) >= LLM_MIN_BEHAVIORS
+                and coverage >= LLM_MIN_COVERAGE)
+
     conflicts = []
     if high or susp:
         conflicts = [
@@ -165,9 +203,13 @@ def compute_verdict(
     unknown_reasons: list[str] = []
     next_actions: list[str] = []
 
-    if require_two_signals and two_signal:
+    if require_two_signals and (two_signal or llm_high):
         verdict = MALICIOUS
-        reasons.append("corroborated signals: " + ", ".join(sorted(signals)))
+        if two_signal:
+            reasons.append("corroborated signals: " + ", ".join(sorted(signals)))
+        else:
+            reasons.append(f"LLM high-confidence: {len(susp)} suspicious function(s), "
+                           f"{len(behavior_classes)} behavior class(es)")
     elif require_two_signals and strong:
         verdict = NEEDS_REVIEW
         reasons.append("single strong signal (" + ", ".join(sorted(strong))
@@ -191,6 +233,9 @@ def compute_verdict(
     elif low:
         verdict = NEEDS_REVIEW
         reasons.append(f"{len(low)} C2-like string(s) without corroborating code evidence")
+    elif analyzed and len(unknown_fns) == len(analyzed):
+        verdict = UNKNOWN
+        unknown_reasons.append("all analyzed functions returned unknown")
     elif total == 0:
         verdict = UNKNOWN
         unknown_reasons.append("no analyzable functions")
@@ -236,6 +281,7 @@ def compute_verdict(
         "next_actions": next_actions,
         "coverage": {
             "total": total,
+            "decompiled": len(decompiled),
             "analyzed": len(analyzed),
             "skipped": total - len(analyzed),
             "ratio": coverage,
@@ -254,6 +300,11 @@ def compute_verdict(
             "signals": sorted(signals),
             "two_signal": two_signal,
             "single_strong_signal": bool(strong) and not two_signal,
+            "llm_high_confidence": llm_high,
+            "behavior_classes": len(behavior_classes),
+            "total_functions": total,
+            "decompiled_functions": len(decompiled),
+            "skipped_functions": total - len(analyzed),
         },
         "critical_findings": [
             {"id": finding_id(f), "source": f.source, "kind": f.kind,

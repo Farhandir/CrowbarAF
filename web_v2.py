@@ -277,6 +277,7 @@ def offline_analyze(
     capa_rules: str = Form("/home/kali/.local/share/capa-rules"),
     yara_rules: str = Form("/home/kali/.local/share/crowbar/yara_rules"),
     profile: str = Form("deep"),
+    decompile_mode: str = Form("auto"),
     max_decompile: int = Form(100),
     ghidra_timeout: int = Form(1200),
     capa_timeout: int = Form(300),
@@ -284,6 +285,8 @@ def offline_analyze(
 ) -> dict[str, Any]:
     if profile not in ("core", "deep"):
         raise HTTPException(status_code=400, detail="profile must be core or deep")
+    if decompile_mode not in ("auto", "all", "top"):
+        raise HTTPException(status_code=400, detail="decompile_mode must be auto, all or top")
     if source_mode not in ("host", "vm"):
         raise HTTPException(status_code=400, detail="source_mode must be host or vm")
     if not vm_name.strip() or not vm_user.strip() or not vm_password:
@@ -324,7 +327,8 @@ def offline_analyze(
     options = dict(
         remote_sample=options_remote_sample,
         profile=profile,
-        max_decompile=max(1, min(int(max_decompile), 1000)),
+        decompile_mode=decompile_mode,
+        max_decompile=max(1, min(int(max_decompile), 5000)),
         ghidra_timeout=max(30, int(ghidra_timeout)),
         capa_timeout=max(30, int(capa_timeout)),
         floss_timeout=max(30, int(floss_timeout)),
