@@ -1,4 +1,4 @@
-"""LLM katmani orkestrasyonu: bottom-up, seviye-seviye paralel ozetleme + onbellek."""
+"""LLM layer orchestration: bottom-up, level-by-level parallel summarization + cache."""
 from __future__ import annotations
 
 import time
@@ -52,14 +52,14 @@ def analyze(
     low_priority_threshold: int = 1,
     min_priority: int = 0,
 ) -> AnalysisResult:
-    """Tum fonksiyonlari bottom-up ozetler.
+    """Summarize all functions bottom-up.
 
-    budget_tokens       : fonksiyon basina context butcesi
-    total_budget_tokens : (ops.) kosu icin secim butcesi; dusuk oncelikler atlanir
-    max_workers         : ayni seviyedeki bagimsiz fonksiyonlar icin paralellik
+    budget_tokens       : per-function context budget
+    total_budget_tokens : (optional) selection budget for the run; low priorities are skipped
+    max_workers         : parallelism for independent functions at the same level
     cache               : SummaryCache (memoization)
-    low_priority_budget : (ops.) esik altindaki fonksiyonlar icin kucuk butce
-                          (SKIP yerine yumusak eleme)
+    low_priority_budget : (optional) small budget for functions below the threshold
+                          (soft elimination instead of SKIP)
     """
     tracer = tracer or Tracer(
         model=getattr(client, "model", ""), provider=getattr(client, "provider", ""),
@@ -95,7 +95,7 @@ def analyze(
     for level_idx, level in enumerate(levels):
         tasks = [off for scc in level for off in scc]
         tracer.event("level", level=level_idx, tasks=len(tasks))
-        snapshot = dict(result.summaries)  # ayni seviyedekiler birbirini etkilemesin
+        snapshot = dict(result.summaries)  # functions at the same level must not affect each other
 
         def run_one(offset: str):
             fn = by_offset[offset]
@@ -130,7 +130,7 @@ def analyze(
             fn = by_offset[offset]
             if error or summary is None:
                 result.failures.append(f"{offset}: {error}")
-                result.summaries[offset] = FunctionSummary(offset=offset, summary="(analiz edilemedi)")
+                result.summaries[offset] = FunctionSummary(offset=offset, summary="(could not be analyzed)")
                 tracer.event("error", offset=offset, error=(error or "")[:200])
                 continue
             cached = bool(stats.get("cached"))

@@ -1,4 +1,4 @@
-"""entry_node ve yardımcıları (sha256, DIE ayrıştırma, rota kararı) için birim testleri."""
+"""Unit tests for entry_node and its helpers (sha256, DIE parsing, route decision)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ OS_WIN64 = {
 
 class TestComputeSha256:
     def test_matches_hashlib(self, tmp_path) -> None:
-        data = b"crowbar" * 500_000  # birden fazla chunk
+        data = b"crowbar" * 500_000  # multiple chunks
         path = tmp_path / "a.bin"
         path.write_bytes(data)
         assert compute_sha256(str(path)) == hashlib.sha256(data).hexdigest()
@@ -37,7 +37,7 @@ class TestComputeSha256:
         assert compute_sha256(str(path)) == hashlib.sha256(b"").hexdigest()
 
     def test_missing_file_returns_empty_string(self, tmp_path) -> None:
-        assert compute_sha256(str(tmp_path / "yok")) == ""
+        assert compute_sha256(str(tmp_path / "missing")) == ""
 
 
 class TestParseDieReport:
@@ -139,7 +139,7 @@ class TestRunYara:
         assert run_yara("x.exe") == []
 
     def test_missing_rules_dir_returns_empty(self, tmp_path) -> None:
-        assert run_yara("x.exe", str(tmp_path / "yok")) == []
+        assert run_yara("x.exe", str(tmp_path / "missing")) == []
 
 
 class TestEntryNode:
@@ -178,7 +178,7 @@ class TestEntryNode:
         assert sample.sha256
 
     def test_missing_file_does_not_crash(self, tmp_path) -> None:
-        out = entry_node(AgentState(file_path=str(tmp_path / "yok.exe")))
+        out = entry_node(AgentState(file_path=str(tmp_path / "missing.exe")))
         assert out["sample"].sha256 == ""
         assert out["route_flag"] == "native"
 
@@ -191,7 +191,7 @@ class TestUnpackNativeNode:
     @pytest.mark.parametrize("packer", ["unknown", "none", "ASPack", ""])
     def test_non_upx_does_nothing(self, tmp_path, monkeypatch, packer: str) -> None:
         def boom(*a, **k):
-            raise AssertionError("upx çağrılmamalı")
+            raise AssertionError("upx must not be called")
 
         monkeypatch.setattr(nodes.subprocess, "run", boom)
         assert nodes.unpack_native_node(self._state(tmp_path / "a.exe", packer)) == {}
@@ -215,7 +215,7 @@ class TestUnpackNativeNode:
         cmd, kwargs = calls[0]
         assert cmd == ["upx", "-d", "-o", str(src) + ".unpacked", str(src)]
         assert kwargs["timeout"] == 60
-        assert src.read_bytes() == b"packed"  # orijinal bozulmadı
+        assert src.read_bytes() == b"packed"  # original file was not modified
 
     def test_stale_output_is_removed_before_run(self, tmp_path, monkeypatch) -> None:
         src = tmp_path / "a.exe"

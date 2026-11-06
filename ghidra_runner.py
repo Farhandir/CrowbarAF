@@ -1,8 +1,8 @@
-"""Ghidra analyzeHeadless orkestratörü (Python 3.12).
+"""Ghidra analyzeHeadless orchestrator (Python 3.12).
 
-``export_functions.py`` betiğini (PyGhidra / Python 3) analyzeHeadless ile
-çalıştırır. Betik dosyadaki tüm fonksiyonları puanlar, en yüksek puanlıları
-decompile eder ve sonucu ``DecompiledFunction`` listesi olarak döndürür.
+Runs the ``export_functions.py`` script (PyGhidra / Python 3) with analyzeHeadless.
+The script scores all functions in the file, decompiles the highest-scoring ones,
+and returns the result as a list of ``DecompiledFunction``.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _find_analyze_headless() -> str | None:
-    """analyzeHeadless(.bat) yürütülebilirini PATH'te veya GHIDRA_INSTALL_DIR altında arar."""
+    """Searches PATH and GHIDRA_INSTALL_DIR for the analyzeHeadless(.bat) executable."""
     exe = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
 
     found = shutil.which(exe)
@@ -50,7 +50,7 @@ def _finding_to_dict(finding: BaseModel | dict[str, Any]) -> dict[str, Any]:
 
 
 def _install_dir_from(analyze_headless: str) -> str | None:
-    """analyzeHeadless yolundan (veya env'den) Ghidra kurulum dizinini bulur."""
+    """Finds the Ghidra installation directory from the analyzeHeadless path (or env)."""
     env = os.environ.get("GHIDRA_INSTALL_DIR")
     if env:
         return env
@@ -60,10 +60,10 @@ def _install_dir_from(analyze_headless: str) -> str | None:
 
 
 def _pyghidra_launcher(install_dir: str | None) -> str | None:
-    """PyGhidra headless launcher'ini dondurur (varsa).
+    """Returns the PyGhidra headless launcher (if present).
 
-    export_functions.py PyGhidra (Python 3) oldugu icin duz analyzeHeadless
-    ile calismaz; launcher -H ile AnalyzeHeadless'i PyGhidra ile baslatir.
+    export_functions.py is PyGhidra (Python 3), so it does not work with plain analyzeHeadless;
+    the launcher starts AnalyzeHeadless with PyGhidra via -H.
     """
     if not install_dir:
         return None
@@ -78,26 +78,26 @@ def run_ghidra(
     findings: list[BaseModel | dict[str, Any]] | None = None,
     decoded_hints: list[dict[str, Any]] | None = None,
 ) -> list[DecompiledFunction]:
-    """Hedef dosyayı Ghidra ile analiz eder; öncelikli fonksiyonları decompile eder.
+    """Analyzes the target file with Ghidra; decompiles priority functions.
 
-    ``hints``: capa adres ipuçları (``[{"offset", "rule"}]``).
-    ``findings``: ``state.findings``; betik ``import_combo`` bulgularını fonksiyon
-    önceliğine yansıtmak için kullanır.
-    ``decoded_hints``: FLOSS ``decoded_at``/``function`` metadata'sı; decoded-only
-    string'leri fonksiyona bağlamak için.
+    ``hints``: capa address hints (``[{"offset", "rule"}]``).
+    ``findings``: ``state.findings``; the script uses it to reflect ``import_combo`` findings
+    in function priority.
+    ``decoded_hints``: FLOSS ``decoded_at``/``function`` metadata; used to bind decoded-only
+    strings to functions.
 
-    ``hints`` ve ``findings`` boş olsa bile Ghidra çalıştırılır; betik tüm
-    fonksiyonları tarayıp kendi önceliklendirmesini yapar. Hata, timeout veya
-    Ghidra'nın bulunamaması durumunda çökmez; ``[]`` döndürür.
+    Ghidra is run even if ``hints`` and ``findings`` are empty; the script scans all
+    functions and performs its own prioritization. It does not crash on error, timeout or
+    when Ghidra is not found; it returns ``[]``.
     """
-    # TemporaryDirectory context manager yerine elle yönetilir: finally'de
-    # temizlik garanti edilir ve Windows'ta kilitli dosyalar çökmeye yol açmaz.
+    # Managed manually instead of using a TemporaryDirectory context manager: cleanup is
+    # guaranteed in finally, and locked files on Windows do not cause a crash.
     temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     try:
         analyze_headless = _find_analyze_headless()
         if analyze_headless is None:
             logger.error(
-                "[run_ghidra] analyzeHeadless bulunamadı (PATH veya GHIDRA_INSTALL_DIR kontrol edin)"
+                "[run_ghidra] analyzeHeadless not found (check PATH or GHIDRA_INSTALL_DIR)"
             )
             return []
 
@@ -110,7 +110,7 @@ def run_ghidra(
             "findings": [_finding_to_dict(f) for f in findings or []],
             # FLOSS decoded/tight string -> function metadata (Ghidra xref)
             "decoded_hints": decoded_hints or [],
-            # import_combo bulgusu -> API isimleri (betik kuralları bilmek zorunda kalmasın)
+            # import_combo finding -> API names (so the script does not have to know the rules)
             "combo_apis": combo_api_map(),
         }
         with open(input_json_path, "w", encoding="utf-8") as fh:
@@ -121,7 +121,7 @@ def run_ghidra(
             GHIDRA_PROJECT_NAME,
             "-import",
             file_path,
-            # Betik varsayılan Ghidra script dizinlerinde olmadığı için gerekli
+            # Required because the script is not in Ghidra's default script directories
             "-scriptPath",
             SCRIPT_DIR,
             "-postScript",
@@ -133,12 +133,12 @@ def run_ghidra(
         install_dir = _install_dir_from(analyze_headless)
         launcher = _pyghidra_launcher(install_dir)
         if launcher:
-            # export_functions.py PyGhidra (Python 3): AnalyzeHeadless'i PyGhidra ile baslat
+            # export_functions.py is PyGhidra (Python 3): start AnalyzeHeadless with PyGhidra
             cmd = [sys.executable, launcher, str(install_dir), "-H", "--console", *analyze_args]
         else:
             logger.warning(
-                "[run_ghidra] PyGhidra launcher bulunamadi; duz analyzeHeadless denenecek "
-                "(PyGhidra script'i calismayabilir)"
+                "[run_ghidra] PyGhidra launcher not found; trying plain analyzeHeadless "
+                "(the PyGhidra script may not work)"
             )
             cmd = [analyze_headless, *analyze_args]
 
@@ -152,20 +152,20 @@ def run_ghidra(
             check=False,
         )
         if proc.returncode != 0:
-            tail = (proc.stderr.strip() or proc.stdout.strip() or "çıktı yok")[-500:]
+            tail = (proc.stderr.strip() or proc.stdout.strip() or "no output")[-500:]
             logger.error(
-                "[run_ghidra] analyzeHeadless %s koduyla çıktı: %s", proc.returncode, tail
+                "[run_ghidra] analyzeHeadless exited with code %s: %s", proc.returncode, tail
             )
             return []
 
         if not os.path.isfile(out_json_path):
-            logger.error("[run_ghidra] Ghidra çıktı dosyası (out.json) üretmedi")
+            logger.error("[run_ghidra] Ghidra did not produce an output file (out.json)")
             return []
 
         with open(out_json_path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
         if not isinstance(raw, list):
-            logger.error("[run_ghidra] out.json beklenmeyen yapıda (liste değil)")
+            logger.error("[run_ghidra] out.json has an unexpected structure (not a list)")
             return []
 
         functions: list[DecompiledFunction] = []
@@ -173,18 +173,18 @@ def run_ghidra(
             try:
                 functions.append(DecompiledFunction(**item))
             except (ValidationError, TypeError) as exc:
-                logger.warning("[run_ghidra] geçersiz fonksiyon kaydı atlandı: %s", exc)
+                logger.warning("[run_ghidra] skipped invalid function record: %s", exc)
         return functions
 
     except subprocess.TimeoutExpired:
-        logger.error("[run_ghidra] Ghidra %d saniye içinde tamamlanamadı (timeout)", GHIDRA_TIMEOUT_SECONDS)
+        logger.error("[run_ghidra] Ghidra did not finish within %d seconds (timeout)", GHIDRA_TIMEOUT_SECONDS)
     except FileNotFoundError as exc:
-        logger.error("[run_ghidra] analyzeHeadless veya hedef dosya bulunamadı: %s", exc)
+        logger.error("[run_ghidra] analyzeHeadless or the target file was not found: %s", exc)
     except json.JSONDecodeError as exc:
-        logger.error("[run_ghidra] out.json ayrıştırılamadı: %s", exc)
-    except Exception as exc:  # noqa: BLE001 - iş akışı hiçbir koşulda çökmemeli
-        logger.error("[run_ghidra] beklenmeyen hata: %s: %s", type(exc).__name__, exc)
+        logger.error("[run_ghidra] could not parse out.json: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - the workflow must never crash
+        logger.error("[run_ghidra] unexpected error: %s: %s", type(exc).__name__, exc)
     finally:
-        temp.cleanup()  # temp klasör + ghidra_input.json/out.json mutlaka silinir
+        temp.cleanup()  # the temp folder + ghidra_input.json/out.json are always deleted
 
     return []

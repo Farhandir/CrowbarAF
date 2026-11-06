@@ -113,12 +113,12 @@ def write_state(state: AgentState, path: str | Path) -> Path:
 
 
 def persist_state(state: AgentState, db_path: str | None = None) -> dict:
-    """Host'ta biten analizi SQLite'a yazar (UI/``report.py --db`` görsün diye).
+    """Writes the host-completed analysis to SQLite (so the UI/``report.py --db`` can see it).
 
-    Sample, bulgular, fonksiyonlar (``llm_summary`` dahil), çağrı kenarları ve
-    ``llm_claims`` (rapor + ``verdict``) ``db.save_analysis`` ile kalıcı olur.
-    ``sample.sha256`` boşsa ``ValueError`` fırlatır. Sadece **host** tarafında
-    çağrılır; analiz VM'i ``--no-db`` ile hiç veritabanına dokunmaz.
+    Sample, findings, functions (including ``llm_summary``), call edges and
+    ``llm_claims`` (report + ``verdict``) are persisted via ``db.save_analysis``.
+    Raises ``ValueError`` if ``sample.sha256`` is empty. Only called on the
+    **host** side; the analysis VM never touches the database (``--no-db``).
     """
     return db.save_analysis(state, db_path)
 

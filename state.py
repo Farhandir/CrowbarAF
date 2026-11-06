@@ -1,4 +1,4 @@
-"""LangGraph düğümleri arasında taşınan ortak durum (State) tanımı."""
+"""Common state (State) definition carried between LangGraph nodes."""
 
 from __future__ import annotations
 
@@ -10,154 +10,154 @@ RouteFlag = Literal["python", "dotnet", "native", "fast_track"]
 
 
 class DecompiledFunction(BaseModel):
-    """Ghidra'dan çıkan fonksiyon bazlı decompile çıktısı ve LLM analizi."""
+    """Function-level decompile output from Ghidra and its LLM analysis."""
 
     offset: str = Field(
         ...,
-        description='Fonksiyonun Entry Point adresi (hint adresi değil), örn: "0x1000".',
+        description='Entry Point address of the function (not the hint address), e.g. "0x1000".',
     )
     size: int = Field(
         default=0,
-        description="Fonksiyonun bayt cinsinden boyutu.",
+        description="Size of the function in bytes.",
     )
     is_library: bool = Field(
         default=False,
-        description="Ghidra thunk/kütüphane fonksiyonu bayrağı.",
+        description="Ghidra thunk/library function flag.",
     )
     callees: list[str] = Field(
         default_factory=list,
-        description='Bu fonksiyonun çağırdığı fonksiyonların Entry Point adresleri, örn: ["0x1000"].',
+        description='Entry Point addresses of functions called by this function, e.g. ["0x1000"].',
     )
     xrefs: list[str] = Field(
         default_factory=list,
-        description="Bu fonksiyona referans veren adresler (çağrı yerleri).",
+        description="Addresses referencing this function (call sites).",
     )
     decompile_warnings: list[str] = Field(
         default_factory=list,
-        description="Decompile güvenini düşüren uyarılar.",
+        description="Warnings that reduce decompile confidence.",
     )
     name: str = Field(
         default="FUN_1000",
-        description="Fonksiyon adı/sembolü.",
+        description="Function name/symbol.",
     )
     priority: int = Field(
         default=0,
-        description="Ghidra öncelik puanı. Capa eşleşmesi olan fonksiyonlar +5 puan alır.",
+        description="Ghidra priority score. Functions with a capa match get +5 points.",
     )
     c_code: str = Field(
         default="",
-        description="Ghidra analyzeHeadless tarafından çıkarılan Pseudo-C kodu.",
+        description="Pseudo-C code produced by Ghidra analyzeHeadless.",
     )
     capa_hits: list[str] = Field(
         default_factory=list,
-        description="Bu spesifik fonksiyonda eşleşen Capa kural isimleri.",
+        description="Names of Capa rules matching in this specific function.",
     )
     iocs: list[str] = Field(
         default_factory=list,
-        description="Bu fonksiyonun string referansıyla kullandığı IoC değerleri (Ghidra string->fonksiyon eşlemesi).",
+        description="IoC values used by this function via string references (Ghidra string->function mapping).",
     )
     llm_summary: str = Field(
         default="",
-        description="Reverser Agent'ın bu fonksiyon için ürettiği analiz özeti.",
+        description="Analysis summary produced by the Reverser Agent for this function.",
     )
 
 
 class SampleInfo(BaseModel):
-    """Analiz edilen örneğin kimliği ve ön tarama (entry_node) özeti."""
+    """Identity of the analyzed sample and the pre-scan (entry_node) summary."""
 
-    sha256: str = Field(default="", description="Dosyanın SHA-256 özeti (hex).")
+    sha256: str = Field(default="", description="SHA-256 digest of the file (hex).")
     file_type: str = Field(default="unknown", description="PE | ELF | Mach-O | ...")
     route: str = Field(
         default="native",
-        description="python | dotnet | native | fast_track (route_flag ile aynı değer).",
+        description="python | dotnet | native | fast_track (same value as route_flag).",
     )
-    packer: str = Field(default="unknown", description='UPX | none | ... ("unknown": tespit yapılamadı).')
+    packer: str = Field(default="unknown", description='UPX | none | ... ("unknown": detection failed).')
     arch: str = Field(default="unknown", description="x86 | x86-64 | arm64 | ...")
 
 
 class Finding(BaseModel):
-    """Deterministik bir araç bulgusu (LLM katmanının kanıt kaynağı)."""
+    """A deterministic tool finding (evidence source for the LLM layer)."""
 
     source: str = Field(
         ...,
-        description='Bulguyu üreten kaynak: "yara", "floss", "capa", "pefile_entropy", "import_combo"...',
+        description='Source that produced the finding: "yara", "floss", "capa", "pefile_entropy", "import_combo"...',
     )
     kind: str = Field(
         ...,
-        description='Bulgu türü: "rule", "ip", "url", "high_entropy", "behavior"...',
+        description='Finding type: "rule", "ip", "url", "high_entropy", "behavior"...',
     )
     value: str = Field(
         ...,
-        description="Eşleşen kural adı, IP adresi, API kombosu vb.",
+        description="Matched rule name, IP address, API combo, etc.",
     )
     address: str = Field(
         default="",
-        description='Varsa bellek adresi (örn. "0x401000"); yoksa boş.',
+        description='Memory address if any (e.g. "0x401000"); empty otherwise.',
     )
     confidence: float = Field(
         default=1.0,
         ge=0.0,
         le=1.0,
-        description="0-1 arası güven; deterministik araçlar için 1.0.",
+        description="Confidence between 0 and 1; 1.0 for deterministic tools.",
     )
     finding_id: str = Field(
         default="",
-        description="Bulgunun deterministik kimliği: md5(source_kind_value_address)[:8] "
-                    "(static_feature_node atar).",
+        description="Deterministic ID of the finding: md5(source_kind_value_address)[:8] "
+                    "(set by static_feature_node).",
     )
     verified: bool = Field(
         default=True,
-        description="Bulgu binary'de gerçekten var mı? Statik olarak çıkarılan metin IoC'leri "
-                    "(ip/url/domain/email) dosya byte'larında (UTF-8/UTF-16LE) bulunamazsa False; "
-                    "kontrol edilemeyen türler True kalır.",
+        description="Does the finding really exist in the binary? False if a statically extracted text IoC "
+                    "(ip/url/domain/email) cannot be found in the file bytes (UTF-8/UTF-16LE); "
+                    "types that cannot be checked stay True.",
     )
 
 
 class AgentState(BaseModel):
-    """Tüm analiz hattı boyunca akan durum nesnesi.
+    """State object flowing through the entire analysis pipeline.
 
-    Düğümler bu nesnenin tamamını değil, sadece güncellemek istedikleri
-    alanları içeren bir ``dict`` döndürür (LangGraph bunları birleştirir).
+    Nodes return a ``dict`` containing only the fields they want to update,
+    not the whole object (LangGraph merges them).
     """
 
-    # Girdi
+    # Input
     file_path: str
 
-    # entry_node çıktısı: sha256, dosya türü, mimari, paketleyici, rota
+    # entry_node output: sha256, file type, architecture, packer, route
     sample: SampleInfo = Field(default_factory=SampleInfo)
 
-    # YARA kural eşleşmeleri, ör. {"rule": "...", "tags": [...], "meta": {...}}
+    # YARA rule matches, e.g. {"rule": "...", "tags": [...], "meta": {...}}
     yara_results: list[dict[str, Any]] = Field(default_factory=list)
 
-    # FLOSS çıktıları (static / stack / tight / decoded stringler)
+    # FLOSS outputs (static / stack / tight / decoded strings)
     extracted_strings: list[str] = Field(default_factory=list)
 
-    # capa çıktıları: MITRE ATT&CK taktikleri ve fonksiyon offset'leri
+    # capa outputs: MITRE ATT&CK tactics and function offsets
     capabilities: dict[str, Any] = Field(default_factory=dict)
 
-    # Tüm deterministik bulgular (yara, capa, floss, entropy, import combo).
-    # LLM katmanı kanıtı doğrudan buradan okur.
+    # All deterministic findings (yara, capa, floss, entropy, import combo).
+    # The LLM layer reads evidence directly from here.
     findings: list[Finding] = Field(default_factory=list)
 
-    # Capa -> Ghidra hedef adresleri,
-    # ör. [{"offset": "0x1000", "rule": "encrypt data using AES"}]
+    # Capa -> Ghidra target addresses,
+    # e.g. [{"offset": "0x1000", "rule": "encrypt data using AES"}]
     ghidra_hints: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Capa düğümünün Ghidra'ya decompile için aktardığı hedef adresler.",
+        description="Target addresses the Capa node passes to Ghidra for decompilation.",
     )
 
     floss_hints: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="FLOSS decoded/tight string -> fonksiyon/adres metadata'sı (Ghidra xref için).",
+        description="FLOSS decoded/tight string -> function/address metadata (for Ghidra xref).",
     )
 
-    # Decompile edilmiş fonksiyonlar (Ghidra; fonksiyon bazlı Pseudo-C + LLM özeti)
+    # Decompiled functions (Ghidra; function-level Pseudo-C + LLM summary)
     source_code: list[DecompiledFunction] = Field(
         default_factory=list,
-        description="Fonksiyon bazlı decompile çıktıları.",
+        description="Function-level decompile outputs.",
     )
 
-    # AI ajanlarının ürettiği ara çıktılar
+    # Intermediate outputs produced by the AI agents
     iocs: dict[str, list[str]] = Field(default_factory=dict)  # ai_extractor_agent
     intent_analysis: str = ""  # ai_reverser_agent
     verdict: dict[str, Any] = Field(
@@ -165,8 +165,8 @@ class AgentState(BaseModel):
         description="Deterministic file-level verdict (malicious/needs_review/unknown/no_evidence).",
     )
 
-    # Nihai sentez raporu (JSON / Markdown)
+    # Final synthesis report (JSON / Markdown)
     analysis_report: str = ""
 
-    # Yönlendirme bayrağı; entry_node tarafından belirlenir
+    # Routing flag; set by entry_node
     route_flag: RouteFlag | None = None

@@ -1,4 +1,4 @@
-"""nodes.py içindeki saf (dış araç gerektirmeyen) mantık için birim testleri."""
+"""Unit tests for the pure logic in nodes.py (no external tools required)."""
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ class TestFilterIocs:
     @pytest.mark.parametrize(
         "text",
         [
-            # URL'ler
+            # URLs
             "http://evil.com/a",
             "https://evil.com/payload.bin",
             "tcp://1.2.3.4:4444",
-            "HTTP://EVIL.COM",  # büyük/küçük harf duyarsız
+            "HTTP://EVIL.COM",  # case-insensitive
             # IPv4
             "10.0.0.1",
             "connect to 192.168.1.255 now",
             "255.255.255.255",
-            # Dosya uzantıları
+            # File extensions
             "C:\\Windows\\Temp\\a.dll",
             "malware.exe",
             "driver.sys",
@@ -47,13 +47,13 @@ class TestFilterIocs:
             "hello world",
             "",
             "   ",
-            "1.2.3.4.5",  # sürüm numarası
-            "999.1.1.1",  # geçersiz oktet
+            "1.2.3.4.5",  # version number
+            "999.1.1.1",  # invalid octet
             "256.256.256.256",
-            "x.dllfoo",  # uzantı kelimenin parçası
-            ".exe",  # dosya adı yok
+            "x.dllfoo",  # extension is part of the word
+            ".exe",  # no file name
             "aaaaaaaaaaaaaaaa",
-            "ftp://example.com",  # istenen şemalar dışında
+            "ftp://example.com",  # outside the requested schemes
         ],
     )
     def test_drops_garbage(self, text: str) -> None:

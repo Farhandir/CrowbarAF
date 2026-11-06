@@ -1,7 +1,7 @@
-"""Bottom-up gezinme: call graph -> SCC'ler -> callee-once seviyeler.
+"""Bottom-up traversal: call graph -> SCCs -> callee-first levels.
 
-`scc_levels`: ayni seviyedeki SCC'ler birbirinden bagimsizdir (paralel islenebilir).
-Donguler (recursion) icin SCC'ler sozlesir; her SCC tek birim gibi islenir.
+`scc_levels`: SCCs at the same level are independent of each other (can be processed in parallel).
+For cycles (recursion) SCCs are contracted; each SCC is processed as a single unit.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _kosaraju(adj: dict[str, list[str]]) -> tuple[list[list[str]], dict[str, int
     if not nodes:
         return [], {}
 
-    # 1) bitis sirasi (iteratif DFS)
+    # 1) finish order (iterative DFS)
     visited: set[str] = set()
     order: list[str] = []
     for s in nodes:
@@ -40,13 +40,13 @@ def _kosaraju(adj: dict[str, list[str]]) -> tuple[list[list[str]], dict[str, int
                 order.append(v)
                 stack.pop()
 
-    # 2) ters grafik
+    # 2) reverse graph
     radj: dict[str, list[str]] = {n: [] for n in nodes}
     for v in nodes:
         for w in adj[v]:
             radj[w].append(v)
 
-    # 3) SCC'ler
+    # 3) SCCs
     comp: dict[str, int] = {}
     comps: list[list[str]] = []
     for s in reversed(order):
@@ -81,9 +81,9 @@ def _condensation(adj: dict[str, list[str]], comp: dict[str, int], n: int) -> tu
 
 
 def scc_levels(functions: list[FunctionInfo]) -> list[list[list[str]]]:
-    """SCC'leri **seviye seviye** dondurur (seviye 0 = yapraklar).
+    """Return the SCCs **level by level** (level 0 = leaves).
 
-    Ayni seviyedeki SCC'ler arasinda bagimlilik yoktur -> paralel islenebilir.
+    SCCs at the same level have no dependencies between them -> can be processed in parallel.
     """
     adj = build_graph(functions)
     comps, comp = _kosaraju(adj)
@@ -92,7 +92,7 @@ def scc_levels(functions: list[FunctionInfo]) -> list[list[list[str]]]:
     n = len(comps)
     dag, rev = _condensation(adj, comp, n)
 
-    # yapraktan yukari: outdeg (callee sayisi) 0 olanlar seviye 0
+    # bottom-up: those with outdeg (callee count) 0 are level 0
     remaining = {i: len(dag[i]) for i in range(n)}
     depth: dict[int, int] = {}
     q = deque([i for i in range(n) if remaining[i] == 0])
@@ -113,5 +113,5 @@ def scc_levels(functions: list[FunctionInfo]) -> list[list[list[str]]]:
 
 
 def scc_order(functions: list[FunctionInfo]) -> list[list[str]]:
-    """SCC'leri duz **callee-once** sirada dondurur (seviyelerin duzlestirilmesi)."""
+    """Return the SCCs in flat **callee-first** order (flattened levels)."""
     return [scc for level in scc_levels(functions) for scc in level]

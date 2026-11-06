@@ -18,6 +18,12 @@ python main.py --serve --host 127.0.0.1 --port 8000
     kopyalanmaz; VM'deki mutlak yol (`/home/kali/samples/sample.bin`) doğrudan
     analiz edilir ve yalnızca `state.json` host'a döner.
 - VM adı, kullanıcı, şifre, repo yolu, Ghidra/capa/YARA yolları, profil, timeout ayarları.
+- **Decompile modu:**
+  - `auto` (önerilen): ≤300 fonksiyon → hepsi; daha büyükse ilk 300.
+  - `all`: tüm fonksiyonlar.
+  - `top`: yalnızca `Max decompile` kadar.
+- Coverage artık **tüm fonksiyonlar** üzerinden raporlanır; 100/170 = %59,
+  "98/98 = %100" değil.
 - **İncele (VM)** → host, `VBoxManage guestcontrol` ile örneği VM'e kopyalar,
   `main.py --no-llm --no-db` çalıştırır ve `state.json`'u geri alır.
 - Çıktı: state indirme bağlantısı.
@@ -44,12 +50,18 @@ Gereksinimler:
 - **LLM ile işle** → state doğrulanır, LLM + policy C çalışır, verdict/rapor/DB
   üretilir.
 - API key yalnızca host ortamında (`CROWBAR_LLM_API_KEY`); UI'den istenmez.
+- Policy C v2: LLM-only durumda en az 3 şüpheli fonksiyon, en az 2 farklı
+  davranış sınıfı ve %60 coverage varsa `malicious`; aksi halde
+  `needs_review`. Deterministic sinyaller varsa mevcut iki-sinyal kuralı geçerli.
 - Gerçek malware için lokal model kullanın.
 
 ### 3. History / Compare
 
 - SQLite'taki analizler.
 - Satıra tıklayınca verdict, rapor ve bulgular.
+- Detaydan **HTML rapor indir**, **Markdown rapor indir** ve **JSON indir**.
+- Rapor `report.py` ile üretilir; HTML sürümü tablo/rozet düzeninde, script içermez,
+  IoC'ler defang edilir.
 - Offline state ile LLM sonucunu aynı örnek hash'i üzerinden karşılaştırabilirsiniz.
 
 ### 4. Setup

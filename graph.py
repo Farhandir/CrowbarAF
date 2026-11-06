@@ -1,4 +1,4 @@
-"""StateGraph inşası ve kenarların (edges) bağlanması."""
+"""StateGraph construction and edge connection."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from nodes import (
 )
 from state import AgentState
 
-# route_flag -> hedef düğüm
+# route_flag -> target node
 ROUTES: dict[str, str] = {
     "fast_track": "ai_supervisor_agent",
     "python": "unpack_python_node",
@@ -29,14 +29,14 @@ ROUTES: dict[str, str] = {
 
 
 def route_after_entry(state: AgentState) -> str:
-    """entry_node sonrası koşullu yönlendirme. Bilinmeyen/boş bayrakta 'native' varsayılır."""
+    """Conditional routing after entry_node. Defaults to 'native' for an unknown/empty flag."""
     return state.route_flag if state.route_flag in ROUTES else "native"
 
 
 def build_graph() -> CompiledStateGraph:
     graph = StateGraph(AgentState)
 
-    # Düğümler
+    # Nodes
     graph.add_node("entry_node", entry_node)
     graph.add_node("unpack_python_node", unpack_python_node)
     graph.add_node("unpack_dotnet_node", unpack_dotnet_node)
@@ -48,7 +48,7 @@ def build_graph() -> CompiledStateGraph:
     graph.add_node("ai_supervisor_agent", ai_supervisor_agent)
     graph.add_node("db_writer_node", db_writer_node)
 
-    # Kenarlar
+    # Edges
     graph.add_edge(START, "entry_node")
     graph.add_conditional_edges("entry_node", route_after_entry, ROUTES)
 
@@ -59,7 +59,7 @@ def build_graph() -> CompiledStateGraph:
     graph.add_edge("deep_inspection_node", "ai_extractor_agent")
     graph.add_edge("ai_extractor_agent", "ai_reverser_agent")
     graph.add_edge("ai_reverser_agent", "ai_supervisor_agent")
-    # fast_track da ai_supervisor_agent'a gittiği için aynı yoldan db_writer_node'a ulaşır
+    # fast_track also goes to ai_supervisor_agent, so it reaches db_writer_node the same way
     graph.add_edge("ai_supervisor_agent", "db_writer_node")
     graph.add_edge("db_writer_node", END)
 

@@ -1,4 +1,4 @@
-"""export_functions.py (saf mantık), ghidra_runner.run_ghidra ve deep_inspection_node testleri."""
+"""Tests for export_functions.py (pure logic), ghidra_runner.run_ghidra and deep_inspection_node."""
 
 from __future__ import annotations
 
@@ -28,10 +28,10 @@ def _rec(offset, priority=0, size=100, is_library=False, callees=()):
 
 
 # --------------------------------------------------------------------------- #
-# Ghidra dışında import edilebilir mi?
+# Can it be imported outside Ghidra?
 # --------------------------------------------------------------------------- #
 def test_module_is_importable_outside_ghidra_and_python3_clean() -> None:
-    # main() çalışmamış olmalı (currentProgram yok); aksi halde import patlardı
+    # main() must not have run (no currentProgram); otherwise the import would fail
     assert callable(ef.main)
 
 
@@ -52,7 +52,7 @@ class TestComputePriority:
         assert ef.compute_priority([], ["VirtualAlloc", "WinExec"], 100, False, set()) == 4
 
     def test_import_combo_api_adds_four(self) -> None:
-        # VirtualAlloc hem tehlikeli listede hem combo'da: 4 + 4
+        # VirtualAlloc is both in the dangerous list and in the combo: 4 + 4
         assert ef.compute_priority([], ["VirtualAlloc"], 100, False, COMBO) == 8
 
     def test_combo_ignored_when_no_active_combo(self) -> None:
@@ -75,10 +75,10 @@ class TestComputePriority:
 class TestActiveComboApis:
     def test_reads_import_combo_findings(self) -> None:
         findings = [
-            {"source": "capa", "value": "Process Injection Combo"},  # yanlış kaynak
+            {"source": "capa", "value": "Process Injection Combo"},  # wrong source
             {"source": "import_combo", "value": "Process Injection Combo"},
-            {"source": "import_combo", "value": "Bilinmeyen"},
-            "bozuk",
+            {"source": "import_combo", "value": "Unknown"},
+            "bad",
         ]
         assert ef.active_combo_apis(findings, combo_api_map()) == COMBO
 
@@ -87,7 +87,7 @@ class TestActiveComboApis:
 
 
 # --------------------------------------------------------------------------- #
-# plan_export (Top-N, fallback, stub'lar)
+# plan_export (Top-N, fallback, stubs)
 # --------------------------------------------------------------------------- #
 class TestPlanExport:
     def test_only_positive_priority_sorted_and_capped(self) -> None:
@@ -112,7 +112,7 @@ class TestPlanExport:
         assert len(chosen) == ef.FALLBACK_DECOMPILE
         offsets = {r["offset"] for r in chosen}
         assert "0xlib" not in offsets and "0xhuge" not in offsets
-        assert chosen[0]["size"] == 59  # en büyük uygun fonksiyon önce
+        assert chosen[0]["size"] == 59  # largest eligible function first
 
     def test_empty_program(self) -> None:
         assert ef.plan_export([]) == ([], [])
@@ -120,9 +120,9 @@ class TestPlanExport:
     def test_stubs_are_direct_internal_callees_only(self) -> None:
         records = [
             _rec("0x1", 5, callees=["0x2", "0xext", "0x1"]),
-            _rec("0x2", 0, callees=["0x3"]),  # 2. seviye: eklenmez
+            _rec("0x2", 0, callees=["0x3"]),  # second level: not added
             _rec("0x3", 0),
-            _rec("0x4", 0),  # alakasız
+            _rec("0x4", 0),  # unrelated
         ]
         chosen, stubs = ef.plan_export(records)
         assert [r["offset"] for r in chosen] == ["0x1"]
@@ -156,8 +156,8 @@ class TestReadInput:
 
     def test_write_results_roundtrip(self, tmp_path) -> None:
         path = tmp_path / "out.json"
-        ef.write_results(str(path), [{"c_code": "int ü(){}"}])
-        assert json.loads(path.read_text(encoding="utf-8")) == [{"c_code": "int ü(){}"}]
+        ef.write_results(str(path), [{"c_code": "int f(){}"}])
+        assert json.loads(path.read_text(encoding="utf-8")) == [{"c_code": "int f(){}"}]
 
 
 # --------------------------------------------------------------------------- #
@@ -185,7 +185,7 @@ class TestRunGhidra:
                     [
                         {"offset": "0x1", "name": "f", "priority": 9, "c_code": "int f(){}", "xrefs": ["0x5"],
                          "decompile_warnings": ["w"], "callees": ["0x2"], "size": 10, "is_library": False},
-                        {"bozuk": True},  # offset yok -> atlanır
+                        {"bad": True},  # no offset -> skipped
                     ],
                     fh,
                 )
@@ -205,7 +205,7 @@ class TestRunGhidra:
         assert "process injection combo" in {k.lower() for k in seen["input"]["combo_apis"]}
         assert seen["cmd"][seen["cmd"].index("-import") + 1] == "sample.exe"
         assert "-deleteProject" in seen["cmd"]
-        assert not os.path.exists(seen["dir"])  # temp klasör temizlendi
+        assert not os.path.exists(seen["dir"])  # temp directory cleaned up
 
     def test_runs_even_with_empty_hints_and_findings(self, monkeypatch) -> None:
         calls = []
@@ -216,7 +216,7 @@ class TestRunGhidra:
 
         self._patch(monkeypatch, fake_run)
         assert ghidra_runner.run_ghidra("s.exe", []) == []
-        assert len(calls) == 1  # Ghidra yine de çağrıldı
+        assert len(calls) == 1  # Ghidra is still called
 
     def test_accepts_dict_findings(self, monkeypatch) -> None:
         captured = {}
@@ -272,7 +272,7 @@ class TestDeepInspectionGuard:
     @staticmethod
     def _boom(monkeypatch):
         def boom(*a, **k):
-            raise AssertionError("Ghidra çalıştırılmamalı")
+            raise AssertionError("Ghidra must not run")
 
         monkeypatch.setattr(nodes, "run_ghidra", boom)
 
@@ -306,7 +306,7 @@ def test_propagate_priority_raises_direct_callee():
 
 
 # --------------------------------------------------------------------------- #
-# Adım 5: adressiz IoC string'i -> fonksiyon eşleme
+# Step 5: addressless IoC string -> function mapping
 # --------------------------------------------------------------------------- #
 class TestCollectTargetIocs:
     def test_only_ioc_kinds_are_collected(self) -> None:
@@ -317,7 +317,7 @@ class TestCollectTargetIocs:
             {"source": "floss", "kind": "registry", "value": "HKLM\\Software\\Run"},
             {"source": "floss", "kind": "file", "value": "dropper.exe"},
             {"source": "x", "kind": "email", "value": "bad@evil.example"},
-            {"source": "capa", "kind": "rule", "value": "encrypt data using AES"},  # IoC türü değil
+            {"source": "capa", "kind": "rule", "value": "encrypt data using AES"},  # not an IoC kind
             {"source": "import_combo", "kind": "behavior", "value": "Process Injection Combo"},
         ]
         assert ef.collect_target_iocs(findings) == {
@@ -345,7 +345,7 @@ class TestMatchIocs:
         assert sorted(ef.match_iocs(text, self.INDEX)) == ["evil.example", "http://Evil.example/gate.php"]
 
     def test_case_insensitive_returns_original_spelling(self) -> None:
-        # eşleşme büyük/küçük harf duyarsız; dönen değer findings'teki orijinal yazım
+        # matching is case-insensitive; the returned value keeps the original spelling from findings
         assert sorted(ef.match_iocs("HTTP://EVIL.EXAMPLE/GATE.PHP", self.INDEX)) == [
             "evil.example", "http://Evil.example/gate.php",
         ]
@@ -356,7 +356,7 @@ class TestMatchIocs:
         assert ef.match_iocs("a", self.INDEX) == []
 
     def test_reverse_containment_is_not_matched(self) -> None:
-        # bellekteki kısa string IoC'nin parçası olsa bile eşleşmemeli
+        # a short string in memory must not match even if it is part of an IoC
         assert ef.match_iocs("evil", self.INDEX) == []
 
 
@@ -385,7 +385,7 @@ class TestIocScoring:
         assert hits["0x2"] == ["a", "b"]
 
 
-# --- Ghidra API'sini taklit eden küçük sahte nesneler -------------------------------------------
+# --- small fake objects that mimic the Ghidra API ---------------------------------------------
 class _Addr:
     def __init__(self, offset, memory=True):
         self.offset, self.memory = offset, memory
@@ -507,14 +507,14 @@ class TestMapIocsToFunctions:
         strings = [
             _Data(0x500000, "http://evil.example/gate.php"),
             _Data(0x500100, "10.0.0.1"),
-            _Data(0x500200, "Hello, world"),               # IoC değil
-            _Data(0x500300, "GET /a HTTP/1.1 Host: EVIL.EXAMPLE"),  # IoC'yi içerir
+            _Data(0x500200, "Hello, world"),               # not an IoC
+            _Data(0x500300, "GET /a HTTP/1.1 Host: EVIL.EXAMPLE"),  # contains the IoC
         ]
         refs = {
-            0x500000: [_Ref(_Addr(0x401010)), _Ref(_Addr(0x401110))],  # f1 ve f2
-            0x500100: [_Ref(_Addr(0x401120)), _Ref(_Addr(0x600000, memory=False))],  # f2 + bellek dışı
-            0x500200: [_Ref(_Addr(0x401210))],                         # f3 ama eşleşmeyen string
-            0x500300: [_Ref(_Addr(0x700000))],                         # hiçbir fonksiyonda değil
+            0x500000: [_Ref(_Addr(0x401010)), _Ref(_Addr(0x401110))],  # f1 and f2
+            0x500100: [_Ref(_Addr(0x401120)), _Ref(_Addr(0x600000, memory=False))],  # f2 + non-memory
+            0x500200: [_Ref(_Addr(0x401210))],                         # f3 but non-matching string
+            0x500300: [_Ref(_Addr(0x700000))],                         # not inside any function
         }
         return _Program(strings, refs, [f1, f2, f3])
 
@@ -528,8 +528,8 @@ class TestMapIocsToFunctions:
         assert errors == []
 
     def test_containing_string_matches_and_non_function_reference_is_dropped(self, fake_ghidra) -> None:
-        # "evil.example" hem URL string'inin içinde (f1, f2 referans verir) hem de "...Host: EVIL.EXAMPLE"
-        # string'inde geçer; ikincisine yalnızca fonksiyon dışından (0x700000) referans var -> yok sayılır.
+        # "evil.example" appears both inside the URL string (f1 and f2 reference it) and in "...Host: EVIL.EXAMPLE";
+        # the latter is referenced only from outside any function (0x700000) -> ignored.
         fake_ghidra(self._program())
         assert ef.map_iocs_to_functions({"evil.example"}) == {
             "0x401000": ["evil.example"],
@@ -537,7 +537,7 @@ class TestMapIocsToFunctions:
         }
 
     def test_no_targets_returns_empty_without_scanning(self, fake_ghidra) -> None:
-        fake_ghidra(None)  # currentProgram'a dokunulursa AttributeError olurdu
+        fake_ghidra(None)  # touching currentProgram would raise AttributeError
         assert ef.map_iocs_to_functions(set()) == {}
 
     def test_string_error_is_skipped_not_fatal(self, fake_ghidra) -> None:
@@ -545,18 +545,18 @@ class TestMapIocsToFunctions:
 
         class Broken(_Data):
             def getValue(self):
-                raise RuntimeError("bozuk string")
+                raise RuntimeError("corrupt string")
 
         prog.strings.insert(0, Broken(0x500400, "x"))
         errors = fake_ghidra(prog)
         hits = ef.map_iocs_to_functions({"10.0.0.1"})
         assert hits == {"0x401100": ["10.0.0.1"]}
-        assert any("string islenemedi" in e for e in errors)
+        assert any("failed to process string" in e for e in errors)
 
     def test_total_failure_returns_partial_empty(self, fake_ghidra) -> None:
-        errors = fake_ghidra(None)  # getReferenceManager çağrısı patlar
+        errors = fake_ghidra(None)  # getReferenceManager call blows up
         assert ef.map_iocs_to_functions({"10.0.0.1"}) == {}
-        assert any("IoC eslemesi basarisiz" in e for e in errors)
+        assert any("IoC mapping failed" in e for e in errors)
 
 
 class TestCollectRecordsWithIocs:
@@ -609,7 +609,7 @@ class TestIocsContract:
         decoded = [{"value": "10.0.0.1", "function": 0x401000}]
         result = ghidra_runner.run_ghidra("sample.exe", [], findings, decoded_hints=decoded)
 
-        # betiğin IoC'leri toplayabilmesi için kind/value girdi JSON'una ulaşmalı
+        # the script must receive kind/value in the input JSON to collect IoCs
         assert {(f["kind"], f["value"]) for f in seen["input"]["findings"]} == {("ip", "10.0.0.1")}
         assert seen["input"]["decoded_hints"] == decoded
         assert ef.collect_target_iocs(seen["input"]["findings"]) == {"10.0.0.1"}
@@ -676,7 +676,7 @@ def test_map_decoded_hints_rebases_floss_pie_address(fake_ghidra, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# is_library_heuristic: Ghidra bayrakları, ad önekleri, size < 16
+# is_library_heuristic: Ghidra flags, name prefixes, size < 16
 # --------------------------------------------------------------------------- #
 class _ExtFunc(_Func):
     def __init__(self, *a, external=False, **kw):
@@ -734,7 +734,7 @@ class TestIsLibraryHeuristic:
                 raise RuntimeError("boom")
 
         assert ef.is_library_heuristic(Broken(), 64) is False
-        assert ef.is_library_heuristic(Broken(), 4) is True  # boyut kuralı yine çalışır
+        assert ef.is_library_heuristic(Broken(), 4) is True  # the size rule still applies
 
 
 class TestLibraryScoringAndExclusion:
@@ -747,13 +747,13 @@ class TestLibraryScoringAndExclusion:
             _Func(0x401400, size=64, name="_ZN3FooC1Ev"),
         ]
         fake_ghidra(_Program([], {}, funcs))
-        # tehlikeli API çağıran (puan alabilecek) kütüphane fonksiyonu bile 0 kalmalı
+        # even a library function that calls dangerous APIs (and could score points) must stay 0
         funcs[1].callees = [_Func(0x900000, name="VirtualAlloc")]
         records = {r["offset"]: r for r in ef.collect_records({"0x401100": ["capa rule"]}, set())}
         assert records["0x401000"]["is_library"] is False
         for off in ("0x401200", "0x401300", "0x401400"):
             assert records[off]["is_library"] is True and records[off]["priority"] == 0
-        # capa kanıtlı ama sadece ad önekiyle "kütüphane" olan fonksiyon: istisna (aşağıda ayrıca test edilir)
+        # function with capa evidence but marked "library" only by name prefix: exception (tested separately below)
         assert records["0x401100"]["is_library"] is False
 
     def test_library_functions_never_enter_top_n_or_fallback(self, fake_ghidra) -> None:
@@ -765,7 +765,7 @@ class TestLibraryScoringAndExclusion:
         chosen, stubs = ef.plan_export(records)
         offsets = [r["offset"] for r in chosen]
         assert "0x401100" not in offsets and "0x401200" not in offsets
-        assert offsets == ["0x401000"]  # fallback sadece kütüphane olmayanı seçer
+        assert offsets == ["0x401000"]  # fallback selects only non-library functions
 
     def test_plan_export_forces_library_priority_to_zero(self) -> None:
         records = [_rec("0x1", priority=9, is_library=True), _rec("0x2", priority=3)]
@@ -779,7 +779,7 @@ class TestLibraryScoringAndExclusion:
         assert rec["is_library"] is True and rec["priority"] == 0
         DecompiledFunction(**{k: v for k, v in rec.items() if k not in ("_func", "is_entry")})
 
-    # -- kanıt / entry istisnası (yalnızca ad-önek ve size sezgisi için) --------------------
+    # -- evidence / entry exception (only for the name-prefix and size heuristics) ---------------
     def test_main_is_never_library_even_if_tiny(self, fake_ghidra) -> None:
         fake_ghidra(_Program([], {}, [_Func(0x401000, size=11, name="main")]))
         (rec,) = ef.collect_records({}, set())
@@ -799,3 +799,21 @@ class TestLibraryScoringAndExclusion:
         fake_ghidra(_Program([], {}, [_Func(0x401000, size=64, name="FUN_t", thunk=True)]))
         (rec,) = ef.collect_records({"0x401000": ["rule"]}, set(), {"0x401000": ["10.0.0.1"]})
         assert rec["is_library"] is True and rec["priority"] == 0
+
+
+class TestAutoDecompile:
+    def test_auto_decompiles_all_under_cap(self, monkeypatch) -> None:
+        monkeypatch.setattr(ef, "DECOMPILE_MODE", "auto")
+        monkeypatch.setattr(ef, "AUTO_ALL_CAP", 300)
+        monkeypatch.setattr(ef, "AUTO_TOP_N", 300)
+        records = [_rec(f"0x{i}", priority=1) for i in range(170)]
+        chosen, _ = ef.plan_export(records)
+        assert len(chosen) == 170
+
+    def test_auto_caps_large_programs(self, monkeypatch) -> None:
+        monkeypatch.setattr(ef, "DECOMPILE_MODE", "auto")
+        monkeypatch.setattr(ef, "AUTO_ALL_CAP", 300)
+        monkeypatch.setattr(ef, "AUTO_TOP_N", 300)
+        records = [_rec(f"0x{i}", priority=1) for i in range(301)]
+        chosen, _ = ef.plan_export(records)
+        assert len(chosen) == 300

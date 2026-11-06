@@ -1,4 +1,4 @@
-"""main.py FastAPI uç noktaları ve db okuma/yazma yardımcıları için testler."""
+"""Tests for main.py FastAPI endpoints and db read/write helpers."""
 
 from __future__ import annotations
 
@@ -38,14 +38,14 @@ def client(db_path):
 
 
 class FakeGraph:
-    """Gerçek db_writer_node ile sonucu veritabanına yazan sahte graph."""
+    """Fake graph that writes results to the database with the real db_writer_node."""
 
     def __init__(self):
         self.seen_paths: list[str] = []
 
     def invoke(self, state: AgentState):
         self.seen_paths.append(state.file_path)
-        assert os.path.isfile(state.file_path)  # analiz sırasında dosya var
+        assert os.path.isfile(state.file_path)  # file exists during analysis
         sha = compute_sha256(state.file_path)
         nodes.db_writer_node(
             AgentState(
@@ -56,10 +56,10 @@ class FakeGraph:
                     DecompiledFunction(
                         offset="0x401000", name="FUN_401000", priority=9, c_code="int f(){}", size=12,
                         callees=["0x402000"], capa_hits=["encrypt data"], xrefs=["0x500000"],
-                        decompile_warnings=["w"], llm_summary="şifreler", is_library=False,
+                        decompile_warnings=["w"], llm_summary="encrypts", is_library=False,
                     )
                 ],
-                analysis_report="# Rapor\nkanıt var",
+                analysis_report="# Report\nevidence present",
                 verdict=FAKE_VERDICT,
             )
         )
@@ -71,7 +71,7 @@ def _upload(client, name="a.exe", data=b"MZ-sample"):
 
 
 # --------------------------------------------------------------------------- #
-# db: yeni sütunlar, llm_claims, migrasyon, okuma yardımcıları
+# db: new columns, llm_claims, migration, read helpers
 # --------------------------------------------------------------------------- #
 class TestDbExtensions:
     def test_functions_new_columns_and_llm_claims_table(self, db_path) -> None:
@@ -95,30 +95,30 @@ class TestDbExtensions:
         with closing(sqlite3.connect(path)) as conn:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(functions)")}
             assert {"llm_summary", "size", "is_library", "capa_hits", "xrefs", "iocs"} <= cols
-            assert conn.execute("SELECT COUNT(*) FROM functions").fetchone()[0] == 1  # veri korunur
+            assert conn.execute("SELECT COUNT(*) FROM functions").fetchone()[0] == 1  # data is preserved
 
     def test_insert_functions_serializes_new_columns_as_json(self, db_path) -> None:
         db.init_db(db_path)
         fn = DecompiledFunction(
-            offset="0x1", capa_hits=["r ü"], xrefs=["0x9"], llm_summary="s", size=7, is_library=True
+            offset="0x1", capa_hits=["r é"], xrefs=["0x9"], llm_summary="s", size=7, is_library=True
         )
         db.insert_functions_and_calls(SHA, [fn], db_path)
         with closing(sqlite3.connect(db_path)) as conn:
             row = conn.execute("SELECT llm_summary, size, is_library, capa_hits, xrefs FROM functions").fetchone()
-        assert row == ("s", 7, 1, '["r ü"]', '["0x9"]')
+        assert row == ("s", 7, 1, '["r é"]', '["0x9"]')
 
     def test_insert_llm_claims_replaces_previous(self, db_path) -> None:
         db.init_db(db_path)
-        db.insert_llm_claims(SHA, "ilk", db_path)
-        db.insert_llm_claims(SHA, "ikinci", db_path)
+        db.insert_llm_claims(SHA, "first", db_path)
+        db.insert_llm_claims(SHA, "second", db_path)
         with closing(sqlite3.connect(db_path)) as conn:
-            assert conn.execute("SELECT supervisor_report FROM llm_claims").fetchall() == [("ikinci",)]
+            assert conn.execute("SELECT supervisor_report FROM llm_claims").fetchall() == [("second",)]
 
     def test_get_all_samples_empty_db_works(self, db_path) -> None:
         assert db.get_all_samples(db_path) == []
 
     def test_get_sample_details_unknown(self, db_path) -> None:
-        assert db.get_sample_details("yok", db_path) is None
+        assert db.get_sample_details("missing", db_path) is None
 
     def test_get_sample_details_roundtrip(self, db_path) -> None:
         db.init_db(db_path)
@@ -128,11 +128,11 @@ class TestDbExtensions:
             [DecompiledFunction(offset="0x1", priority=1, callees=["0x2"]), DecompiledFunction(offset="0x2", priority=9)],
             db_path,
         )
-        db.insert_llm_claims(SHA, "rapor", db_path)
+        db.insert_llm_claims(SHA, "report", db_path)
         d = db.get_sample_details(SHA, db_path)
-        assert [f["offset"] for f in d["functions"]] == ["0x2", "0x1"]  # öncelik azalan
+        assert [f["offset"] for f in d["functions"]] == ["0x2", "0x1"]  # priority descending
         assert d["functions"][1]["callees"] == ["0x2"]
-        assert d["supervisor_report"] == "rapor"
+        assert d["supervisor_report"] == "report"
         assert db.get_all_samples(db_path)[0]["has_report"] is True
 
 
@@ -156,25 +156,25 @@ class TestIndex:
         assert res.status_code == 200
         assert "text/html" in res.headers["content-type"]
         assert "CrowbarAF" in res.text and "/api/upload" in res.text and "/api/samples" in res.text
-        assert "http://" not in res.text and "https://" not in res.text  # CDN yok: çevrimdışı çalışır
-        assert "innerHTML" not in res.text  # dinamik veri HTML olarak enjekte edilmez
+        assert "http://" not in res.text and "https://" not in res.text  # no CDN: works offline
+        assert "innerHTML" not in res.text  # dynamic data is not injected as HTML
 
     def test_has_verdict_badge_logic_and_styles(self, client) -> None:
         html = client.get("/").text
-        assert "function verdictBadge" in html and "<th>Karar</th>" in html
-        # malicious: kırmızı/beyaz, needs_review: turuncu/siyah, unknown + no_evidence: gri
+        assert "function verdictBadge" in html and "<th>Verdict</th>" in html
+        # malicious: red/white, needs_review: orange/black, unknown + no_evidence: gray
         assert ".badge.malicious { background: #d63031; color: #fff; }" in html
         assert ".badge.needs_review { background: #f5a623; color: #000; }" in html
         assert ".badge.unknown, .badge.no_evidence { background: #6b7280; color: #fff; }" in html
-        # rozet sınıfı yalnızca bilinen karar adlarından seçilir (sınıf enjeksiyonu yok)
+        # badge class is chosen only from known verdict names (no class injection)
         assert 'KNOWN_VERDICTS = ["malicious", "needs_review", "unknown", "no_evidence"]' in html
 
     def test_function_summary_is_shown_under_the_name(self, client) -> None:
         html = client.get("/").text
         assert ".fn-summary { color: var(--muted); font-style: italic;" in html
         assert 'el("div", { class: "fn-summary", text: fn.llm_summary })' in html
-        # özet, <summary> (fonksiyon adı satırı) içinde; ayrıca gövdede tekrar edilmez
-        assert 'kv("Özet"' not in html
+        # summary is inside <summary> (function name row); it is not repeated in the body
+        assert 'kv("Summary"' not in html
 
 
 class TestUploadAndRead:
@@ -192,7 +192,7 @@ class TestUploadAndRead:
         sha = body["sha256"]
         assert len(sha) == 64
 
-        # analiz bitti: geçici klasör silindi, iş kaydı düştü
+        # analysis finished: temp directory removed, job record dropped
         assert not os.path.exists(os.path.dirname(graph.seen_paths[0]))
         assert main._JOBS == {}
 
@@ -207,11 +207,11 @@ class TestUploadAndRead:
         assert d["findings"][0]["value"] == "encrypt data" and d["findings"][0]["address"] == "0x401000"
         fn = d["functions"][0]
         assert (fn["name"], fn["llm_summary"], fn["size"], fn["capa_hits"], fn["xrefs"], fn["callees"]) == (
-            "FUN_401000", "şifreler", 12, ["encrypt data"], ["0x500000"], ["0x402000"],
+            "FUN_401000", "encrypts", 12, ["encrypt data"], ["0x500000"], ["0x402000"],
         )
         assert fn["decompile_warnings"] == ["w"] and fn["is_library"] is False
-        assert d["supervisor_report"].startswith("# Rapor")
-        # karar: DB'ye JSON yazılır, API'den ayrıştırılmış dict olarak döner
+        assert d["supervisor_report"].startswith("# Report")
+        # verdict: stored as JSON in the DB and returned as a parsed dict by the API
         assert d["verdict"] == FAKE_VERDICT
         assert samples[0]["verdict"] == FAKE_VERDICT
 
@@ -223,7 +223,7 @@ class TestUploadAndRead:
 
         listed = {s["sha256"]: s for s in client.get("/api/samples").json()}
         assert listed[SHA]["verdict"] == {"verdict": "needs_review", "reasons": ["x"]}
-        assert listed["c" * 64]["verdict"] == {}  # kararı olmayan örnek: boş dict, hata yok
+        assert listed["c" * 64]["verdict"] == {}  # sample without a verdict: empty dict, no error
 
         detail = client.get(f"/api/samples/{SHA}").json()
         assert detail["verdict"]["verdict"] == "needs_review"
@@ -233,9 +233,9 @@ class TestUploadAndRead:
         db.init_db(db_path)
         db.insert_sample(SampleInfo(sha256=SHA), db_path)
         db.insert_functions_and_calls(
-            SHA, [DecompiledFunction(offset="0x1", name="f", c_code="int f(){}", llm_summary="Soket açar")], db_path
+            SHA, [DecompiledFunction(offset="0x1", name="f", c_code="int f(){}", llm_summary="opens a socket")], db_path
         )
-        assert client.get(f"/api/samples/{SHA}").json()["functions"][0]["llm_summary"] == "Soket açar"
+        assert client.get(f"/api/samples/{SHA}").json()["functions"][0]["llm_summary"] == "opens a socket"
 
     def test_filename_is_sanitized(self, client, monkeypatch) -> None:
         graph = FakeGraph()
@@ -249,13 +249,13 @@ class TestUploadAndRead:
         assert main._safe_filename(raw) == expected
 
     def test_empty_file_rejected(self, client, monkeypatch) -> None:
-        monkeypatch.setattr(main, "_get_graph", lambda: pytest.fail("graph çalışmamalı"))
+        monkeypatch.setattr(main, "_get_graph", lambda: pytest.fail("graph must not run"))
         res = _upload(client, data=b"")
         assert res.status_code == 400
 
     def test_too_large_rejected_and_cleaned(self, client, monkeypatch) -> None:
         monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 10)
-        monkeypatch.setattr(main, "_get_graph", lambda: pytest.fail("graph çalışmamalı"))
+        monkeypatch.setattr(main, "_get_graph", lambda: pytest.fail("graph must not run"))
         created = []
         real_mkdtemp = main.tempfile.mkdtemp
         monkeypatch.setattr(main.tempfile, "mkdtemp", lambda **k: created.append(real_mkdtemp(**k)) or created[-1])
@@ -269,7 +269,7 @@ class TestUploadAndRead:
         class Boom:
             def invoke(self, state):
                 paths.append(state.file_path)
-                raise RuntimeError("ghidra patladı")
+                raise RuntimeError("ghidra crashed")
 
         monkeypatch.setattr(main, "_get_graph", lambda: Boom())
         sha = _upload(client, data=b"MZ-boom").json()["sha256"]
@@ -277,7 +277,7 @@ class TestUploadAndRead:
         assert not os.path.exists(os.path.dirname(paths[0]))
         res = client.get(f"/api/samples/{sha}")
         assert res.status_code == 500
-        assert res.json()["analysis_status"] == "error" and "ghidra patladı" in res.json()["error"]
+        assert res.json()["analysis_status"] == "error" and "ghidra crashed" in res.json()["error"]
 
     def test_unknown_sample_404(self, client) -> None:
         assert client.get("/api/samples/" + "0" * 64).status_code == 404
@@ -288,7 +288,7 @@ class TestUploadAndRead:
         assert res.status_code == 202 and res.json()["analysis_status"] == "running"
 
     def test_duplicate_upload_while_running_does_not_start_second_job(self, client, monkeypatch) -> None:
-        monkeypatch.setattr(main, "_get_graph", lambda: pytest.fail("ikinci iş başlamamalı"))
+        monkeypatch.setattr(main, "_get_graph", lambda: pytest.fail("a second job must not start"))
         sha = compute_sha256_of_bytes(b"MZ-dup")
         main._JOBS[sha] = {"status": "running", "error": ""}
         res = _upload(client, data=b"MZ-dup")

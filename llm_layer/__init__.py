@@ -1,4 +1,4 @@
-"""CrowbarAF LLM katmani: butce-farkinda, kanit-temelli fonksiyon analizi."""
+"""CrowbarAF LLM layer: budget-aware, evidence-based function analysis."""
 from .cache import SummaryCache
 from .client import LLMClient, LLMResult
 from .context import build_function_context, findings_for, select_functions, select_with_reasons

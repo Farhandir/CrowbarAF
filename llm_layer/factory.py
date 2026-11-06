@@ -1,4 +1,4 @@
-"""Ortam degiskenlerinden LLM istemcisi uretir (model = config, bagimlilik degil)."""
+"""Build an LLM client from environment variables (model = config, not a dependency)."""
 from __future__ import annotations
 
 import os

@@ -1,7 +1,7 @@
-"""LangGraph dugumlerinin LLM karsiliklari.
+"""LLM counterparts of the LangGraph nodes.
 
-nodes.py'deki ai_* fonksiyonlari bu modulu cagirir. Boylece LLM katmani
-pipeline kodundan ayri kalir ve test edilebilir.
+The ai_* functions in nodes.py call this module. This keeps the LLM layer
+separate from the pipeline code and testable.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from .verdict import compute_verdict
 def _to_function_infos(state) -> list[FunctionInfo]:
     out = []
     for d in getattr(state, "source_code", []) or []:
-        # Ghidra decompile etmediği (c_code "") çağrı grafiği kayıtları LLM'e gönderilmez
+        # Call-graph records Ghidra did not decompile (c_code "") are not sent to the LLM
         if not (getattr(d, "c_code", "") or "").strip():
             continue
         out.append(FunctionInfo(
@@ -33,13 +33,13 @@ def _to_function_infos(state) -> list[FunctionInfo]:
 
 
 def _to_findings(state) -> list[Finding]:
-    """state.findings'i LLM katmanı tipine çevirir (birleştirme pipeline'da yapıldı)."""
+    """Convert state.findings to the LLM layer type (merging is done in the pipeline)."""
     return [
         Finding(
             source=f.source,
             kind=f.kind,
             value=f.value,
-            address=f.address or None,  # boş adres = genel (tüm fonksiyonlar için) bulgu
+            address=f.address or None,  # empty address = global finding (applies to all functions)
             confidence=f.confidence,
             finding_id=getattr(f, "finding_id", "") or "",
             verified=bool(getattr(f, "verified", True)),
@@ -49,7 +49,7 @@ def _to_findings(state) -> list[Finding]:
 
 
 def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
-    """ai_reverser_agent: bottom-up fonksiyon ozetleme."""
+    """ai_reverser_agent: bottom-up function summarization."""
     import os
     import time
 
@@ -72,23 +72,23 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
                      max_workers=max_workers, cache=cache,
                      low_priority_budget=low_budget, min_priority=min_priority)
 
-    # llm_summary'leri state'e geri yaz
+    # write llm_summary values back to state
     updated = []
     for d in state.source_code:
         s = result.summaries.get(d.offset)
         updated.append(d.model_copy(update={"llm_summary": s.summary if s else ""}))
 
-    # iz (trace) kaydet
+    # save the trace
     trace_path = None
     if result.trace is not None:
         try:
             outdir = os.getenv("CROWBAR_LLM_TRACE_DIR", "runs")
             ts = time.strftime("%Y%m%d-%H%M%S")
             trace_path = result.trace.save(os.path.join(outdir, f"llm_trace_{ts}.json"))
-        except Exception:  # noqa: BLE001 - iz kaydi akisi cokertmesin
+        except Exception:  # noqa: BLE001 - trace saving must not crash the flow
             trace_path = None
 
-    # niyet analizi: supheli fonksiyonlar + dogrulanmis iddialar
+    # intent analysis: suspicious functions + verified claims
     lines = []
     for off, s in result.summaries.items():
         if s.suspicious:

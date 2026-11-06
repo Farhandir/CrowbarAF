@@ -125,14 +125,14 @@ def normalize_address(addr) -> str | None:
     return s.lstrip("0") or "0"
 
 
-MIN_SUBSTRING_MATCH = 8  # kısa değerler (ör. "a.exe") rastgele eşleşmesin
+MIN_SUBSTRING_MATCH = 8  # so short values (e.g. "a.exe") do not match randomly
 
 
 def _value_matches_iocs(value: str, iocs: list[str]) -> bool:
-    """Bulgu değeri, Ghidra'nın fonksiyona bağladığı IoC'lerden biriyle eşit mi / onun içinde mi?
+    """Does the finding value equal or appear inside one of the IoCs Ghidra linked to the function?
 
-    Eşitlik (büyük/küçük harf duyarsız) kısa değerlerde de geçerli; "değer IoC'nin içinde" ise
-    yalnızca yeterince uzun değerler için.
+    Equality (case-insensitive) also applies to short values; "value inside IoC" only for
+    sufficiently long values.
     """
     needle = value.strip().lower()
     if not needle:
@@ -147,8 +147,8 @@ def _value_matches_iocs(value: str, iocs: list[str]) -> bool:
 def finding_matches_function(f: Finding, fn: FunctionInfo) -> bool:
     """Address match, the finding value appears in the function's code, or Ghidra linked it by xref.
 
-    ``fn.iocs`` = Ghidra'nın string referansıyla fonksiyona bağladığı IoC'ler; adressiz bir bulgu
-    (ör. kodda düz metin olarak görünmeyen string) bu yolla fonksiyona bağlanır.
+    ``fn.iocs`` = IoCs Ghidra linked to the function via string references; an address-less finding
+    (e.g. a string that does not appear as plain text in the code) is linked to the function this way.
     """
     if f.address and normalize_address(f.address) == normalize_address(fn.offset):
         return True

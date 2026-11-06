@@ -1,8 +1,8 @@
-"""Fonksiyon ozeti onbellegi (memoization).
+"""Function summary cache (memoization).
 
-Ayni fonksiyon (normalize edilmis kod + isim) tekrar analiz edilirse LLM cagrisi
-yapilmaz. Anahtar: sha256(kod + isim); adres kasitli olarak disarida (adresler
-analizden analize degisebilir).
+If the same function (normalized code + name) is analyzed again, no LLM call is
+made. Key: sha256(code + name); the address is deliberately excluded (addresses
+may change between analyses).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class SummaryCache:
             try:
                 with open(path, encoding="utf-8") as fh:
                     self.data = json.load(fh)
-            except Exception:  # noqa: BLE001 - bozuk onbellek akisi cokertmesin
+            except Exception:  # noqa: BLE001 - a corrupt cache must not crash the flow
                 self.data = {}
 
     @staticmethod
@@ -40,7 +40,7 @@ class SummaryCache:
             offset=fn.offset,
             summary=rec.get("summary", ""),
             suspicious=rec.get("suspicious"),
-            confidence=rec.get("confidence", "dusuk"),
+            confidence=rec.get("confidence", "low"),
             behaviors=list(rec.get("behaviors", [])),
             claims=[Claim(text=c.get("text", ""), evidence=c.get("evidence", ""), status=c.get("status", "unverified"))
                     for c in rec.get("claims", [])],

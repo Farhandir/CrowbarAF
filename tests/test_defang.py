@@ -1,4 +1,4 @@
-"""IoC defanging (analist güvenliği): utils, db.get_sample_details, API ve report.py."""
+"""IoC defanging (analyst safety): utils, db.get_sample_details, API and report.py."""
 from __future__ import annotations
 
 import pytest
@@ -74,11 +74,11 @@ def test_defang_finding_only_network_kinds():
     assert defang_finding({"kind": "rule", "value": "x.y"})["value"] == "x.y"
     orig = {"kind": "url", "value": "http://a.b/x"}
     defang_finding(orig)
-    assert orig["value"] == "http://a.b/x"  # kopya döner, girdi değişmez
+    assert orig["value"] == "http://a.b/x"  # returns a copy, the input is not modified
 
 
 # --------------------------------------------------------------------------- #
-# DB / API: ham değer saklanır, okuma yolu defang eder
+# DB / API: the raw value is stored; the read path defangs it
 # --------------------------------------------------------------------------- #
 SHA = "cd" * 32
 URL = "http://198.51.100.7/gate.php"
@@ -106,12 +106,12 @@ def test_get_sample_details_defangs_iocs_but_db_keeps_raw(tmp_path):
     values = {f["kind"]: f["value"] for f in detail["findings"]}
     assert values["url"] == "hxxp://198.51.100[.]7/gate.php"
     assert values["ip"] == "198.51.100[.]7"
-    assert values["rule"] == "Evil.Rule"          # ağ IoC'i olmayan dokunulmaz
+    assert values["rule"] == "Evil.Rule"          # non-network IoCs are left untouched
     assert detail["functions"][0]["iocs"] == ["hxxp://198.51.100[.]7/gate.php", "evil.example[.]com"]
 
     import sqlite3
     raw = sqlite3.connect(path).execute("SELECT value FROM findings WHERE kind='url'").fetchone()[0]
-    assert raw == URL  # veritabanında ham değer (LLM eşleştirmesi için)
+    assert raw == URL  # raw value in the database (for LLM matching)
 
 
 def test_api_detail_returns_defanged_iocs(tmp_path, monkeypatch):
@@ -125,7 +125,7 @@ def test_api_detail_returns_defanged_iocs(tmp_path, monkeypatch):
     assert res.status_code == 200
     body = res.text
     assert "hxxp://198.51.100[.]7/gate.php" in body
-    # findings/iocs alanlarında ham, tıklanabilir URL kalmamalı (c_code decompile çıktısıdır)
+    # findings/iocs must not contain raw, clickable URLs (c_code is decompiler output)
     data = res.json()
     for f in data["findings"]:
         assert "http://" not in f["value"]
