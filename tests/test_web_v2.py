@@ -157,3 +157,35 @@ def test_offline_vm_path_rejects_relative_path():
               "vm_name": "vm", "vm_user": "kali", "vm_password": "secret"},
     )
     assert res.status_code == 400
+
+
+def test_transport_remote_sample_skips_host_copy(tmp_path, monkeypatch):
+    transport = GuestControlTransport(GuestControlConfig(
+        vm_name="vm", username="kali", password="secret", repo_dir="/repo"))
+    out = tmp_path / "state.json"
+    calls = []
+
+    def fake_mkdir(path):
+        calls.append(("mkdir", path))
+
+    def fake_run(exe, args, timeout=None):
+        calls.append(("run", exe, args))
+        return "ok"
+
+    def fake_copyfrom(guest, local):
+        calls.append(("copyfrom", guest, local))
+        Path(local).write_text("{}", encoding="utf-8")
+
+    def forbidden_copyto(*args, **kwargs):
+        raise AssertionError("copyto must not be called for a VM-resident sample")
+
+    monkeypatch.setattr(transport, "mkdir", fake_mkdir)
+    monkeypatch.setattr(transport, "run", fake_run)
+    monkeypatch.setattr(transport, "copyfrom", fake_copyfrom)
+    monkeypatch.setattr(transport, "copyto", forbidden_copyto)
+    monkeypatch.setattr(transport, "cleanup", lambda p: calls.append(("cleanup", p)))
+
+    transport.run_offline(None, str(out), remote_sample="/home/kali/Desktop/mirai.elf")
+    assert any(c[0] == "run" and c[1] == "/bin/test" for c in calls)
+    assert any(c[0] == "copyfrom" for c in calls)
+    assert out.is_file()

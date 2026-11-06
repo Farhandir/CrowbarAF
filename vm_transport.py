@@ -151,10 +151,14 @@ class GuestControlTransport:
 
         job_id = uuid.uuid4().hex
         remote_dir = f"{self.config.repo_dir}/incoming/{job_id}"
-        remote_sample = f"{remote_dir}/{local_sample.name}"
         remote_state = f"{remote_dir}/state.json"
         self.mkdir(remote_dir)
-        self.copyto(str(local_sample), remote_dir)
+        if remote_sample is None:
+            remote_sample = f"{remote_dir}/{local_sample.name}"
+            self.copyto(str(local_sample), remote_dir)
+        else:
+            # The sample already exists inside the VM; never copy it to the host.
+            self.run("/bin/test", ["-f", remote_sample], timeout=60)
         try:
             self.run(
                 self.python,
