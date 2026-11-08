@@ -59,13 +59,14 @@ class LLMClient:
         self.json_mode_supported = json_mode_supported
 
     # --- shared ---
-    def chat(self, messages: list[dict], json_mode: bool = True, temperature: float = 0.0) -> LLMResult:
+    def chat(self, messages: list[dict], json_mode: bool = True, temperature: float = 0.0,
+             max_tokens: int | None = None) -> LLMResult:
         if self.provider == "ollama":
-            return self._ollama(messages, json_mode, temperature)
-        return self._openai(messages, json_mode, temperature)
+            return self._ollama(messages, json_mode, temperature, max_tokens)
+        return self._openai(messages, json_mode, temperature, max_tokens)
 
     # --- Ollama /api/chat ---
-    def _ollama(self, messages, json_mode, temperature) -> LLMResult:
+    def _ollama(self, messages, json_mode, temperature, max_tokens=None) -> LLMResult:
         payload = {
             "model": self.model,
             "stream": False,
@@ -74,7 +75,7 @@ class LLMClient:
             "options": {
                 "temperature": temperature,
                 "num_ctx": self.num_ctx,
-                "num_predict": self.num_predict,
+                "num_predict": max_tokens or self.num_predict,
             },
         }
         if json_mode:
@@ -119,14 +120,14 @@ class LLMClient:
             return [True]
         return [True, False]
 
-    def _openai(self, messages, json_mode, temperature) -> LLMResult:
+    def _openai(self, messages, json_mode, temperature, max_tokens=None) -> LLMResult:
         last_error: Exception | None = None
         for use_json in self._json_attempts(json_mode):
             payload = {
                 "model": self.model,
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": self.num_predict,
+                "max_tokens": max_tokens or self.num_predict,
             }
             if use_json:
                 payload["response_format"] = {"type": "json_object"}

@@ -11,11 +11,12 @@ from .types import Finding, FunctionInfo
 from .verdict import compute_verdict
 
 
-def _to_function_infos(state) -> list[FunctionInfo]:
+def _to_function_infos(state, include_empty: bool = False) -> list[FunctionInfo]:
     out = []
     for d in getattr(state, "source_code", []) or []:
-        # Call-graph records Ghidra did not decompile (c_code "") are not sent to the LLM
-        if not (getattr(d, "c_code", "") or "").strip():
+        # Call-graph records Ghidra did not decompile (c_code "") are not sent to
+        # the LLM, but they must still count in coverage.
+        if not include_empty and not (getattr(d, "c_code", "") or "").strip():
             continue
         out.append(FunctionInfo(
             offset=getattr(d, "offset", ""),
@@ -53,11 +54,12 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     import os
     import time
 
-    functions = _to_function_infos(state)
+    all_functions = _to_function_infos(state, include_empty=True)
+    functions = [f for f in all_functions if (f.c_code or "").strip()]
     findings = _to_findings(state)
     if not functions:
         return {"intent_analysis": "No functions to analyze (empty Ghidra output).",
-                "verdict": compute_verdict([], findings, {})}
+                "verdict": compute_verdict(all_functions, findings, {})}
 
     client = client or from_env()
     max_workers = int(os.getenv("CROWBAR_LLM_MAX_WORKERS", "1"))
@@ -68,9 +70,16 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         cache = SummaryCache(cache_path)
     low_budget = int(os.getenv("CROWBAR_LLM_LOW_PRIORITY_BUDGET", "0")) or None
     min_priority = int(os.getenv("CROWBAR_LLM_MIN_PRIORITY", "0"))
+    batch_size = int(os.getenv("CROWBAR_LLM_BATCH_SIZE", "1"))
+    single_pass = os.getenv("CROWBAR_LLM_SINGLE_PASS", "0").strip().lower() \
+        in ("1", "true", "yes", "on")
+    single_pass_max = int(os.getenv("CROWBAR_LLM_SINGLE_PASS_MAX", "40"))
+    use_single_pass = single_pass and len(functions) <= single_pass_max
+    batch_size = max(1, batch_size)
     result = analyze(functions, findings, client, budget_tokens=budget_tokens,
                      max_workers=max_workers, cache=cache,
-                     low_priority_budget=low_budget, min_priority=min_priority)
+                     low_priority_budget=low_budget, min_priority=min_priority,
+                     batch_size=batch_size, single_pass=use_single_pass)
 
     # write llm_summary values back to state
     updated = []
@@ -98,7 +107,7 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     unverified = sum(1 for s in result.summaries.values()
                      for c in s.claims if c.status == "unverified")
     intent = (
-        f"{result.calls} functions summarized; "
+        f"{len(result.summaries)} functions summarized; "
         f"suspicious={sum(1 for s in result.summaries.values() if s.suspicious)}; "
         f"verified claims={verified}, unverified={unverified}; "
         f"tokens={result.token_total()}."
@@ -111,7 +120,7 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         not functions or all(f.is_library for f in functions))
     two_signal = os.getenv("CROWBAR_TWO_SIGNAL_MALICIOUS", "1").strip().lower() \
         not in ("0", "false", "no", "off")
-    verdict = compute_verdict(functions, findings, result.summaries,
+    verdict = compute_verdict(all_functions, findings, result.summaries,
                               packed=packed, analysis_failures=result.failures,
                               require_two_signals=two_signal)
     return {"source_code": updated, "intent_analysis": intent, "verdict": verdict}

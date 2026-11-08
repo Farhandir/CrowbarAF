@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
+from .batch import summarize_batch
 from .cache import SummaryCache
 from .client import LLMClient, LLMResult
 from .context import (findings_for, must_include_offsets, normalize_address,
@@ -51,6 +52,8 @@ def analyze(
     low_priority_budget: int | None = None,
     low_priority_threshold: int = 1,
     min_priority: int = 0,
+    batch_size: int = 1,
+    single_pass: bool = False,
 ) -> AnalysisResult:
     """Summarize all functions bottom-up.
 
@@ -90,12 +93,70 @@ def analyze(
     by_offset = {f.offset: f for f in fns}
     result = AnalysisResult(must_include=sorted(must))
 
-    levels = scc_levels(fns)
+    if single_pass:
+        # One prompt for the whole (small) sample. Bypass SCC levels because the
+        # point is to avoid per-level prompt overhead; use only when it fits.
+        batch_size = max(1, len(fns))
+        levels = [[set(by_offset)]]
+    else:
+        levels = scc_levels(fns)
 
     for level_idx, level in enumerate(levels):
         tasks = [off for scc in level for off in scc]
         tracer.event("level", level=level_idx, tasks=len(tasks))
         snapshot = dict(result.summaries)  # functions at the same level must not affect each other
+
+        if batch_size > 1:
+            for start in range(0, len(tasks), batch_size):
+                chunk = tasks[start:start + batch_size]
+                group = [by_offset[o] for o in chunk]
+                t0 = time.monotonic()
+                try:
+                    summaries, res, stats = summarize_batch(
+                        client, group, findings, budget_tokens, max_retries)
+                except Exception as exc:  # noqa: BLE001
+                    result.failures.extend(f"{o}: {type(exc).__name__}: {exc}" for o in chunk)
+                    for o in chunk:
+                        result.summaries[o] = FunctionSummary(offset=o, summary="(could not be analyzed)")
+                    tracer.event("batch_error", offsets=chunk, error=f"{type(exc).__name__}: {exc}"[:200])
+                    continue
+                result.calls += 1
+                result.total_prompt_tokens += (res.prompt_tokens or 0)
+                result.total_completion_tokens += (res.completion_tokens or 0)
+                result.total_cost_usd += (res.cost_usd or 0)
+                result.total_allowance += (res.allowance or 0)
+                if res.billing_source:
+                    result.billing_source = res.billing_source
+                if res.finish_reason == "length":
+                    result.truncated_calls += 1
+                duration = time.monotonic() - t0
+                # Batch prompts have no individual child summaries; keep the
+                # same trace shape so coverage/claim reports stay correct.
+                per_fn_stats = {
+                    **stats,
+                    "estimated_tokens": max(0, (stats.get("estimated_tokens") or 0) // len(group)),
+                    "batch": True,
+                    "json_ok": stats.get("json_ok"),
+                }
+                for fn in group:
+                    summary = summaries.get(fn.offset) or FunctionSummary(
+                        offset=fn.offset, summary="(could not be analyzed)")
+                    summary = apply_fail_closed(summary, fn, findings)
+                    result.summaries[fn.offset] = summary
+                    result.per_function[fn.offset] = {
+                        **per_fn_stats,
+                        "prompt_tokens": res.prompt_tokens,
+                        "completion_tokens": res.completion_tokens,
+                        "cached": False,
+                        "fail_closed": summary.fail_closed,
+                    }
+                    tracer.analyzed(
+                        fn, per_fn_stats, res, summary, duration,
+                        children=[],
+                        n_findings=len(findings_for(fn, findings)),
+                    )
+                tracer.event("batch", offsets=chunk, tokens=res.prompt_tokens or 0)
+            continue
 
         def run_one(offset: str):
             fn = by_offset[offset]
