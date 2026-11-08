@@ -364,6 +364,11 @@ export CROWBAR_AUTO_ALL_CAP=300
 export CROWBAR_AUTO_TOP_N=300
 export CROWBAR_MAX_DECOMPILE=100           # used only in top mode
 export CROWBAR_LLM_MAX_WORKERS=8           # per-level LLM parallelism
+# Token controls: 1 = legacy one-call-per-function
+# 4 = group up to four functions per call (shared evidence/system prompt)
+export CROWBAR_LLM_BATCH_SIZE=4
+export CROWBAR_LLM_SINGLE_PASS=1           # one prompt when it fits
+export CROWBAR_LLM_SINGLE_PASS_MAX=40      # only for small samples
 export CROWBAR_LLM_MIN_SUSPICIOUS=3        # Policy C v2 LLM-only threshold
 export CROWBAR_LLM_MIN_BEHAVIORS=2
 export CROWBAR_LLM_MIN_COVERAGE=0.6
@@ -373,6 +378,15 @@ export CROWBAR_CAPA_TIMEOUT=600
 export CROWBAR_FLOSS_TIMEOUT=600
 export CROWBAR_READELF_TIMEOUT=60
 ```
+
+Measured on the local real-malware check (same deterministic state, same
+model and policy): `8.exe` (33 decompiled functions) dropped from 50,941 to
+23,177 tokens with a single pass; Mirai (224 functions) dropped from 334,172 to
+201,959 tokens with batch size 4. These are not universal savings: batching
+reduces prompt overhead but the model can omit functions or truncate JSON, so a
+missing function stays `unknown` and a truncated batch is rejected rather than
+treated as evidence. Batch prompts are intentionally concise; use the
+per-function mode when maximum per-function detail is required.
 
 Full setup: [`docs/SETUP.md`](docs/SETUP.md).
 

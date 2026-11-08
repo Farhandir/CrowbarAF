@@ -70,9 +70,16 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         cache = SummaryCache(cache_path)
     low_budget = int(os.getenv("CROWBAR_LLM_LOW_PRIORITY_BUDGET", "0")) or None
     min_priority = int(os.getenv("CROWBAR_LLM_MIN_PRIORITY", "0"))
+    batch_size = int(os.getenv("CROWBAR_LLM_BATCH_SIZE", "1"))
+    single_pass = os.getenv("CROWBAR_LLM_SINGLE_PASS", "0").strip().lower() \
+        in ("1", "true", "yes", "on")
+    single_pass_max = int(os.getenv("CROWBAR_LLM_SINGLE_PASS_MAX", "40"))
+    use_single_pass = single_pass and len(functions) <= single_pass_max
+    batch_size = max(1, batch_size)
     result = analyze(functions, findings, client, budget_tokens=budget_tokens,
                      max_workers=max_workers, cache=cache,
-                     low_priority_budget=low_budget, min_priority=min_priority)
+                     low_priority_budget=low_budget, min_priority=min_priority,
+                     batch_size=batch_size, single_pass=use_single_pass)
 
     # write llm_summary values back to state
     updated = []
@@ -100,7 +107,7 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     unverified = sum(1 for s in result.summaries.values()
                      for c in s.claims if c.status == "unverified")
     intent = (
-        f"{result.calls} functions summarized; "
+        f"{len(result.summaries)} functions summarized; "
         f"suspicious={sum(1 for s in result.summaries.values() if s.suspicious)}; "
         f"verified claims={verified}, unverified={unverified}; "
         f"tokens={result.token_total()}."
