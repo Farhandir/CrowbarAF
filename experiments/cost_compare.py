@@ -22,8 +22,9 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm_layer.tokens import estimate_tokens
+from llm_layer.tokens import TokenCounter
 
+DEFAULT_CHARS_PER_TOKEN = float(os.getenv("CROWBAR_NAIVE_CHARS_PER_TOKEN", "2.08"))
 NAIVE_SYSTEM = (
     "You are a malware analyst. Review the following decompiled functions and "
     "deterministic findings. Decide whether the sample is malicious, benign, "
@@ -63,11 +64,12 @@ def naive_prompt(state: dict[str, Any]) -> str:
 
 
 def measure(state: dict[str, Any], trace: dict[str, Any] | None = None,
-            context_tokens: int = 131072) -> dict[str, Any]:
+            context_tokens: int = 131072,
+            chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> dict[str, Any]:
     functions = [f for f in (state.get("source_code") or [])
                  if str(f.get("c_code") or "").strip()]
     prompt = naive_prompt(state)
-    naive_tokens = estimate_tokens(prompt)
+    naive_tokens = TokenCounter(chars_per_token).estimate(prompt)
     totals = (trace or {}).get("totals") or {}
     crowbar_prompt = int(totals.get("prompt_tokens") or 0)
     crowbar_completion = int(totals.get("completion_tokens") or 0)
@@ -83,6 +85,7 @@ def measure(state: dict[str, Any], trace: dict[str, Any] | None = None,
         "functions": len(functions),
         "code_chars": sum(len(str(f.get("c_code") or "")) for f in functions),
         "findings": len(state.get("findings") or []),
+        "chars_per_token": chars_per_token,
         "naive_prompt_tokens_est": naive_tokens,
         "naive_fits_context": naive_tokens <= context_tokens,
         "context_tokens": context_tokens,
@@ -101,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("states", nargs="+", help="Crowbar state JSON (preferably .llm.json)")
     parser.add_argument("--trace", help="explicit trace JSON for a single state")
     parser.add_argument("--context", type=int, default=131072, help="context limit to test")
+    parser.add_argument("--chars-per-token", type=float, default=DEFAULT_CHARS_PER_TOKEN,
+                        help="code-oriented tokenizer factor; default 2.08 (measured)")
     parser.add_argument("--json", action="store_true", help="emit JSON")
     args = parser.parse_args(argv)
 
@@ -108,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     for path in args.states:
         state = json.loads(Path(path).read_text(encoding="utf-8"))
         trace = _load_trace(_trace_path(state, args.trace if len(args.states) == 1 else None))
-        row = measure(state, trace, args.context)
+        row = measure(state, trace, args.context, args.chars_per_token)
         row["state"] = path
         rows.append(row)
 
@@ -125,7 +130,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name:40} {row['functions']:5} {row['naive_prompt_tokens_est']:10} "
               f"{row['crowbar_prompt_tokens']:11} {saving_text:>7} "
               f"{str(row['naive_fits_context']):>5} {str(row['verdict']):>12}")
-    print("\nnaive_fits_context is a feasibility flag, not an accuracy result.")
+    print(f"\nchars/token={DEFAULT_CHARS_PER_TOKEN} (code-oriented; measure per corpus)")
+    print("naive_fits_context is a feasibility flag, not an accuracy result.")
     return 0
 
 
