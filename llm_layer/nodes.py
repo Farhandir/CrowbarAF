@@ -11,11 +11,12 @@ from .types import Finding, FunctionInfo
 from .verdict import compute_verdict
 
 
-def _to_function_infos(state) -> list[FunctionInfo]:
+def _to_function_infos(state, include_empty: bool = False) -> list[FunctionInfo]:
     out = []
     for d in getattr(state, "source_code", []) or []:
-        # Call-graph records Ghidra did not decompile (c_code "") are not sent to the LLM
-        if not (getattr(d, "c_code", "") or "").strip():
+        # Call-graph records Ghidra did not decompile (c_code "") are not sent to
+        # the LLM, but they must still count in coverage.
+        if not include_empty and not (getattr(d, "c_code", "") or "").strip():
             continue
         out.append(FunctionInfo(
             offset=getattr(d, "offset", ""),
@@ -53,11 +54,12 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     import os
     import time
 
-    functions = _to_function_infos(state)
+    all_functions = _to_function_infos(state, include_empty=True)
+    functions = [f for f in all_functions if (f.c_code or "").strip()]
     findings = _to_findings(state)
     if not functions:
         return {"intent_analysis": "No functions to analyze (empty Ghidra output).",
-                "verdict": compute_verdict([], findings, {})}
+                "verdict": compute_verdict(all_functions, findings, {})}
 
     client = client or from_env()
     max_workers = int(os.getenv("CROWBAR_LLM_MAX_WORKERS", "1"))
@@ -111,7 +113,7 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
         not functions or all(f.is_library for f in functions))
     two_signal = os.getenv("CROWBAR_TWO_SIGNAL_MALICIOUS", "1").strip().lower() \
         not in ("0", "false", "no", "off")
-    verdict = compute_verdict(functions, findings, result.summaries,
+    verdict = compute_verdict(all_functions, findings, result.summaries,
                               packed=packed, analysis_failures=result.failures,
                               require_two_signals=two_signal)
     return {"source_code": updated, "intent_analysis": intent, "verdict": verdict}
