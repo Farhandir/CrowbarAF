@@ -1,8 +1,6 @@
 """Cost-only naive-vs-Crowbar comparison tests."""
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 from experiments.cost_compare import measure, naive_prompt
 

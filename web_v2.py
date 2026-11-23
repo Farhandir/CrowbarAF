@@ -13,7 +13,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -28,7 +27,7 @@ import host_analyze
 import report
 from llm_layer.client import LLMClient
 from sandbox.validate_state import validate_state
-from state import AgentState
+from uploads import safe_filename, save_upload
 from vm_transport import GuestControlConfig, GuestControlTransport
 
 logger = logging.getLogger(__name__)
@@ -53,6 +52,9 @@ _LLM_ENV_LOCK = threading.Lock()
 DEFAULT_VM_NAME = os.getenv("CROWBAR_VM_NAME", "kali-linux-2026.2-virtualbox-amd64")
 DEFAULT_VM_USER = os.getenv("CROWBAR_VM_USER", "kali")
 DEFAULT_VM_REPO = os.getenv("CROWBAR_VM_REPO", "/home/kali/Desktop/CrowbarAF")
+DEFAULT_VM_GHIDRA_DIR = os.getenv("CROWBAR_VM_GHIDRA_DIR", "/home/kali/Desktop/ghidra_12.1.4_PUBLIC")
+DEFAULT_VM_CAPA_RULES = os.getenv("CROWBAR_VM_CAPA_RULES", "/home/kali/.local/share/capa-rules")
+DEFAULT_VM_YARA_RULES = os.getenv("CROWBAR_VM_YARA_RULES", "/home/kali/.local/share/crowbar/yara_rules")
 
 
 def _job_new(kind: str) -> str:
@@ -79,29 +81,7 @@ def _job_get(job_id: str) -> dict[str, Any]:
         return dict(_JOBS[job_id])
 
 
-def _safe_filename(name: str | None) -> str:
-    base = os.path.basename((name or "").replace("\\", "/"))
-    base = re.sub(r"[\x00-\x1f<>:\"|?*]", "_", base).strip(" .")
-    return base or "sample.bin"
-
-
-def _save_upload(upload: UploadFile, dest: Path) -> int:
-    size = 0
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, "wb") as out:
-        while chunk := upload.file.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"file exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
-                )
-            out.write(chunk)
-    try:
-        os.chmod(dest, 0o600)
-    except OSError:
-        pass
-    return size
+_safe_filename = safe_filename
 
 
 def _sha256(path: Path) -> str:
@@ -274,9 +254,9 @@ def offline_analyze(
     vm_user: str = Form(DEFAULT_VM_USER),
     vm_password: str = Form(...),
     repo_dir: str = Form(DEFAULT_VM_REPO),
-    ghidra_dir: str = Form("/home/kali/Desktop/ghidra_12.1.4_PUBLIC"),
-    capa_rules: str = Form("/home/kali/.local/share/capa-rules"),
-    yara_rules: str = Form("/home/kali/.local/share/crowbar/yara_rules"),
+    ghidra_dir: str = Form(DEFAULT_VM_GHIDRA_DIR),
+    capa_rules: str = Form(DEFAULT_VM_CAPA_RULES),
+    yara_rules: str = Form(DEFAULT_VM_YARA_RULES),
     profile: str = Form("deep"),
     decompile_mode: str = Form("auto"),
     max_decompile: int = Form(100),
@@ -307,7 +287,7 @@ def offline_analyze(
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="file required for host upload mode")
         sample_path = job_dir / _safe_filename(file.filename)
-        size = _save_upload(file, sample_path)
+        size = save_upload(file, sample_path, MAX_UPLOAD_BYTES)
         if size == 0:
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="empty file")
@@ -356,7 +336,7 @@ def host_analyze_upload(
     job_dir = UPLOAD_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     state_path = job_dir / "state.json"
-    size = _save_upload(file, state_path)
+    size = save_upload(file, state_path, MAX_UPLOAD_BYTES)
     if size == 0:
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="empty state")

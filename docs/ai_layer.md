@@ -2,7 +2,7 @@
 
 > **Kapsam:** `ai_reverser_agent`, `ai_supervisor_agent` ve bunların üzerine
 > kurulacağı **bottom-up (aşağıdan yukarı) özetleme orkestrasyonu**.
-> `ai_extractor_agent` / IoC çıkarımı ve arayüz bu notun dışında (arkadaşın alanı).
+> `ioc_extractor_node` (eski adı `ai_extractor_agent`; deterministik) / IoC çıkarımı ve arayüz bu notun dışında (arkadaşın alanı).
 >
 > **Statü:** Tasarım notu. Kod değil, kararların ve sınırların kaydı.
 
@@ -12,7 +12,7 @@ Hat şu an şöyle (native kol):
 
 ```
 entry → unpack → static_feature_node (capa + FLOSS) → deep_inspection_node (Ghidra)
-      → ai_extractor_agent → ai_reverser_agent → ai_supervisor_agent
+      → ioc_extractor_node → ai_reverser_agent → ai_supervisor_agent
 ```
 
 `static_feature_node` artık capa'dan **iki** çıktı üretiyor: insan/LLM için özet

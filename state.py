@@ -158,7 +158,7 @@ class AgentState(BaseModel):
     )
 
     # Intermediate outputs produced by the AI agents
-    iocs: dict[str, list[str]] = Field(default_factory=dict)  # ai_extractor_agent
+    iocs: dict[str, list[str]] = Field(default_factory=dict)  # ioc_extractor_node
     intent_analysis: str = ""  # ai_reverser_agent
     verdict: dict[str, Any] = Field(
         default_factory=dict,

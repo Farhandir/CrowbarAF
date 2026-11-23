@@ -74,7 +74,7 @@ ortamında, asla VM’de):
 
 ```bash
 export CROWBAR_LLM_PROVIDER=openai
-export CROWBAR_LLM_BASE_URL=https://opencode.ai/inference/go/openai/v1
+export CROWBAR_LLM_BASE_URL=https://opencode.ai/inference/go/openai   # istemci /v1/chat/completions ekler
 export CROWBAR_LLM_MODEL=deepseek-v4.1-flash
 export CROWBAR_LLM_API_KEY=...          # shell geçmişine yazma
 ./sandbox/run_host_analysis.sh /out/state.json /out/state.llm.json

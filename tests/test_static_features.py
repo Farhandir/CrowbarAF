@@ -5,11 +5,12 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-import sys
 from types import SimpleNamespace
 
 import pytest
 
+import analyzers.binary as binary
+import analyzers.findings as findings
 import nodes
 from nodes import (
     build_findings,
@@ -70,7 +71,7 @@ def _install_fake_pefile(monkeypatch, pe=None, error=None):
             "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
         },
     )
-    monkeypatch.setattr(nodes, "pefile", fake)
+    monkeypatch.setattr(binary, "pefile", fake)
     return fake
 
 
@@ -90,7 +91,7 @@ class TestExtractImports:
         assert extract_imports("x") == []
 
     def test_pefile_not_installed(self, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "pefile", None)
+        monkeypatch.setattr(binary, "pefile", None)
         assert extract_imports("x") == []
 
     def test_real_pefile_on_non_pe_file(self, tmp_path) -> None:
@@ -164,7 +165,7 @@ class TestExtractElfImports:
         calls: list = []
         monkeypatch.setattr(nodes.subprocess, "run", _fake_run(stdout=READELF_OUTPUT, calls=calls))
         # pefile must not be used at all
-        monkeypatch.setattr(nodes, "pefile", None)
+        monkeypatch.setattr(binary, "pefile", None)
 
         imports = extract_imports(path)
 
@@ -255,7 +256,7 @@ class TestShannonEntropy:
         assert nodes.file_range_entropy(str(tmp_path / "missing"), 0, 10) is None
 
     def test_file_range_is_read_in_chunks(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "ENTROPY_READ_CHUNK", 7)
+        monkeypatch.setattr(binary, "ENTROPY_READ_CHUNK", 7)
         path, _ = _make_elf_with_sections(tmp_path)
         assert nodes.file_range_entropy(str(path), *_ELF_PACKED) == pytest.approx(8.0)
 
@@ -280,7 +281,7 @@ class TestElfSectionEntropy:
         path, readelf_s = _make_elf_with_sections(tmp_path)
         calls: list = []
         monkeypatch.setattr(nodes.subprocess, "run", _fake_run(stdout=readelf_s, calls=calls))
-        monkeypatch.setattr(nodes, "pefile", None)  # pefile must not be used on the ELF path
+        monkeypatch.setattr(binary, "pefile", None)  # pefile must not be used on the ELF path
 
         result = section_entropy(str(path))
 
@@ -361,7 +362,7 @@ class TestComputeImphash:
     def test_pe_without_pefile_returns_empty(self, tmp_path, monkeypatch) -> None:
         path = tmp_path / "a.exe"
         path.write_bytes(b"MZ" + b"\x00" * 60)
-        monkeypatch.setattr(nodes, "pefile", None)
+        monkeypatch.setattr(binary, "pefile", None)
         assert nodes.compute_imphash(str(path), ["x"]) == ""
 
     def test_elf_is_md5_of_sorted_comma_joined_imports(self, tmp_path) -> None:
@@ -590,9 +591,9 @@ class TestLoadPe:
     def test_elf_and_missing_pefile_are_skipped(self, tmp_path, monkeypatch) -> None:
         elf = tmp_path / "a.elf"
         elf.write_bytes(b"\x7fELF" + b"\x00" * 60)
-        monkeypatch.setattr(nodes, "pefile", SimpleNamespace(PE=lambda *a, **k: pytest.fail("pefile must not be called for ELF")))
+        monkeypatch.setattr(binary, "pefile", SimpleNamespace(PE=lambda *a, **k: pytest.fail("pefile must not be called for ELF")))
         assert nodes._load_pe(str(elf)) is None
-        monkeypatch.setattr(nodes, "pefile", None)
+        monkeypatch.setattr(binary, "pefile", None)
         assert nodes._load_pe(self._pe_file(tmp_path)) is None
 
 
@@ -699,7 +700,7 @@ class TestSectionEntropy:
         assert section_entropy(str(path)) == {}
 
     def test_pefile_not_installed(self, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "pefile", None)
+        monkeypatch.setattr(binary, "pefile", None)
         assert section_entropy("x") == {}
 
 
@@ -1022,7 +1023,7 @@ class _FakeTlsh:
 
 def _install_fake_tlsh(monkeypatch, **kwargs):
     fake = _FakeTlsh(**kwargs)
-    monkeypatch.setattr(nodes, "tlsh", fake)
+    monkeypatch.setattr(binary, "tlsh", fake)
     return fake
 
 
@@ -1053,7 +1054,7 @@ class TestComputeTlsh:
         assert nodes.compute_tlsh(str(p)) == ""
 
     def test_library_missing_returns_empty(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "tlsh", None)  # ImportError path: the module stays None
+        monkeypatch.setattr(binary, "tlsh", None)  # ImportError path: the module stays None
         p = tmp_path / "s.bin"
         p.write_bytes(b"B" * 500)
         assert nodes.compute_tlsh(str(p)) == ""
@@ -1081,7 +1082,7 @@ class TestComputeTlsh:
 
     def test_oversized_file_is_skipped(self, tmp_path, monkeypatch) -> None:
         fake = _install_fake_tlsh(monkeypatch)
-        monkeypatch.setattr(nodes, "TLSH_MAX_FILE_BYTES", 100)
+        monkeypatch.setattr(binary, "TLSH_MAX_FILE_BYTES", 100)
         p = tmp_path / "big"
         p.write_bytes(b"B" * 500)
         assert nodes.compute_tlsh(str(p)) == ""
@@ -1114,7 +1115,7 @@ class TestStaticFeatureNodeTlsh:
         self._quiet(monkeypatch)
         p = tmp_path / "s.bin"
         p.write_bytes(b"C" * 300)
-        monkeypatch.setattr(nodes, "tlsh", None)
+        monkeypatch.setattr(binary, "tlsh", None)
         assert not any(f.source == "tlsh" for f in static_feature_node(AgentState(file_path=str(p)))["findings"])
         _install_fake_tlsh(monkeypatch)
         small = tmp_path / "small"
@@ -1360,19 +1361,19 @@ class TestFinalizeFindings:
         path = _blob(tmp_path, b"x")
         seen = []
         real = nodes.string_in_file
-        monkeypatch.setattr(nodes, "string_in_file", lambda p, v: seen.append(list(v)) or real(p, v))
+        monkeypatch.setattr(findings, "string_in_file", lambda p, v: seen.append(list(v)) or real(p, v))
         nodes.finalize_findings([self._floss("url", FAKE_URL),
                                  Finding(source="floss", kind="url", value=FAKE_URL, address="0x1")], path)
         assert seen == [[FAKE_URL]]
 
     def test_value_cap(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "MAX_VERIFY_VALUES", 2)
+        monkeypatch.setattr(findings, "MAX_VERIFY_VALUES", 2)
         path = _blob(tmp_path, b"x")
         out = nodes.finalize_findings([self._floss("url", f"http://h{i}.example/") for i in range(4)], path)
         assert [f.verified for f in out] == [False, False, True, True]  # the rest is not checked
 
     def test_no_targets_does_not_open_the_file(self, monkeypatch) -> None:
-        monkeypatch.setattr(nodes, "string_in_file", lambda *a: pytest.fail("must not scan"))
+        monkeypatch.setattr(findings, "string_in_file", lambda *a: pytest.fail("must not scan"))
         out = nodes.finalize_findings([Finding(source="yara", kind="rule", value="R")], "does-not-matter")
         assert out[0].verified is True
 

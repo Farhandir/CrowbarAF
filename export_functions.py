@@ -506,8 +506,8 @@ def map_iocs_to_functions(target_iocs):
     except Exception as exc:
         printerr("[export_functions] IoC mapping failed: " + str(exc))  # noqa: F821
     if os.environ.get("CROWBAR_IOC_DEBUG"):
-        printerr(f"[export_functions] ioc debug: seen={seen} matched_data={matched_data} "
-                 f"refs={refs_seen} hits={len(hits)}")  # noqa: F821
+        printerr(f"[export_functions] ioc debug: seen={seen} matched_data={matched_data} "  # noqa: F821
+                 f"refs={refs_seen} hits={len(hits)}")
     return hits
 
 

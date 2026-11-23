@@ -6,12 +6,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from nodes import (
-    ai_extractor_agent,
     ai_reverser_agent,
     ai_supervisor_agent,
     db_writer_node,
     deep_inspection_node,
     entry_node,
+    ioc_extractor_node,
     static_feature_node,
     unpack_dotnet_node,
     unpack_native_node,
@@ -43,7 +43,7 @@ def build_graph() -> CompiledStateGraph:
     graph.add_node("unpack_native_node", unpack_native_node)
     graph.add_node("static_feature_node", static_feature_node)
     graph.add_node("deep_inspection_node", deep_inspection_node)
-    graph.add_node("ai_extractor_agent", ai_extractor_agent)
+    graph.add_node("ioc_extractor_node", ioc_extractor_node)
     graph.add_node("ai_reverser_agent", ai_reverser_agent)
     graph.add_node("ai_supervisor_agent", ai_supervisor_agent)
     graph.add_node("db_writer_node", db_writer_node)
@@ -56,8 +56,8 @@ def build_graph() -> CompiledStateGraph:
         graph.add_edge(unpack, "static_feature_node")
 
     graph.add_edge("static_feature_node", "deep_inspection_node")
-    graph.add_edge("deep_inspection_node", "ai_extractor_agent")
-    graph.add_edge("ai_extractor_agent", "ai_reverser_agent")
+    graph.add_edge("deep_inspection_node", "ioc_extractor_node")
+    graph.add_edge("ioc_extractor_node", "ai_reverser_agent")
     graph.add_edge("ai_reverser_agent", "ai_supervisor_agent")
     # fast_track also goes to ai_supervisor_agent, so it reaches db_writer_node the same way
     graph.add_edge("ai_supervisor_agent", "db_writer_node")

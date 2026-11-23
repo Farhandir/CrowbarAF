@@ -15,9 +15,9 @@ API:
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import logging
 import os
-import re
 import shutil
 import sys
 import tempfile
@@ -32,12 +32,18 @@ import db
 from graph import build_graph
 from nodes import compute_sha256
 from state import AgentState
+from uploads import safe_filename, save_upload
 from web_v2 import router as web_v2_router
 
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = int(os.environ.get("CROWBAR_MAX_UPLOAD_MB", "200")) * 1024 * 1024
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+LEGACY_UPLOAD_WARNING = (
+    "The legacy /api/upload endpoint analyzes the sample on this host and is meant only for "
+    "synthetic, benign or approved samples; use the split VM/host mode (/v2) for real malware."
+)
 
 app = FastAPI(title="CrowbarAF", description="Autonomous static malware analysis")
 app.include_router(web_v2_router)
@@ -61,23 +67,7 @@ def _get_graph() -> Any:
 # --------------------------------------------------------------------------- #
 # Upload + analysis
 # --------------------------------------------------------------------------- #
-def _safe_filename(name: str | None) -> str:
-    """Sanitizes path components and control characters (against path traversal)."""
-    base = os.path.basename((name or "").replace("\\", "/"))
-    base = re.sub(r"[\x00-\x1f<>:\"|?*]", "_", base).strip(" .")
-    return base or "sample.bin"
-
-
-def _save_upload(upload: UploadFile, dest: str) -> int:
-    """Writes the uploaded file to disk in chunks; raises 413 if the size limit is exceeded."""
-    size = 0
-    with open(dest, "wb") as out:
-        while chunk := upload.file.read(UPLOAD_CHUNK_SIZE):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                raise HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
-            out.write(chunk)
-    return size
+_safe_filename = safe_filename
 
 
 def _run_analysis(path: str, tmp_dir: str, sha256: str) -> None:
@@ -100,11 +90,12 @@ def upload(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> d
 
     Poll ``GET /api/samples/{sha256}`` with the returned ``sha256`` to wait for the result.
     """
+    logger.warning("[api] %s", LEGACY_UPLOAD_WARNING)
     filename = _safe_filename(file.filename)
     tmp_dir = tempfile.mkdtemp(prefix="crowbaraf_")
     path = os.path.join(tmp_dir, filename)
     try:
-        size = _save_upload(file, path)
+        size = save_upload(file, path, MAX_UPLOAD_BYTES, UPLOAD_CHUNK_SIZE)
         if size == 0:
             raise HTTPException(status_code=400, detail="Empty file")
         sha256 = compute_sha256(path)
@@ -112,14 +103,14 @@ def upload(background_tasks: BackgroundTasks, file: UploadFile = File(...)) -> d
         with _JOBS_LOCK:
             if _JOBS.get(sha256, {}).get("status") == "running":
                 shutil.rmtree(tmp_dir, ignore_errors=True)
-                return {"sha256": sha256, "filename": filename, "status": "running"}
+                return {"sha256": sha256, "filename": filename, "status": "running", "warning": LEGACY_UPLOAD_WARNING}
             _JOBS[sha256] = {"status": "running", "error": ""}
     except Exception:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
 
     background_tasks.add_task(_run_analysis, path, tmp_dir, sha256)
-    return {"sha256": sha256, "filename": filename, "status": "running"}
+    return {"sha256": sha256, "filename": filename, "status": "running", "warning": LEGACY_UPLOAD_WARNING}
 
 
 # --------------------------------------------------------------------------- #
@@ -210,11 +201,14 @@ INDEX_HTML = r"""<!doctype html>
   .badge.unknown, .badge.no_evidence { background: #6b7280; color: #fff; }
   .kv { margin: 6px 0; } .kv b { color: var(--muted); font-weight: 600; margin-right: 6px; }
   .banner { padding: 8px 12px; border-radius: 8px; background: #2a2412; color: var(--warn); margin-bottom: 12px; }
+  .host-warning { padding: 9px 28px; background: #2a2412; border-bottom: 1px solid var(--border); color: var(--warn); }
+  .host-warning a { color: var(--warn); }
   .empty { color: var(--muted); padding: 14px 4px; }
 </style>
 </head>
 <body>
 <header><h1>CrowbarAF</h1><span>Autonomous static malware analysis</span></header>
+<div class="host-warning" role="alert">The legacy /api/upload endpoint analyzes the sample on this host and is meant only for synthetic, benign or approved samples; use the split VM/host mode (/v2) for real malware. <a href="/v2">Open /v2</a></div>
 <main>
   <section class="card">
     <h2>Upload file</h2>
@@ -453,6 +447,19 @@ def index() -> str:
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def is_loopback_host(host: str) -> bool:
+    """Return True only for localhost or a loopback IP address."""
+    candidate = host.strip()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    if candidate == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
+
+
 def main() -> None:
     # Windows consoles default to cp1252; force UTF-8 for non-ASCII characters.
     for stream in (sys.stdout, sys.stderr):
@@ -464,6 +471,9 @@ def main() -> None:
     parser.add_argument("--serve", action="store_true", help="Start the web UI and API")
     parser.add_argument("--host", default="127.0.0.1", help="address for --serve (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="port for --serve (default: 8000)")
+    parser.add_argument("--allow-remote", action="store_true",
+                        help="allow --serve to bind --host to a non-loopback address "
+                             "(the API has no authentication)")
     parser.add_argument("--no-llm", action="store_true",
                         help="produce deterministic state without calling the LLM (offline VM)")
     parser.add_argument("--no-db", action="store_true", help="skip writing to SQLite (offline VM)")
@@ -496,6 +506,19 @@ def main() -> None:
         os.environ["CROWBAR_FLOSS_TIMEOUT"] = str(args.floss_timeout)
 
     if args.serve:
+        if not is_loopback_host(args.host):
+            if not args.allow_remote:
+                parser.error(
+                    f"refusing to bind the web UI to non-loopback host {args.host!r}: "
+                    "the API has no authentication. Use --allow-remote only on a "
+                    "trusted, isolated network."
+                )
+            logger.warning(
+                "serving the web UI on non-loopback host %s without authentication; "
+                "anyone who can reach this port can submit samples and start analysis. "
+                "Use --allow-remote only on a trusted, isolated network.",
+                args.host,
+            )
         import uvicorn
 
         uvicorn.run(app, host=args.host, port=args.port)
