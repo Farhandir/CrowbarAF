@@ -332,6 +332,12 @@ class TestGraphWiring:
         assert ("entry_node", "ai_supervisor_agent") in edges  # fast_track
         assert ("ai_supervisor_agent", "db_writer_node") in edges
 
+    def test_ioc_extraction_node_name_and_alias(self) -> None:
+        nodes_in_graph = build_graph().get_graph().nodes
+        assert "ioc_extractor_node" in nodes_in_graph
+        assert "ai_extractor_agent" not in nodes_in_graph
+        assert nodes.ai_extractor_agent is nodes.ioc_extractor_node
+
 
 class TestFindingIntegrityColumns:
     def test_finding_id_and_verified_roundtrip(self, db_path) -> None:

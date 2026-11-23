@@ -1,0 +1,22 @@
+[project]
+name = "crowbaraf"
+version = "0.1.0"
+description = "Deterministic-first static malware analysis with a context-efficient, fail-closed LLM layer."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+# Runtime/test dependencies live in requirements.txt (ranges) and requirements.lock
+# (exact pins used by CI). Optional analysis tools: requirements-tools.txt.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["results", "runs", "reports"]
+
+[tool.ruff.lint]
+# Start with real-bug rules only (syntax errors, undefined names, unused imports/variables).
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# nodes.py re-exports the analyzers/* helpers so `from nodes import X` keeps working.
+"nodes.py" = ["F401"]
