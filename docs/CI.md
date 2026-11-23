@@ -7,8 +7,12 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 Her `master` push’unda ve PR’da:
 
 1. Python 3.12
-2. `pip install -r requirements.txt`
-3. `pytest -q`
+2. `pip install -r requirements.txt -c requirements.lock` (sabit sürümler)
+3. `ruff check .` (kurallar `pyproject.toml`'da: sadece gerçek hata sınıfları `E9`, `F`)
+4. `pytest -q`
+
+Yerelde aynısı: `ruff check .` ve `python -m pytest -q`. `requirements.txt` değişirse
+testleri geçen bir venv'den `requirements.lock` yeniden üretilir.
 
 Unit testler fake/mock kullanır; Ghidra/capa/FLOSS/gerçek malware entegrasyonu
 GitHub runner’da **çalışmaz**. Onlar offline VM smoke testinde kalır.

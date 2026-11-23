@@ -328,7 +328,8 @@ cp .env.example .env
 set -a; . ./.env; set +a
 
 python main.py <sample>                    # analysis + state JSON
-python main.py --serve                     # legacy UI at http://127.0.0.1:8000
+python main.py --serve                     # legacy UI at http://127.0.0.1:8000 (analyzes on the host: synthetic samples only, use /v2 for real malware)
+# non-loopback --host requires --allow-remote (the API has no authentication)
 # split UI: http://127.0.0.1:8000/v2
 #   Offline / Host-LLM / History-Compare / Setup
 #   auto decompile, VM-path sample input, HTML/MD/JSON report downloads
@@ -397,6 +398,8 @@ Full setup: [`docs/SETUP.md`](docs/SETUP.md).
 ```text
 CrowbarAF/
 ├── main.py / graph.py / nodes.py    # LangGraph pipeline
+├── analyzers/                       # tool runners + parsers (DIE/YARA, PE/ELF, capa/FLOSS, unpack, findings)
+├── uploads.py                       # shared upload sanitizing/saving
 ├── web_v2.py / ui_v2.html           # split UI API + four-tab frontend
 ├── vm_transport.py                  # VBoxManage guestcontrol transport
 ├── host_analyze.py                  # host-side LLM stage (split mode)
@@ -406,7 +409,7 @@ CrowbarAF/
 ├── export_functions.py              # Ghidra: priority + IoC xref
 ├── db.py / report.py                # SQLite + MD/HTML/JSON reports
 ├── docs/                            # Turkish internal/paper docs
-├── tests/                           # pipeline + LLM-layer tests (701)
+├── tests/                           # pipeline + LLM-layer tests (738)
 ├── results/archive/                 # comparable experiment records
 └── docs/assets/                     # logo
 ```

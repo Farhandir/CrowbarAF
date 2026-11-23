@@ -176,10 +176,25 @@ class TestIndex:
         # summary is inside <summary> (function name row); it is not repeated in the body
         assert 'kv("Summary"' not in html
 
+    def test_shows_legacy_upload_host_warning_banner(self, client) -> None:
+        html = client.get("/").text
+        assert main.LEGACY_UPLOAD_WARNING in html
+        assert '<div class="host-warning" role="alert">' in html
+        assert '<a href="/v2">' in html
+
 
 class TestUploadAndRead:
     def test_empty_list(self, client) -> None:
         assert client.get("/api/samples").json() == []
+
+    def test_upload_response_carries_legacy_host_warning(self, client, monkeypatch, caplog) -> None:
+        monkeypatch.setattr(main, "_get_graph", lambda: FakeGraph())
+
+        res = _upload(client, data=b"MZ-warn")
+
+        assert res.status_code == 202
+        assert res.json()["warning"] == main.LEGACY_UPLOAD_WARNING
+        assert caplog.text.count(main.LEGACY_UPLOAD_WARNING) == 1  # logged once per request
 
     def test_upload_runs_graph_and_results_are_readable(self, client, monkeypatch) -> None:
         graph = FakeGraph()

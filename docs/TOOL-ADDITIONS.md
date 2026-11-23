@@ -36,9 +36,11 @@ Her araç `state.Finding` üretir:
 ```python
 Finding(source="...", kind="...", value="...", address="", confidence=1.0)
 ```
+- Araç koşucuları/ayrıştırıcıları `analyzers/` paketine eklenir (ör. `analyzers/triage.py`,
+  `analyzers/binary.py`); düğüm bağlantısı `nodes.py` içinde kalır.
 - `static_feature_node` içinde çağrılır, `build_findings`/`merge_findings` ile birleştirilir.
 - Her araç için `tests/test_static_features.py` deseninde **birim test** (mock çıktı).
-- `_run_tool(cmd, timeout)` yardımcısını kullan (zaman aşımı + hata toleransı).
+- `analyzers.unpack._run_tool(cmd, timeout)` yardımcısını kullan (zaman aşımı + hata toleransı).
 
 ---
 
@@ -129,7 +131,7 @@ digest = tlsh.hash(open(path, "rb").read())   # "T1..."
 ```python
 Finding(source="tlsh", kind="grouping_key", value=digest)
 ```
-**Durum: done** (`nodes.compute_tlsh`; her iki profilde çalışır; `py-tlsh` yoksa veya dosya < 50 bayt ise `""`;
+**Durum: done** (`analyzers.binary.compute_tlsh`; her iki profilde çalışır; `py-tlsh` yoksa veya dosya < 50 bayt ise `""`;
 `TNULL` da boş sayılır). **Kabul:** Hash üretilir; DB'de saklanır; benzerlik karşılaştırması (opsiyonel) ayrı adım.
 
 ---

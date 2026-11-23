@@ -1,7 +1,7 @@
 """Tests for the v2 split UI API and GuestControl transport."""
 from __future__ import annotations
 
-import json
+import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -222,3 +222,20 @@ def test_offline_job_report_download(tmp_path, monkeypatch):
     md = client.get(f"/api/v2/jobs/{job_id}/report?format=md")
     assert md.status_code == 200
     assert "CrowbarAF" in md.text
+
+
+def test_vm_path_defaults():
+    # Module constants are read at import time; compare against the same env lookup
+    # so the test also passes when a developer has CROWBAR_VM_* set in their shell.
+    expected = {
+        "DEFAULT_VM_NAME": ("CROWBAR_VM_NAME", "kali-linux-2026.2-virtualbox-amd64"),
+        "DEFAULT_VM_USER": ("CROWBAR_VM_USER", "kali"),
+        "DEFAULT_VM_REPO": ("CROWBAR_VM_REPO", "/home/kali/Desktop/CrowbarAF"),
+        "DEFAULT_VM_GHIDRA_DIR": ("CROWBAR_VM_GHIDRA_DIR", "/home/kali/Desktop/ghidra_12.1.4_PUBLIC"),
+        "DEFAULT_VM_CAPA_RULES": ("CROWBAR_VM_CAPA_RULES", "/home/kali/.local/share/capa-rules"),
+        "DEFAULT_VM_YARA_RULES": ("CROWBAR_VM_YARA_RULES", "/home/kali/.local/share/crowbar/yara_rules"),
+    }
+    for attr, (var, default) in expected.items():
+        assert getattr(web_v2, attr) == os.getenv(var, default), attr
+    config = GuestControlConfig(vm_name="vm", username="kali", password="secret")
+    assert config.repo_dir == os.getenv("CROWBAR_VM_REPO", "/home/kali/Desktop/CrowbarAF")

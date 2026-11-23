@@ -36,7 +36,7 @@ class GuestControlConfig:
     vm_name: str
     username: str
     password: str = field(repr=False)
-    repo_dir: str = "/home/kali/Desktop/CrowbarAF"
+    repo_dir: str = os.getenv("CROWBAR_VM_REPO", "/home/kali/Desktop/CrowbarAF")
     python: str = ""          # default: <repo_dir>/.venv/bin/python
     env: dict[str, str] = field(default_factory=dict)  # guest --putenv
     timeout: int = 1800

@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from llm_layer import Finding, FunctionInfo, LLMClient, analyze  # noqa: E402
+from llm_layer import Finding, FunctionInfo, analyze  # noqa: E402
 from llm_layer.factory import from_env  # noqa: E402
 
 BUILTIN = [
