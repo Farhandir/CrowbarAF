@@ -56,6 +56,7 @@ class FunctionSummary:
     claims: list[Claim] = field(default_factory=list)
     suggested_name: str = ""
     fail_closed: bool = False  # LLM said benign, but a critical finding overrode it
+    analysis_failed: bool = False  # placeholder: call failed or the model omitted this function
 
     def note(self) -> str:
         """Short note to carry up to the parent function (fixed and narrow)."""

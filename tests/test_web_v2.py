@@ -239,3 +239,21 @@ def test_vm_path_defaults():
         assert getattr(web_v2, attr) == os.getenv(var, default), attr
     config = GuestControlConfig(vm_name="vm", username="kali", password="secret")
     assert config.repo_dir == os.getenv("CROWBAR_VM_REPO", "/home/kali/Desktop/CrowbarAF")
+
+
+def test_form_defaults_endpoint_reflects_module_defaults(monkeypatch):
+    monkeypatch.setattr(web_v2, "DEFAULT_VM_NAME", "lab-vm")
+    monkeypatch.setattr(web_v2, "DEFAULT_VM_GHIDRA_DIR", "/opt/ghidra")
+    res = _client().get("/api/v2/defaults")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["vm_name"] == "lab-vm"
+    assert body["ghidra_dir"] == "/opt/ghidra"
+    assert set(body) == {"vm_name", "vm_user", "repo_dir", "ghidra_dir", "capa_rules", "yara_rules"}
+    assert not any("pass" in key for key in body)  # never expose secrets
+
+
+def test_ui_loads_server_defaults():
+    html = _client().get("/v2").text
+    assert 'api("/api/v2/defaults")' in html
+    assert "loadDefaults();" in html

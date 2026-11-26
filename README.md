@@ -365,6 +365,7 @@ export CROWBAR_AUTO_ALL_CAP=300
 export CROWBAR_AUTO_TOP_N=300
 export CROWBAR_MAX_DECOMPILE=100           # used only in top mode
 export CROWBAR_LLM_MAX_WORKERS=8           # per-level LLM parallelism
+export CROWBAR_LLM_MAX_RETRIES=5           # retry 429/502/503/504 (honors Retry-After, else backoff)
 # Token controls: 1 = legacy one-call-per-function
 # 4 = group up to four functions per call (shared evidence/system prompt)
 export CROWBAR_LLM_BATCH_SIZE=4

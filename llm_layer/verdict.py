@@ -135,7 +135,12 @@ def compute_verdict(
     # functions so a 100/170 run cannot be reported as 100% coverage.
     total_functions = [f for f in functions if not f.is_library]
     decompiled = [f for f in total_functions if (f.c_code or "").strip()]
-    analyzed = [f for f in decompiled if f.offset in summaries]
+    # A failed call (rate limit, bad JSON) or a function the model omitted is not
+    # analyzed: it must not count toward coverage.
+    failed = [f for f in decompiled
+              if f.offset in summaries and getattr(summaries[f.offset], "analysis_failed", False)]
+    failed_offsets = {f.offset for f in failed}
+    analyzed = [f for f in decompiled if f.offset in summaries and f.offset not in failed_offsets]
     total = len(total_functions)
     coverage = round(len(analyzed) / total, 3) if total else 0.0
 
@@ -283,6 +288,7 @@ def compute_verdict(
             "total": total,
             "decompiled": len(decompiled),
             "analyzed": len(analyzed),
+            "failed": len(failed),
             "skipped": total - len(analyzed),
             "ratio": coverage,
             "min_required": min_coverage,
@@ -290,6 +296,7 @@ def compute_verdict(
         "counts": {
             "suspicious_functions": len(susp),
             "unknown_functions": len(unknown_fns),
+            "failed_functions": len(failed),
             "fail_closed": len(fail_closed),
             "critical_findings": len(critical),
             "unverified_critical": len(unverified),

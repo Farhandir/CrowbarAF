@@ -451,6 +451,19 @@ def state_by_filename(filename: str) -> FileResponse:
     return FileResponse(path, media_type="application/json", filename=filename)
 
 
+@router.get("/api/v2/defaults")
+def form_defaults() -> dict[str, str]:
+    """Default VM form values (CROWBAR_VM_* env vars or built-in defaults); never secrets."""
+    return {
+        "vm_name": DEFAULT_VM_NAME,
+        "vm_user": DEFAULT_VM_USER,
+        "repo_dir": DEFAULT_VM_REPO,
+        "ghidra_dir": DEFAULT_VM_GHIDRA_DIR,
+        "capa_rules": DEFAULT_VM_CAPA_RULES,
+        "yara_rules": DEFAULT_VM_YARA_RULES,
+    }
+
+
 @router.get("/api/v2/setup/status")
 def setup_status() -> dict[str, Any]:
     """Host-side environment check; the offline VM check is done from the UI."""
