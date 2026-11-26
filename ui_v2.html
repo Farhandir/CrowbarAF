@@ -391,10 +391,22 @@ $("#provider").addEventListener("change", () => {
   }
 });
 
+// Server-side defaults (CROWBAR_VM_* env vars); the HTML values stay as a fallback.
+async function loadDefaults() {
+  const { ok, body } = await api("/api/v2/defaults");
+  if (!ok || !body) return;
+  for (const [k, id] of [["vm_name", "#vmName"], ["vm_user", "#vmUser"], ["repo_dir", "#vmRepo"],
+                         ["ghidra_dir", "#ghidraDir"], ["capa_rules", "#capaRules"],
+                         ["yara_rules", "#yaraRules"]]) {
+    if (typeof body[k] === "string" && body[k]) $(id).value = body[k];
+  }
+}
+
 $("#offRun").addEventListener("click", offlineRun);
 $("#hostRun").addEventListener("click", hostRun);
 $("#refreshHistory").addEventListener("click", loadHistory);
 $("#setupCheck").addEventListener("click", setupCheck);
+loadDefaults();
 loadHistory();
 </script>
 </body>

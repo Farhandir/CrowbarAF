@@ -6,9 +6,24 @@ and optionally an API all use the same code.
 from __future__ import annotations
 
 import json
+import random
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+
+# Transient HTTP errors worth retrying (rate limit, gateway/overload).
+RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+MAX_BACKOFF_SECONDS = 60.0
+
+
+def _retry_after_seconds(headers) -> float | None:
+    """Parse a numeric ``Retry-After`` header (seconds); HTTP-date values are ignored."""
+    try:
+        value = headers.get("Retry-After") if headers is not None else None
+        return max(0.0, float(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 class LLMHTTPError(RuntimeError):
@@ -45,8 +60,14 @@ class LLMClient:
         user_agent: str = "crowbaraf/0.1",
         session_id: str | None = None,
         json_mode_supported: bool | None = None,
+        max_retries: int = 5,
+        backoff_base: float = 2.0,
     ) -> None:
         self.provider = provider
+        # Retries for RETRYABLE_STATUS / connection errors (OpenAI-compatible path).
+        self.max_retries = max(0, max_retries)
+        self.backoff_base = backoff_base
+        self._sleep = time.sleep  # injectable for tests
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -109,6 +130,29 @@ class LLMClient:
             headers["x-opencode-session"] = self.session_id
         return headers
 
+    def _post_with_retry(self, req: urllib.request.Request) -> dict:
+        """POST ``req``; retry rate limits, gateway errors and connection failures.
+
+        Waits ``Retry-After`` when the server sends it, otherwise exponential backoff
+        with jitter (capped). The final error is re-raised unchanged.
+        """
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                if e.code not in RETRYABLE_STATUS or attempt == self.max_retries:
+                    raise
+                wait = _retry_after_seconds(e.headers)
+            except urllib.error.URLError:
+                if attempt == self.max_retries:
+                    raise
+                wait = None
+            if wait is None:
+                wait = self.backoff_base * (2 ** attempt) * (0.5 + random.random() / 2)
+            self._sleep(min(wait, MAX_BACKOFF_SECONDS))
+        raise RuntimeError("unreachable")  # pragma: no cover
+
     # --- OpenAI-uyumlu /v1/chat/completions (vLLM, OpenAI, OpenCode Go) ---
     def _json_attempts(self, json_mode: bool) -> list[bool]:
         """Try response_format, but fall back to prompt-only JSON on HTTP 400."""
@@ -137,8 +181,7 @@ class LLMClient:
                 headers=self._openai_headers(),
             )
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                    data = json.loads(r.read())
+                data = self._post_with_retry(req)
             except urllib.error.HTTPError as e:
                 body = e.read().decode("utf-8", "replace")[:500]
                 last_error = LLMHTTPError(e.code, body)

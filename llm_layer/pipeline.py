@@ -117,7 +117,8 @@ def analyze(
                 except Exception as exc:  # noqa: BLE001
                     result.failures.extend(f"{o}: {type(exc).__name__}: {exc}" for o in chunk)
                     for o in chunk:
-                        result.summaries[o] = FunctionSummary(offset=o, summary="(could not be analyzed)")
+                        result.summaries[o] = FunctionSummary(offset=o, summary="(could not be analyzed)",
+                                                         analysis_failed=True)
                     tracer.event("batch_error", offsets=chunk, error=f"{type(exc).__name__}: {exc}"[:200])
                     continue
                 result.calls += 1
@@ -140,7 +141,7 @@ def analyze(
                 }
                 for fn in group:
                     summary = summaries.get(fn.offset) or FunctionSummary(
-                        offset=fn.offset, summary="(could not be analyzed)")
+                        offset=fn.offset, summary="(could not be analyzed)", analysis_failed=True)
                     summary = apply_fail_closed(summary, fn, findings)
                     result.summaries[fn.offset] = summary
                     result.per_function[fn.offset] = {
@@ -191,7 +192,8 @@ def analyze(
             fn = by_offset[offset]
             if error or summary is None:
                 result.failures.append(f"{offset}: {error}")
-                result.summaries[offset] = FunctionSummary(offset=offset, summary="(could not be analyzed)")
+                result.summaries[offset] = FunctionSummary(offset=offset, summary="(could not be analyzed)",
+                                                            analysis_failed=True)
                 tracer.event("error", offset=offset, error=(error or "")[:200])
                 continue
             cached = bool(stats.get("cached"))
