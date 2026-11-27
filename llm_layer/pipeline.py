@@ -14,7 +14,7 @@ from .summarize import summarize_function
 from .trace import Tracer
 from .traverse import scc_levels
 from .types import Finding, FunctionInfo, FunctionSummary
-from .verdict import apply_fail_closed
+from .verdict import apply_fail_closed, linked_critical_ids
 ZERO_RESULT = LLMResult(content="", prompt_tokens=0, completion_tokens=0)
 
 
@@ -70,6 +70,8 @@ def analyze(
     )
 
     must = must_include_offsets(functions, findings)
+    # Address-less critical findings tied to specific functions fail-close only those (S13).
+    linked = linked_critical_ids(findings, functions)
     must_norm = {normalize_address(x) for x in must}
     if must:
         tracer.event("must_include", offsets=sorted(must))
@@ -142,7 +144,7 @@ def analyze(
                 for fn in group:
                     summary = summaries.get(fn.offset) or FunctionSummary(
                         offset=fn.offset, summary="(could not be analyzed)", analysis_failed=True)
-                    summary = apply_fail_closed(summary, fn, findings)
+                    summary = apply_fail_closed(summary, fn, findings, linked)
                     result.summaries[fn.offset] = summary
                     result.per_function[fn.offset] = {
                         **per_fn_stats,
@@ -175,7 +177,7 @@ def analyze(
             try:
                 summary, res, stats = summarize_function(
                     client, fn, callee_summaries, findings, fn_budget, max_retries)
-                summary = apply_fail_closed(summary, fn, findings)
+                summary = apply_fail_closed(summary, fn, findings, linked)
                 stats["fail_closed"] = summary.fail_closed
                 return offset, summary, res, stats, time.monotonic() - t0, None
             except Exception as exc:  # noqa: BLE001

@@ -236,12 +236,47 @@ def _keyword_matches(word: str, text: str) -> bool:
     return word in text
 
 
+def linked_critical_ids(findings: list[Finding], functions: list[FunctionInfo]) -> frozenset[str]:
+    """Ids of address-less critical findings that can be tied to at least one function.
+
+    A finding is tied to a function by ``context.finding_matches_function`` (its value appears
+    in the function's code or in the function's IoC list: Ghidra string xrefs, .NET ldstr).
+    """
+    from .context import finding_matches_function  # local import: context imports verdict
+
+    ids = set()
+    for f in findings:
+        if f.address or not is_critical_finding(f):
+            continue
+        if any(finding_matches_function(f, fn) for fn in functions):
+            ids.add(finding_id(f))
+    return frozenset(ids)
+
+
+def _relevant_to(f: Finding, fn: FunctionInfo, linked: frozenset[str] | None) -> bool:
+    if f.address:
+        return f.address == fn.offset
+    # S13: an address-less finding that is tied to some functions applies only to them;
+    # one that cannot be tied to any function stays global (fail-closed for all).
+    # Revisit if a sample hides its use of an IoC (e.g. through a decoded pointer).
+    if linked is None or finding_id(f) not in linked:
+        return True
+    from .context import finding_matches_function
+
+    return finding_matches_function(f, fn)
+
+
 def apply_fail_closed(summary: FunctionSummary, fn: FunctionInfo,
-                      findings: list[Finding]) -> FunctionSummary:
-    """If the LLM says benign but a critical finding is relevant, return unknown."""
+                      findings: list[Finding],
+                      linked: frozenset[str] | None = None) -> FunctionSummary:
+    """If the LLM says benign but a critical finding is relevant, return unknown.
+
+    ``linked`` (from ``linked_critical_ids``) localizes address-less critical findings to the
+    functions they are tied to; ``None`` keeps the old rule (every address-less finding is global).
+    """
     if summary.suspicious is not False:
         return summary
-    relevant = [f for f in findings if not f.address or f.address == fn.offset]
+    relevant = [f for f in findings if _relevant_to(f, fn, linked)]
     critical = [f for f in relevant if is_critical_finding(f)]
     if not critical:
         return summary
