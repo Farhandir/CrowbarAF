@@ -372,10 +372,13 @@ export CROWBAR_LLM_BATCH_SIZE=4
 export CROWBAR_LLM_SINGLE_PASS=1           # one prompt when it fits
 export CROWBAR_LLM_SINGLE_PASS_MAX=40      # only for small samples
 export CROWBAR_LLM_MIN_SUSPICIOUS=3        # Policy C v2 LLM-only threshold
-export CROWBAR_LLM_MIN_BEHAVIORS=2
+export CROWBAR_LLM_MIN_BEHAVIORS=3        # canonical behavior classes
+export CROWBAR_LLM_MIN_ANALYZED=20        # LLM-only malicious needs this many analyzed functions
+export CROWBAR_LLM_C2_TRIAGE=1            # advisory C2 candidate triage (one call; never changes the verdict)
 export CROWBAR_LLM_MIN_COVERAGE=0.6
 export CROWBAR_TWO_SIGNAL_MALICIOUS=1      # 0 restores strict single-signal policy
 export CROWBAR_GHIDRA_TIMEOUT=1200        # seconds
+export CROWBAR_GHIDRA_MAXMEM=5g           # Ghidra JVM heap (-Xmx); empty = JVM default
 export CROWBAR_CAPA_TIMEOUT=600
 export CROWBAR_FLOSS_TIMEOUT=600
 export CROWBAR_READELF_TIMEOUT=60
