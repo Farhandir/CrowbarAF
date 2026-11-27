@@ -16,6 +16,8 @@ def from_env() -> LLMClient:
     user_agent = os.getenv("CROWBAR_LLM_USER_AGENT", "crowbaraf/0.1")
     session_id = os.getenv("CROWBAR_LLM_SESSION_ID") or None
     max_retries = int(os.getenv("CROWBAR_LLM_MAX_RETRIES", "5"))
+    # Per-request socket timeout. A hung request used to block a run for 20 min per attempt.
+    timeout = int(os.getenv("CROWBAR_LLM_TIMEOUT", "300"))
     return LLMClient(
         provider=provider,
         model=model,
@@ -26,4 +28,5 @@ def from_env() -> LLMClient:
         user_agent=user_agent,
         session_id=session_id,
         max_retries=max_retries,
+        timeout=timeout,
     )

@@ -105,6 +105,29 @@ def test_connection_error_is_retried(monkeypatch):
     assert len(calls) == 2 and len(waits) == 1
 
 
+def test_read_timeout_is_retried(monkeypatch):
+    calls = _script(monkeypatch, [TimeoutError("The read operation timed out"), OK_BODY])
+    c, waits = _client()
+    c.chat([{"role": "user", "content": "hi"}])
+    assert len(calls) == 2 and len(waits) == 1
+
+
+def test_read_timeout_gives_up_after_max_retries(monkeypatch):
+    calls = _script(monkeypatch, [TimeoutError("t")] * 3)
+    c, _ = _client(max_retries=2)
+    with pytest.raises(TimeoutError):
+        c.chat([{"role": "user", "content": "hi"}])
+    assert len(calls) == 3
+
+
+def test_factory_reads_timeout(monkeypatch):
+    from llm_layer.factory import from_env
+    monkeypatch.delenv("CROWBAR_LLM_TIMEOUT", raising=False)
+    assert from_env().timeout == 300
+    monkeypatch.setenv("CROWBAR_LLM_TIMEOUT", "45")
+    assert from_env().timeout == 45
+
+
 def test_factory_reads_max_retries(monkeypatch):
     from llm_layer.factory import from_env
     monkeypatch.setenv("CROWBAR_LLM_MAX_RETRIES", "1")
