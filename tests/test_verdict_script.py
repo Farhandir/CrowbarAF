@@ -31,10 +31,23 @@ def test_url_alone_is_not_two_signals():
     assert v["counts"]["signals"] == ["c2"]
 
 
-def test_combo_plus_url_is_malicious():
+def test_combo_plus_script_url_is_capped_at_review():
     v = compute_verdict([], [COMBO, URL], {})
-    assert v["verdict"] == "malicious"
+    assert v["verdict"] == "needs_review"
     assert set(v["counts"]["signals"]) == {"c2", "script"}
+    assert any("independent source" in r for r in v["reasons"])
+
+
+def test_combo_plus_independent_yara_is_malicious():
+    yara = Finding(source="yara", kind="rule", value="Some_Family", confidence=1.0)
+    v = compute_verdict([], [COMBO, yara], {})
+    assert v["verdict"] == "malicious"
+
+
+def test_script_combo_plus_floss_c2_is_not_script_only():
+    floss = Finding(source="floss", kind="url", value="http://198.51.100.7/g", confidence=0.7)
+    v = compute_verdict([], [COMBO, floss], {})
+    assert v["verdict"] == "malicious"
 
 
 def test_domain_alone_is_not_a_signal():
@@ -67,3 +80,58 @@ def test_script_route_without_functions_adds_unknown_reason():
 def test_other_route_has_no_script_reason():
     out = run_reverser(_state("native", []))
     assert SCRIPT_UNSUPPORTED_REASON not in out["verdict"]["unknown_reasons"]
+
+
+def test_script_reason_not_added_to_non_unknown_verdict():
+    out = run_reverser(_state("script", [COMBO]))
+    assert out["verdict"]["verdict"] == "needs_review"
+    assert SCRIPT_UNSUPPORTED_REASON not in out["verdict"]["unknown_reasons"]
+
+
+class _FakeClient:
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, json_mode=True, temperature=0.0, max_tokens=None):
+        from llm_layer.client import LLMResult
+        self.calls += 1
+        content = '{"candidates": [{"id": "c1", "label": "plausible_c2", "reason": "raw IP"}]}'
+        return LLMResult(content=content, prompt_tokens=10, completion_tokens=5)
+
+
+def test_script_route_runs_llm_c2_triage_lazily(monkeypatch):
+    import llm_layer.nodes as ln
+    fake = _FakeClient()
+    monkeypatch.setattr(ln, "from_env", lambda: fake)
+    out = run_reverser(_state("script", [COMBO, URL]))
+    assert fake.calls == 1
+    review = out["verdict"]["c2_review"]
+    assert review["llm"] is True and review["candidates"][0]["label"] == "plausible_c2"
+    assert out["verdict"]["verdict"] == "needs_review"  # advisory: verdict unchanged
+
+
+def test_no_candidates_creates_no_client(monkeypatch):
+    import llm_layer.nodes as ln
+
+    def boom():
+        raise AssertionError("client must not be created")
+    monkeypatch.setattr(ln, "from_env", boom)
+    run_reverser(_state("script", [COMBO]))
+
+
+def test_client_failure_keeps_deterministic_labels(monkeypatch):
+    import llm_layer.nodes as ln
+
+    def fail():
+        raise RuntimeError("no key")
+    monkeypatch.setattr(ln, "from_env", fail)
+    out = run_reverser(_state("script", [COMBO, URL]))
+    review = out["verdict"]["c2_review"]
+    assert review["llm"] is False and len(review["candidates"]) == 1
+
+
+def test_triage_disabled_creates_no_client(monkeypatch):
+    import llm_layer.nodes as ln
+    monkeypatch.setenv("CROWBAR_LLM_C2_TRIAGE", "0")
+    monkeypatch.setattr(ln, "from_env", lambda: (_ for _ in ()).throw(AssertionError("no client")))
+    run_reverser(_state("script", [COMBO, URL]))

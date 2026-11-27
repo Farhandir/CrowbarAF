@@ -320,6 +320,12 @@ def compute_verdict(
         signals.add("script")
     strong = signals & {"llm", "yara", "c2"}
     two_signal = len(signals) >= 2 and bool(strong)
+    # The script combo and a script URL come from the same analyzer (one pass over the
+    # same text), so together they are not two independent signals: cap at review.
+    script_only = ("script" in signals and signals <= {"script", "c2"}
+                   and all((f.source or "").lower() == "script" for f in low))
+    if script_only:
+        two_signal = False
 
     # LLM-only high-confidence tier (Policy C v2): several suspicious functions,
     # at least three canonical behavior classes, enough coverage and a large
@@ -366,6 +372,9 @@ def compute_verdict(
                            f"{len(behavior_classes)} behavior class(es)")
     elif require_two_signals and strong:
         verdict = NEEDS_REVIEW
+        if script_only:
+            reasons.append("script findings only (combo + C2-like URL from one analyzer); "
+                           "an independent source is required for malicious")
         reasons.append("single strong signal (" + ", ".join(sorted(strong))
                        + "); corroboration required")
         if llm_small_surface:
