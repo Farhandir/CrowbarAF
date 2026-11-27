@@ -283,7 +283,8 @@ class TestDeepInspectionGuard:
         )
         assert nodes.deep_inspection_node(state) == {}
 
-    @pytest.mark.parametrize("route", ["python", "dotnet", "fast_track", None])
+    # dotnet has its own branch (TestDeepInspectionDotnet in test_unpack_nodes.py)
+    @pytest.mark.parametrize("route", ["python", "fast_track", None])
     def test_skips_when_route_not_native(self, monkeypatch, route) -> None:
         self._boom(monkeypatch)
         assert nodes.deep_inspection_node(AgentState(file_path="x", route_flag=route)) == {}

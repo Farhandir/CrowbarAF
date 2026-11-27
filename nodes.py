@@ -58,6 +58,7 @@ from analyzers.binary import (
     shannon_entropy,
     tlsh,
 )
+from analyzers.dotnet_functions import build_dotnet_functions
 from analyzers.capa_floss import (
     CAPA_RULES_ENV,
     CAPA_TIMEOUT_SECONDS,
@@ -243,22 +244,17 @@ def unpack_python_node(state: AgentState) -> dict[str, Any]:
 
 
 def unpack_dotnet_node(state: AgentState) -> dict[str, Any]:
-    """de4dot (deobfuscation) + ilspycmd (decompile): extracts C# source from a .NET assembly.
+    """No-op placeholder: .NET decompilation is deferred to ``deep_inspection_node``.
 
-    Returns ``{}`` if the route is not ``dotnet``. If any step fails (tool missing,
-    timeout, no source produced) it returns ``{"route_flag": "native"}`` so that
-    ``deep_inspection_node`` can run Ghidra (native fallback).
+    Per-method source needs capa hints and findings, which only exist after
+    ``static_feature_node``.  Returns ``{}`` for the ``dotnet`` route (and for every
+    other route) without running any tool.
     """
     logger.info("[unpack_dotnet_node]")
     if state.sample.route != "dotnet":
         return {}
-
-    code = _extract_dotnet_source(state.file_path)
-    if not code.strip():
-        logger.warning("[unpack_dotnet_node] could not extract source; native fallback")
-        return {"route_flag": "native"}
-    func = DecompiledFunction(offset="", name="dotnet_source", priority=10, c_code=code)
-    return {"source_code": [func]}
+    logger.info("[unpack_dotnet_node] decompile is deferred to deep_inspection_node")
+    return {}
 
 
 def unpack_native_node(state: AgentState) -> dict[str, Any]:
@@ -348,7 +344,11 @@ def static_feature_node(state: AgentState) -> dict[str, Any]:
 
 
 def deep_inspection_node(state: AgentState) -> dict[str, Any]:
-    """Deep inspection / decompile with Ghidra (headless).
+    """Deep inspection: per-method .NET source or Ghidra (headless) decompilation.
+
+    For the ``dotnet`` route the per-method builder gets capa hints and findings from
+    ``static_feature_node``; if it is unusable, whole-assembly ILSpy output is used, and
+    finally Ghidra runs as the native fallback.
 
     capa hints and ``state.findings`` (import combos etc.) are passed to Ghidra for
     priority scoring. On error/timeout ``run_ghidra`` returns ``[]``.
@@ -361,6 +361,28 @@ def deep_inspection_node(state: AgentState) -> dict[str, Any]:
     if get_tool_profile() == "core":
         logger.info("[deep_inspection_node] skipped (%s=core: Ghidra is not run)", TOOL_PROFILE_ENV)
         return {}
+
+    if state.route_flag == "dotnet" and not state.source_code:
+        funcs = build_dotnet_functions(state.file_path, state.ghidra_hints, state.findings)
+        if funcs:
+            return {"source_code": funcs}
+
+        code = _extract_dotnet_source(state.file_path)
+        if code.strip():
+            func = DecompiledFunction(
+                offset="",
+                name="dotnet_source",
+                priority=10,
+                c_code=code,
+                decompile_warnings=["dotnet: per-method split unavailable; whole-assembly source"],
+            )
+            return {"source_code": [func]}
+
+        logger.warning("[deep_inspection_node] .NET source unavailable; native Ghidra fallback")
+        result = run_ghidra(state.file_path, state.ghidra_hints, state.findings,
+                            decoded_hints=list(getattr(state, "floss_hints", []) or []))
+        return {"source_code": result, "route_flag": "native"}
+
     if state.source_code or state.route_flag != "native":
         logger.info(
             "[deep_inspection_node] skipped (source_code=%d, route_flag=%s)",

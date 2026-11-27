@@ -125,14 +125,18 @@ def _extract_dotnet_source(file_path: str) -> str:
         if os.path.exists(clean_path):
             os.remove(clean_path)  # leftover output from a previous run
 
+        # de4dot is best effort: if it is missing, fails or writes nothing, decompile the original
+        # assembly. Obfuscated C# is still far better input than Ghidra disassembling MSIL as x86.
+        target = file_path
         if _run_tool(["de4dot", file_path, "-o", clean_path], DOTNET_TOOL_TIMEOUT_SECONDS) is None:
-            return ""
-        if not os.path.isfile(clean_path):
-            logger.warning("[unpack_dotnet_node] de4dot did not produce an output file")
-            return ""
+            logger.warning("[unpack_dotnet_node] de4dot unavailable/failed; decompiling original assembly")
+        elif not os.path.isfile(clean_path):
+            logger.warning("[unpack_dotnet_node] de4dot did not produce an output file; using original")
+        else:
+            target = clean_path
 
         # Note: ``-p`` (project mode) requires ``-o <folder>``; stdout mode emits a single C# file.
-        proc = _run_tool(["ilspycmd", clean_path], DOTNET_DECOMPILE_TIMEOUT_SECONDS)
+        proc = _run_tool(["ilspycmd", target], DOTNET_DECOMPILE_TIMEOUT_SECONDS)
         return proc.stdout if proc is not None and proc.stdout.strip() else ""
     except Exception as exc:  # noqa: BLE001 - the workflow must never crash
         logger.warning("[unpack_dotnet_node] unexpected error: %s: %s", type(exc).__name__, exc)
