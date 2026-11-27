@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-RouteFlag = Literal["python", "dotnet", "native", "fast_track"]
+RouteFlag = Literal["python", "dotnet", "native", "fast_track", "script"]
 
 
 class DecompiledFunction(BaseModel):
@@ -66,10 +66,13 @@ class SampleInfo(BaseModel):
     """Identity of the analyzed sample and the pre-scan (entry_node) summary."""
 
     sha256: str = Field(default="", description="SHA-256 digest of the file (hex).")
-    file_type: str = Field(default="unknown", description="PE | ELF | Mach-O | ...")
+    file_type: str = Field(
+        default="unknown",
+        description='PE | ELF | Mach-O | ... ("script/<type>", e.g. "script/js", for script samples).',
+    )
     route: str = Field(
         default="native",
-        description="python | dotnet | native | fast_track (same value as route_flag).",
+        description="python | dotnet | native | fast_track | script (same value as route_flag).",
     )
     packer: str = Field(default="unknown", description='UPX | none | ... ("unknown": detection failed).')
     arch: str = Field(default="unknown", description="x86 | x86-64 | arm64 | ...")

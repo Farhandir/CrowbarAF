@@ -99,6 +99,7 @@ from analyzers.findings import (
     string_in_file,
     yara_findings,
 )
+from analyzers.script import analyze_script_file, detect_script_type, extract_script_iocs
 from analyzers.triage import (
     DIE_TIMEOUT_SECONDS,
     KNOWN_MALWARE_META_KEY,
@@ -166,16 +167,26 @@ def get_tool_profile() -> str:
 # --------------------------------------------------------------------------- #
 # Helper (pure) logic: requires no external tools and is testable.
 # --------------------------------------------------------------------------- #
-def decide_route(die_info: dict[str, Any], yara_results: list[dict[str, Any]]) -> RouteFlag:
-    """Determines ``route_flag`` from DIE and YARA results.
+def decide_route(
+    die_info: dict[str, Any],
+    yara_results: list[dict[str, Any]],
+    script_type: str | None = None,
+) -> RouteFlag:
+    """Determines ``route_flag`` from DIE, YARA and script-detection results.
 
     ``die_info``: output of ``run_die`` (``packer``, ``language``, ``compiler``,
     ``detected``, etc.). An empty dict is valid and yields the ``native`` path.
+    ``script_type``: output of ``detect_script_type`` (``"js"``, ``"vbs"``, ...) or ``None``.
+
+    Order: known-malware YARA (``fast_track``) -> script -> python -> dotnet -> native.
     """
     for match in yara_results:
         meta = match.get("meta", {})
         if meta.get(KNOWN_MALWARE_META_KEY) == KNOWN_MALWARE_META_VALUE:
             return "fast_track"
+
+    if script_type:
+        return "script"
 
     haystack = " ".join(
         str(die_info.get(key, "")) for key in ("language", "compiler", "packer", "detected")
@@ -199,13 +210,20 @@ def entry_node(state: AgentState) -> dict[str, Any]:
     die_info = run_die(state.file_path)  # {} if the tool is missing/an error occurs
     yara_results = run_yara(state.file_path)  # [] if no rules/library
 
-    route = decide_route(die_info, yara_results)
+    # Script samples are recognized up front so they never reach the binary tools
+    # (capa/FLOSS/pefile in static_feature_node or Ghidra in deep_inspection_node).
+    script_type = detect_script_type(state.file_path, die_info)
+    route = decide_route(die_info, yara_results, script_type)
+
+    file_type = die_info.get("file_type", state.sample.file_type)
+    if route == "script" and script_type:
+        file_type = f"script/{script_type}"  # keep the script type for script_analysis_node
 
     # If DIE gave no information, SampleInfo defaults ("unknown") are kept
     updated_sample = state.sample.model_copy(
         update={
             "sha256": sha256 or state.sample.sha256,
-            "file_type": die_info.get("file_type", state.sample.file_type),
+            "file_type": file_type,
             "arch": die_info.get("arch", state.sample.arch),
             "packer": die_info.get("packer", state.sample.packer),
             "route": route,
@@ -218,6 +236,51 @@ def entry_node(state: AgentState) -> dict[str, Any]:
         "yara_results": yara_results,
         # fast_track skips static_feature_node; YARA evidence should still reach findings
         "findings": merge_findings(state.findings, yara_findings(yara_results)),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Script analysis (tool-free; script text never reaches source_code/the LLM)
+# --------------------------------------------------------------------------- #
+SCRIPT_FILE_TYPE_PREFIX = "script/"
+
+
+def script_analysis_node(state: AgentState) -> dict[str, Any]:
+    """Analyzes script samples (JS/VBS/PS1/HTA/WSF/BAT/LNK) statically, without executing them.
+
+    Returns ``{}`` if the route is not ``script`` or the script type cannot be
+    determined. URL/IP values are also added to ``extracted_strings`` so
+    ``ioc_extractor_node`` picks them up. The script text is never written to
+    ``source_code``: it must not be sent to the LLM. Runs regardless of
+    ``CROWBAR_TOOL_PROFILE`` (it is cheap and tool-free).
+    """
+    logger.info("[script_analysis_node]")
+    if state.route_flag != "script":
+        return {}
+
+    # entry_node stores the detected type as sample.file_type ("script/js"); fall back to
+    # content/extension detection if the state came from somewhere else (e.g. split mode).
+    file_type = state.sample.file_type or ""
+    if file_type.startswith(SCRIPT_FILE_TYPE_PREFIX):
+        script_type = file_type[len(SCRIPT_FILE_TYPE_PREFIX):]
+    else:
+        script_type = ""
+    if not script_type:
+        script_type = detect_script_type(state.file_path) or ""
+    if not script_type:
+        logger.warning("[script_analysis_node] script type unknown for %s", state.file_path)
+        return {}
+
+    findings = analyze_script_file(state.file_path, script_type)  # source="script"
+    logger.info("[script_analysis_node] type=%s findings=%d", script_type, len(findings))
+
+    # Domains and combos stay findings-only; URL/IP values feed ioc_extractor_node.
+    script_iocs = [f.value for f in findings if f.kind in ("url", "ip")]
+    extracted_strings = _unique([*state.extracted_strings, *script_iocs])
+
+    return {
+        "findings": finalize_findings(merge_findings(state.findings, findings), state.file_path, set()),
+        "extracted_strings": extracted_strings,
     }
 
 

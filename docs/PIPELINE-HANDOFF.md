@@ -147,7 +147,7 @@ Pipeline'ın ürettiği ve LLM katmanının tükettiği yapı:
   "sample": {
     "sha256": "...",
     "file_type": "PE|ELF|...",
-    "route": "python|dotnet|native|fast_track",
+    "route": "python|dotnet|native|fast_track|script",
     "packer": "UPX|none|...",
     "arch": "x86-64"
   },
