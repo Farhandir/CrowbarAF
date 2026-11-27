@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,10 @@ from state import DecompiledFunction
 logger = logging.getLogger(__name__)
 
 GHIDRA_TIMEOUT_SECONDS = int(os.environ.get("CROWBAR_GHIDRA_TIMEOUT", "600"))
+# JVM max heap for Ghidra (e.g. "5g"). PyGhidra does not pass -Xmx, so the JVM default
+# (~1/4 of RAM) applies and large Go/Rust binaries hit OutOfMemoryError. Empty = JVM default.
+GHIDRA_MAXMEM = os.environ.get("CROWBAR_GHIDRA_MAXMEM", "").strip()
+_MAXMEM_RE = re.compile(r"^\d+[kKmMgG]$")
 GHIDRA_PROJECT_NAME = "TempGhidraProject"
 SCRIPT_NAME = "export_functions.py"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +48,21 @@ def _find_analyze_headless() -> str | None:
         if os.path.isfile(candidate):
             return candidate
     return None
+
+
+def _ghidra_env(maxmem: str | None = None) -> dict[str, str] | None:
+    """Return a subprocess env with -Xmx in JAVA_TOOL_OPTIONS, or None to inherit."""
+    maxmem = GHIDRA_MAXMEM if maxmem is None else maxmem.strip()
+    if not maxmem:
+        return None
+    if not _MAXMEM_RE.match(maxmem):
+        logger.warning("[run_ghidra] ignoring invalid CROWBAR_GHIDRA_MAXMEM=%r (expected e.g. 5g)",
+                       maxmem)
+        return None
+    env = dict(os.environ)
+    opts = re.sub(r"-Xmx\S+", "", env.get("JAVA_TOOL_OPTIONS", "")).split()
+    env["JAVA_TOOL_OPTIONS"] = " ".join([*opts, f"-Xmx{maxmem}"])
+    return env
 
 
 def _finding_to_dict(finding: BaseModel | dict[str, Any]) -> dict[str, Any]:
@@ -150,6 +170,7 @@ def run_ghidra(
             errors="replace",
             timeout=GHIDRA_TIMEOUT_SECONDS,
             check=False,
+            env=_ghidra_env(),
         )
         if proc.returncode != 0:
             tail = (proc.stderr.strip() or proc.stdout.strip() or "no output")[-500:]
@@ -159,7 +180,12 @@ def run_ghidra(
             return []
 
         if not os.path.isfile(out_json_path):
-            logger.error("[run_ghidra] Ghidra did not produce an output file (out.json)")
+            # analyzeHeadless exits 0 even when the post-script fails; keep the tail for diagnosis.
+            output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            errors = [ln.strip() for ln in output.splitlines()
+                      if re.search(r"Exception|Error|ERROR|SEVERE", ln) and not ln.lstrip().startswith("at ")]
+            detail = " | ".join(errors[:12])[:1500] or output[-800:] or "no output"
+            logger.error("[run_ghidra] Ghidra did not produce an output file (out.json): %s", detail)
             return []
 
         with open(out_json_path, "r", encoding="utf-8") as fh:
