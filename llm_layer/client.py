@@ -144,7 +144,9 @@ class LLMClient:
                 if e.code not in RETRYABLE_STATUS or attempt == self.max_retries:
                     raise
                 wait = _retry_after_seconds(e.headers)
-            except urllib.error.URLError:
+            except (urllib.error.URLError, TimeoutError):
+                # TimeoutError: the server accepted the request but sent nothing within
+                # ``timeout`` (a hung request); retried like a connection failure.
                 if attempt == self.max_retries:
                     raise
                 wait = None

@@ -335,3 +335,22 @@ def test_must_include_is_capped(monkeypatch):
     monkeypatch.setattr(df, "split_csharp_members", lambda files: members)
     out = df.build_dotnet_functions("x.dll", hints, [])
     assert sum(1 for f in out if f.c_code) == 3
+
+
+def test_unmatched_tiny_member_is_trivial_library(monkeypatch):
+    import analyzers.dotnet_functions as df
+    methods = [
+        df.DotnetMethod(token=0x06000001, type_name="Ns.T", name="Run", param_count=0, il_size=40, has_body=True),
+        df.DotnetMethod(token=0x06000002, type_name="Ns.T", name="get_X", param_count=0, il_size=7, has_body=True),
+        df.DotnetMethod(token=0x06000003, type_name="Ns.T", name="Big", param_count=0, il_size=40, has_body=True,
+                        callees=[]),
+    ]
+    methods[0].callees = [0x06000002, 0x06000003]
+    members = [df.CSharpMember(type_name="Ns.T", name="Run", param_count=0, code="void Run() {}",
+                               file="T.cs", start_line=1)]
+    monkeypatch.setattr(df, "extract_dotnet_methods", lambda path: methods)
+    monkeypatch.setattr(df, "run_ilspy_project", lambda path, timeout: {"T.cs": "x"})
+    monkeypatch.setattr(df, "split_csharp_members", lambda files: members)
+    by = {f.offset: f for f in df.build_dotnet_functions("x.dll", [], [])}
+    assert by["0x6000002"].is_library and by["0x6000002"].decompile_warnings == [df._TRIVIAL_WARNING]
+    assert not by["0x6000003"].is_library and by["0x6000003"].decompile_warnings == [df._NO_MEMBER_WARNING]

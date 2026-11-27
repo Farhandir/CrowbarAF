@@ -5,6 +5,7 @@ separate from the pipeline code and testable.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from .c2_triage import (collect_c2_candidates, deterministic_review, sort_review,
@@ -12,7 +13,9 @@ from .c2_triage import (collect_c2_candidates, deterministic_review, sort_review
 from .factory import from_env
 from .pipeline import analyze
 from .types import Finding, FunctionInfo
-from .verdict import compute_verdict
+from .verdict import SCRIPT_UNSUPPORTED_REASON, compute_verdict
+
+logger = logging.getLogger(__name__)
 
 
 def _c2_triage_enabled() -> bool:
@@ -59,6 +62,34 @@ def _to_findings(state) -> list[Finding]:
     ]
 
 
+def _c2_review(findings, functions, client, lazy_client: bool = False) -> dict:
+    """Advisory C2 candidate review; never changes the verdict.
+
+    With ``lazy_client`` the LLM client is created only when there are candidates and the
+    triage is enabled; if it cannot be created the deterministic labels are kept.
+    """
+    candidates = collect_c2_candidates(findings, functions)
+    review = None
+    if candidates and _c2_triage_enabled():
+        if client is None and lazy_client:
+            try:
+                client = from_env()
+            except Exception as exc:  # noqa: BLE001 - advisory step must not break the verdict
+                logger.warning("[c2_triage] no LLM client (%s); deterministic labels only",
+                               type(exc).__name__)
+        if client is not None:
+            review = triage_c2_candidates(candidates, client)
+    if review is None:
+        review = deterministic_review(candidates)
+    return {
+        "candidates": sort_review(review["candidates"]),
+        "llm": review["llm"],
+        "prompt_tokens": review["prompt_tokens"],
+        "completion_tokens": review["completion_tokens"],
+        "error": review["error"],
+    }
+
+
 def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     """ai_reverser_agent: bottom-up function summarization."""
     import time
@@ -68,8 +99,15 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     findings = _to_findings(state)
     if not functions:
         verdict = compute_verdict(all_functions, findings, {})
-        verdict["c2_review"] = deterministic_review(
-            collect_c2_candidates(findings, all_functions))
+        route = (getattr(getattr(state, "sample", None), "route", "") or "").lower()
+        # Only an unknown verdict is explained by the unsupported format; a review or
+        # malicious verdict already rests on the static script findings.
+        if (route == "script" and verdict["verdict"] == "unknown"
+                and SCRIPT_UNSUPPORTED_REASON not in verdict["unknown_reasons"]):
+            verdict["unknown_reasons"].append(SCRIPT_UNSUPPORTED_REASON)
+        # Scripts (and empty decompiles) still get the advisory C2 triage; the client is
+        # created only when there is something to triage.
+        verdict["c2_review"] = _c2_review(findings, all_functions, client, lazy_client=True)
         return {"intent_analysis": "No functions to analyze (empty Ghidra output).",
                 "verdict": verdict}
 
@@ -136,18 +174,7 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
                               packed=packed, analysis_failures=result.failures,
                               require_two_signals=two_signal)
     # Advisory only: the labels are reported, never fed back into the verdict.
-    c2_candidates = collect_c2_candidates(findings, all_functions)
-    if c2_candidates and _c2_triage_enabled():
-        review = triage_c2_candidates(c2_candidates, client)
-    else:
-        review = deterministic_review(c2_candidates)
-    verdict["c2_review"] = {
-        "candidates": sort_review(review["candidates"]),
-        "llm": review["llm"],
-        "prompt_tokens": review["prompt_tokens"],
-        "completion_tokens": review["completion_tokens"],
-        "error": review["error"],
-    }
+    verdict["c2_review"] = _c2_review(findings, all_functions, client)
     return {"source_code": updated, "intent_analysis": intent, "verdict": verdict}
 
 
