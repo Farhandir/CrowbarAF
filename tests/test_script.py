@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from analyzers.script import (
@@ -334,3 +336,72 @@ def test_analyze_script_file_js(tmp_path):
 
 def test_analyze_script_file_missing_path_returns_empty(tmp_path):
     assert analyze_script_file(str(tmp_path / "missing.js"), "js") == []
+
+
+# --------------------------------------------------------------------------- #
+# Deobfuscation integration
+# --------------------------------------------------------------------------- #
+def _b64(data: str | bytes) -> str:
+    if isinstance(data, str):
+        data = data.encode()
+    return base64.b64encode(data).decode("ascii")
+
+
+def _fake_pe() -> bytes:
+    return b"MZ" + b"\x90" * 200 + b"This program cannot be run in DOS mode"
+
+
+def test_deobf_does_not_duplicate_raw_url(tmp_path):
+    hidden = _b64("Harmless note. " * 20 + "http://example.com/x")
+    text = f'var u = "http://example.com/x";\nvar b = "{hidden}";\n'
+    path = _write(tmp_path, "sample.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    assert any(f.kind == "url" and f.value == "http://example.com/x" for f in findings)
+    assert not any(f.kind == "deobf_url" and f.value == "http://example.com/x" for f in findings)
+
+
+def test_deobf_combo_hidden_behind_charcodes_and_concat(tmp_path):
+    text = (
+        'Set sh = CreateObject(Chr(87) & Chr(83) & "cript.Shell")\n'
+        'sh.Run("cmd /c calc")\n'
+    )
+    path = _write(tmp_path, "hidden.vbs", text.encode())
+
+    findings = analyze_script_file(path, "vbs")
+
+    combos = [f for f in findings if f.kind == "combo" and f.address.startswith("deobf:")]
+    assert combos
+    assert combos[0].value == "Script Host Spawn"
+    assert combos[0].confidence == 0.8
+    assert combos[0].source == "script"
+
+
+def test_deobf_embedded_pe_becomes_finding(tmp_path):
+    text = f'var payload = "{_b64(_fake_pe())}";\n'
+    path = _write(tmp_path, "dropper.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    embedded = [f for f in findings if f.kind == "embedded_pe"]
+    assert len(embedded) == 1
+    assert embedded[0].value.startswith("sha256=")
+    assert " size=" in embedded[0].value
+    assert embedded[0].address.startswith("deobf:")
+    assert embedded[0].confidence == 0.9
+
+
+def test_deobf_kill_switch_disables_deobf_findings(tmp_path, monkeypatch):
+    monkeypatch.setenv("CROWBAR_SCRIPT_DEOBF", "0")
+    text = (
+        'var u = "http://example.com/x";\n'
+        f'var payload = "{_b64(_fake_pe())}";\n'
+        'Set sh = CreateObject(Chr(87) & Chr(83) & "cript.Shell")\n'
+    )
+    path = _write(tmp_path, "disabled.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    assert any(f.kind == "url" for f in findings)  # raw analysis still runs
+    assert not any(f.kind.startswith("deobf_") or f.kind.startswith("embedded_") for f in findings)

@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from analyzers.capa_floss import _IPV4_RE, _URL_RE
+from analyzers.script_deobf import DeobfResult, deobfuscate
 from state import Finding
 
 logger = logging.getLogger(__name__)
@@ -370,13 +371,13 @@ def extract_script_iocs(text: str) -> dict[str, list[str]]:
 # --------------------------------------------------------------------------- #
 # Findings
 # --------------------------------------------------------------------------- #
-def _finding(kind: str, value: str, confidence: float) -> Finding:
+def _finding(kind: str, value: str, confidence: float, address: str = "") -> Finding:
     """Builds a script finding without a precomputed deterministic ID."""
     return Finding(
         source=SCRIPT_SOURCE,
         kind=kind,
         value=value,
-        address="",
+        address=address,
         confidence=confidence,
         finding_id="",
         verified=True,
@@ -401,13 +402,74 @@ def script_findings(text: str, script_type: str) -> list[Finding]:
     return findings
 
 
+_DEOBF_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
+_DEOBF_IOC_FINDINGS: tuple[tuple[str, str, float], ...] = (
+    ("url", "deobf_url", 0.7),
+    ("ip", "deobf_ip", 0.7),
+    ("domain", "deobf_domain", 0.5),
+)
+_EMBEDDED_BINARY_KINDS = {"pe": "embedded_pe", "zip": "embedded_zip"}
+
+
+def _deobf_enabled() -> bool:
+    """Reads the kill switch at call time (default: enabled)."""
+    return os.environ.get("CROWBAR_SCRIPT_DEOBF", "1").strip().lower() not in _DEOBF_DISABLED_VALUES
+
+
+def _deobf_findings(result: DeobfResult, raw_findings: Iterable[Finding]) -> list[Finding]:
+    """Converts deobfuscation artefacts into findings, avoiding raw duplicates."""
+    raw_list = list(raw_findings)
+    seen_combos = {finding.value for finding in raw_list if finding.kind == "combo"}
+    seen_iocs: dict[str, set[str]] = {
+        raw_kind: {finding.value for finding in raw_list if finding.kind == raw_kind}
+        for raw_kind, _kind, _confidence in _DEOBF_IOC_FINDINGS
+    }
+
+    findings: list[Finding] = []
+    for layer in result.layers:
+        address = f"deobf:{layer.transform}"
+        for rule in match_script_combos(layer.text):
+            if rule in seen_combos:
+                continue
+            seen_combos.add(rule)
+            findings.append(_finding("combo", rule, 0.8, address=address))
+        iocs = extract_script_iocs(layer.text)
+        for raw_kind, kind, confidence in _DEOBF_IOC_FINDINGS:
+            for value in iocs[raw_kind]:
+                if value in seen_iocs[raw_kind]:
+                    continue
+                seen_iocs[raw_kind].add(value)
+                findings.append(_finding(kind, value, confidence, address=address))
+
+    for binary in result.binaries:
+        kind = _EMBEDDED_BINARY_KINDS.get(binary.kind)
+        if kind is None:
+            continue
+        findings.append(
+            _finding(
+                kind,
+                f"sha256={binary.sha256} size={binary.size}",
+                0.9,
+                address=f"deobf:{binary.transform}",
+            )
+        )
+    return findings
+
+
 def analyze_script_file(file_path: str, script_type: str) -> list[Finding]:
     """Analyzes a script file; returns ``[]`` for LNK or on any error."""
     if script_type == "lnk":
         logger.info("[script] lnk parsing not yet supported: %s", file_path)
         return []
     try:
-        return script_findings(read_script_text(file_path), script_type)
+        text = read_script_text(file_path)
+        findings = script_findings(text, script_type)
+        if _deobf_enabled():
+            result = deobfuscate(text)
+            for note in result.notes:
+                logger.info("[script] deobf note for %s: %s", file_path, note)
+            findings.extend(_deobf_findings(result, findings))
+        return findings
     except Exception as exc:  # noqa: BLE001 - standalone analysis must never crash the caller
         logger.warning("[script] analysis failed for %s: %s", file_path, exc)
         return []
