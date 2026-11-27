@@ -25,6 +25,7 @@ from export_functions import (
     LARGE_FUNCTION_PENALTY,
     MAX_IOCS_PER_FUNCTION,
     MAX_STUBS,
+    MIN_FUNCTION_BYTES,
     MIN_IOC_LENGTH,
     propagate_priority,
 )
@@ -74,6 +75,7 @@ MAX_CODE_CHARS = 60_000
 MAX_MUST_INCLUDE_EXTRA = 100
 
 _NO_MEMBER_WARNING = "dotnet: no matching C# member"
+_TRIVIAL_WARNING = "dotnet: trivial member (no C# block)"
 _BUDGET_WARNING = "dotnet: not selected (budget)"
 _TRUNCATED_WARNING = "dotnet: code truncated"
 
@@ -267,8 +269,13 @@ def _build_records(
 
         warnings: list[str] = []
         c_code = ""
+        # Auto-property accessors and empty constructors have no C# block of their own
+        # (``{ get; set; }``) and only a few IL bytes; treat them like Ghidra's tiny functions.
+        trivial = not matched and not method.is_generated and method.il_size < MIN_FUNCTION_BYTES
         if matched and member is not None:
             c_code = member.code
+        elif trivial:
+            warnings.append(_TRIVIAL_WARNING)
         elif not method.is_generated:
             warnings.append(_NO_MEMBER_WARNING)
 
@@ -282,7 +289,7 @@ def _build_records(
             capa_hits=_capa_hits_for_token(method.token, ghidra_hints),
             iocs=_matching_iocs(list(method.strings), ioc_values),
             api_refs=list(method.api_refs),
-            is_library=method.is_generated,
+            is_library=method.is_generated or trivial,
         )
         records.append(record)
 
