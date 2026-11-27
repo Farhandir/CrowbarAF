@@ -126,9 +126,9 @@ def test_select_findings_budget_is_bounded_and_traced():
 
 def test_build_context_reports_finding_trace():
     fn = _fn("0x401000", "int f(){return 1;}")
-    findings = [Finding(source="floss", kind="string", value="http://x", address=None)]
+    findings = [Finding(source="floss", kind="string", value="http://x.example", address=None)]
     text, stats = build_function_context(fn, [], findings, budget_tokens=1000)
-    assert "http://x" in text
+    assert "http://x.example" in text
     assert stats["findings_total"] == 1
     assert stats["findings_used"] == 1
     assert stats["findings_dropped"] == 0
@@ -956,16 +956,18 @@ def test_fail_closed_empty_address_critical():
 
 
 def test_llm_high_confidence_promotes_multiple_behavior_functions():
-    fns = [_fn(f"0x{i}", "code") for i in range(1, 4)]
+    # Policy C v2: >= LLM_MIN_ANALYZED analyzed functions and >= 3 canonical classes.
+    fns = [_fn(f"0x{i}", "code") for i in range(1, 26)]
     summaries = {
-        f"0x{i}": FunctionSummary(offset=f"0x{i}", summary="persistence and network behavior",
+        f"0x{i}": FunctionSummary(offset=f"0x{i}", summary="persistence, network and file deletion",
                                   suspicious=True, behaviors=["persistence", "network"])
         for i in range(1, 4)
     }
+    summaries.update({f"0x{i}": _summary(f"0x{i}", False) for i in range(4, 26)})
     v = compute_verdict(fns, [], summaries)
     assert v["verdict"] == "malicious"
     assert v["counts"]["llm_high_confidence"] is True
-    assert v["counts"]["behavior_classes"] >= 2
+    assert v["counts"]["behavior_classes"] >= 3
 
 
 def test_llm_high_confidence_requires_three_functions():

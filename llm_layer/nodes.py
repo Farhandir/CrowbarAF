@@ -5,10 +5,20 @@ separate from the pipeline code and testable.
 """
 from __future__ import annotations
 
+import os
+
+from .c2_triage import (collect_c2_candidates, deterministic_review, sort_review,
+                        triage_c2_candidates)
 from .factory import from_env
 from .pipeline import analyze
 from .types import Finding, FunctionInfo
 from .verdict import compute_verdict
+
+
+def _c2_triage_enabled() -> bool:
+    """Advisory C2 triage is on by default; CROWBAR_LLM_C2_TRIAGE=0 disables it."""
+    return os.getenv("CROWBAR_LLM_C2_TRIAGE", "1").strip().lower() not in (
+        "0", "false", "no", "off")
 
 
 def _to_function_infos(state, include_empty: bool = False) -> list[FunctionInfo]:
@@ -51,15 +61,17 @@ def _to_findings(state) -> list[Finding]:
 
 def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     """ai_reverser_agent: bottom-up function summarization."""
-    import os
     import time
 
     all_functions = _to_function_infos(state, include_empty=True)
     functions = [f for f in all_functions if (f.c_code or "").strip()]
     findings = _to_findings(state)
     if not functions:
+        verdict = compute_verdict(all_functions, findings, {})
+        verdict["c2_review"] = deterministic_review(
+            collect_c2_candidates(findings, all_functions))
         return {"intent_analysis": "No functions to analyze (empty Ghidra output).",
-                "verdict": compute_verdict(all_functions, findings, {})}
+                "verdict": verdict}
 
     client = client or from_env()
     max_workers = int(os.getenv("CROWBAR_LLM_MAX_WORKERS", "1"))
@@ -123,6 +135,19 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     verdict = compute_verdict(all_functions, findings, result.summaries,
                               packed=packed, analysis_failures=result.failures,
                               require_two_signals=two_signal)
+    # Advisory only: the labels are reported, never fed back into the verdict.
+    c2_candidates = collect_c2_candidates(findings, all_functions)
+    if c2_candidates and _c2_triage_enabled():
+        review = triage_c2_candidates(c2_candidates, client)
+    else:
+        review = deterministic_review(c2_candidates)
+    verdict["c2_review"] = {
+        "candidates": sort_review(review["candidates"]),
+        "llm": review["llm"],
+        "prompt_tokens": review["prompt_tokens"],
+        "completion_tokens": review["completion_tokens"],
+        "error": review["error"],
+    }
     return {"source_code": updated, "intent_analysis": intent, "verdict": verdict}
 
 

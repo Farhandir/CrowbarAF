@@ -20,6 +20,10 @@ import re
 import sys
 
 from utils import defang_ioc, defang_text
+from llm_layer.c2_triage import (collect_c2_candidates, deterministic_review,
+                                 sort_review)
+from llm_layer.types import Finding as LLMFinding
+from llm_layer.types import FunctionInfo as LLMFunctionInfo
 
 FLOSS_CAP = 60
 IMPORT_CAP = 80
@@ -39,6 +43,62 @@ def _by_source(findings: list[dict], source: str) -> list[dict]:
 
 def _interesting(fn: dict) -> bool:
     return bool(fn.get("capa_hits")) or (fn.get("priority") or 0) >= 4
+
+
+def _to_llm_finding(d: dict) -> LLMFinding:
+    """State finding dict -> LLM layer type (same mapping as llm_layer.nodes)."""
+    return LLMFinding(
+        source=str(d.get("source") or ""),
+        kind=str(d.get("kind") or ""),
+        value=str(d.get("value") or ""),
+        address=d.get("address") or None,
+        confidence=float(d.get("confidence") or 0.0),
+        finding_id=str(d.get("finding_id") or ""),
+        verified=bool(d.get("verified", True)),
+    )
+
+
+def _to_llm_function(d: dict) -> LLMFunctionInfo:
+    """State function dict -> LLM layer type (same mapping as llm_layer.nodes)."""
+    return LLMFunctionInfo(
+        offset=str(d.get("offset") or ""),
+        name=str(d.get("name") or ""),
+        c_code=str(d.get("c_code") or ""),
+        priority=int(d.get("priority") or 0),
+        size=int(d.get("size") or 0),
+        is_library=bool(d.get("is_library", False)),
+        callees=list(d.get("callees") or []),
+        xrefs=list(d.get("xrefs") or []),
+        decompile_warnings=list(d.get("decompile_warnings") or []),
+        iocs=list(d.get("iocs") or []),
+    )
+
+
+def _c2_review(v4: dict, findings: list[dict], functions: list[dict]) -> dict:
+    """Advisory C2 candidate list; falls back to deterministic labels without an LLM run.
+
+    Tokens/context are defanged here (presentation layer); the state/DB keep raw values.
+    """
+    review = (v4 or {}).get("c2_review")
+    if not isinstance(review, dict) or not isinstance(review.get("candidates"), list):
+        review = deterministic_review(collect_c2_candidates(
+            [_to_llm_finding(f) for f in findings],
+            [_to_llm_function(f) for f in functions],
+        ))
+    entries = sort_review([dict(c) for c in review.get("candidates") or []
+                           if isinstance(c, dict)])
+    for entry in entries:
+        entry["token"] = defang_text(str(entry.get("token") or ""))
+        entry["context"] = defang_text(str(entry.get("context") or ""))
+        entry["reason"] = defang_text(str(entry.get("reason") or ""))
+    return {
+        "candidates": entries,
+        "llm": bool(review.get("llm")),
+        "prompt_tokens": review.get("prompt_tokens"),
+        "completion_tokens": review.get("completion_tokens"),
+        "error": defang_text(str(review.get("error") or "")),
+    }
+
 
 
 def build(state: dict, trace: dict | None = None) -> dict:
@@ -106,6 +166,7 @@ def build(state: dict, trace: dict | None = None) -> dict:
             "state": state_v,
             "has_deterministic_evidence": deterministic,
             "coverage": (v4.get("coverage") or {}),
+            "c2_review": _c2_review(v4, findings, functions),
             "unknown_reasons": [defang_text(x) for x in (v4.get("unknown_reasons") or [])],
             "next_actions": [defang_text(x) for x in (v4.get("next_actions") or [])],
         },
@@ -169,6 +230,11 @@ def _limitations(level: str, deterministic: bool, ai: dict | None) -> list[str]:
 
 def render_json(rep: dict) -> str:
     return json.dumps(rep, ensure_ascii=False, indent=2)
+
+
+def _md_cell(value) -> str:
+    """Single-line Markdown table cell (pipes escaped, newlines collapsed)."""
+    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ").strip()
 
 
 def render_markdown(rep: dict) -> str:
@@ -242,6 +308,19 @@ def render_markdown(rep: dict) -> str:
         L.append(f"| `{f['offset']}` | {f['name']} | {f['priority']} | {f['size']} | {'yes' if f['interesting'] else '—'} |")
     if not g["prioritized"]:
         L.append("| - | (no functions) | | | |")
+
+    c2_review = v.get("c2_review") or {}
+    c2_candidates = c2_review.get("candidates") or []
+    if c2_candidates:
+        L += ["", "## C2 candidates (manual review)",
+              "LLM labels are advisory; they do not change the verdict.", "",
+              "| label | token | verified | functions | reason |",
+              "|---|---|---|---|---|"]
+        for c in c2_candidates:
+            funcs = ", ".join(_md_cell(x) for x in (c.get("functions") or [])) or "—"
+            L.append(f"| {_md_cell(c.get('label') or 'unclear')} | `{_md_cell(c.get('token'))}` | "
+                     f"{'yes' if c.get('verified') else 'no'} | {funcs} | "
+                     f"{_md_cell(c.get('reason'))} |")
 
     if rep["ai"]:
         L += ["", "## AI commentary (not authoritative — read with caution)"]
@@ -361,6 +440,23 @@ def render_html(rep: dict) -> str:
     parts.append(_table(["Offset", "Name", "Priority", "Size", "Interesting", "LLM summary"], rows)
                  if rows else '<p class="empty">No functions.</p>')
     parts.append("</section>")
+
+    c2_review = v.get("c2_review") or {}
+    c2_rows = []
+    for c in c2_review.get("candidates") or []:
+        funcs = ", ".join(str(x) for x in (c.get("functions") or []))
+        c2_rows.append([
+            _esc(c.get("label") or "unclear"),
+            f"<code>{_esc(c.get('token'))}</code>",
+            "yes" if c.get("verified") else "no",
+            _esc(funcs or "—"),
+            _esc(str(c.get("reason") or "")[:200]),
+        ])
+    if c2_rows:
+        parts.append('<section class="card"><h2>C2 candidates (manual review)</h2>'
+                     '<p class="muted">LLM labels are advisory; they do not change the verdict.</p>')
+        parts.append(_table(["Label", "Token", "Verified", "Functions", "Reason"], c2_rows))
+        parts.append("</section>")
 
     ai = rep.get("ai")
     if ai:

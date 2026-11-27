@@ -8,8 +8,8 @@ import subprocess
 import pytest
 
 import nodes
-from nodes import _find_main_pyc, unpack_dotnet_node, unpack_python_node
-from state import AgentState, SampleInfo
+from nodes import _extract_dotnet_source, _find_main_pyc, unpack_dotnet_node, unpack_python_node
+from state import AgentState, DecompiledFunction, SampleInfo
 
 
 def _state(path, route: str) -> AgentState:
@@ -156,6 +156,15 @@ class TestUnpackDotnet:
         _no_tools(monkeypatch)
         assert unpack_dotnet_node(_state(tmp_path / "a.exe", route)) == {}
 
+    def test_dotnet_route_defers_decompilation(self, tmp_path, monkeypatch) -> None:
+        _no_tools(monkeypatch)
+        assert unpack_dotnet_node(_state(tmp_path / "a.exe", "dotnet")) == {}
+
+
+# --------------------------------------------------------------------------- #
+# _extract_dotnet_source (whole-assembly fallback)
+# --------------------------------------------------------------------------- #
+class TestExtractDotnetSource:
     def test_success_and_cleanup(self, tmp_path, monkeypatch) -> None:
         calls = []
         src = tmp_path / "app.exe"
@@ -173,10 +182,8 @@ class TestUnpackDotnet:
             raise AssertionError(cmd)
 
         monkeypatch.setattr(nodes.subprocess, "run", fake_run)
-        out = unpack_dotnet_node(_state(src, "dotnet"))
 
-        [func] = out["source_code"]
-        assert (func.name, func.priority, func.c_code) == ("dotnet_source", 10, "class Program { }\n")
+        assert _extract_dotnet_source(str(src)) == "class Program { }\n"
         assert calls[0][0] == ["de4dot", str(src), "-o", clean]
         assert calls[0][1]["timeout"] == 60
         assert calls[1][0] == ["ilspycmd", clean]
@@ -193,33 +200,53 @@ class TestUnpackDotnet:
             if cmd[0] == "de4dot":
                 seen["existed"] = stale.exists()
                 return _ok(cmd, code=1)
-            raise AssertionError(cmd)
+            return _ok(cmd, code=1, stderr="no")
 
         monkeypatch.setattr(nodes.subprocess, "run", fake_run)
-        assert unpack_dotnet_node(_state(src, "dotnet")) == {"route_flag": "native"}
+        assert _extract_dotnet_source(str(src)) == ""
         assert seen["existed"] is False
 
-    def test_de4dot_failure_skips_ilspy(self, tmp_path, monkeypatch) -> None:
+    def test_de4dot_failure_decompiles_original(self, tmp_path, monkeypatch) -> None:
+        calls = []
+        src = tmp_path / "a.exe"
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "de4dot":
+                return _ok(cmd, code=1, stderr="bad")
+            return _ok(cmd, stdout="class P { }\n")
+
+        monkeypatch.setattr(nodes.subprocess, "run", fake_run)
+        assert _extract_dotnet_source(str(src)) == "class P { }\n"
+        assert calls[1] == ["ilspycmd", str(src)]
+
+    def test_de4dot_missing_decompiles_original(self, tmp_path, monkeypatch) -> None:
+        src = tmp_path / "a.exe"
         calls = []
 
         def fake_run(cmd, **kwargs):
-            calls.append(cmd[0])
-            return _ok(cmd, code=1, stderr="bad")
+            calls.append(cmd)
+            if cmd[0] == "de4dot":
+                raise FileNotFoundError("de4dot")
+            return _ok(cmd, stdout="class P { }\n")
 
         monkeypatch.setattr(nodes.subprocess, "run", fake_run)
-        assert unpack_dotnet_node(_state(tmp_path / "a.exe", "dotnet")) == {"route_flag": "native"}
-        assert calls == ["de4dot"]
+        assert _extract_dotnet_source(str(src)) == "class P { }\n"
+        assert calls[1] == ["ilspycmd", str(src)]
 
     def test_de4dot_without_output_file(self, tmp_path, monkeypatch) -> None:
+        src = tmp_path / "a.exe"
         calls = []
 
         def fake_run(cmd, **kwargs):
-            calls.append(cmd[0])
-            return _ok(cmd)  # looks successful but no file exists
+            calls.append(cmd)
+            if cmd[0] == "de4dot":
+                return _ok(cmd)  # looks successful but no file exists
+            return _ok(cmd, code=1, stderr="boom")
 
         monkeypatch.setattr(nodes.subprocess, "run", fake_run)
-        assert unpack_dotnet_node(_state(tmp_path / "a.exe", "dotnet")) == {"route_flag": "native"}
-        assert calls == ["de4dot"]
+        assert _extract_dotnet_source(str(src)) == ""
+        assert calls[1] == ["ilspycmd", str(src)]
 
     def test_ilspy_failure_cleans_up(self, tmp_path, monkeypatch) -> None:
         src = tmp_path / "a.exe"
@@ -231,7 +258,7 @@ class TestUnpackDotnet:
             return _ok(cmd, code=1, stderr="boom")
 
         monkeypatch.setattr(nodes.subprocess, "run", fake_run)
-        assert unpack_dotnet_node(_state(src, "dotnet")) == {"route_flag": "native"}
+        assert _extract_dotnet_source(str(src)) == ""
         assert not os.path.exists(str(src) + ".clean")
 
     @pytest.mark.parametrize("exc", [FileNotFoundError("de4dot"), subprocess.TimeoutExpired("de4dot", 60), OSError("y")])
@@ -240,15 +267,117 @@ class TestUnpackDotnet:
             raise exc
 
         monkeypatch.setattr(nodes.subprocess, "run", boom)
-        assert unpack_dotnet_node(_state(tmp_path / "a.exe", "dotnet")) == {"route_flag": "native"}
+        assert _extract_dotnet_source(str(tmp_path / "a.exe")) == ""
+
+
+# --------------------------------------------------------------------------- #
+# deep_inspection_node: .NET branch
+# --------------------------------------------------------------------------- #
+class TestDeepInspectionDotnet:
+    @staticmethod
+    def _dotnet_state(path, **updates) -> AgentState:
+        state = AgentState(file_path=str(path), sample=SampleInfo(route="dotnet"), route_flag="dotnet")
+        return state.model_copy(update=updates) if updates else state
+
+    def test_uses_per_method_builder(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "deep")
+        expected = [DecompiledFunction(offset="0x6000001", name="Ns.Outer::Run", c_code="body")]
+        captured = {}
+
+        def fake_build(path, hints, findings, timeout=None):
+            captured.update(path=path, hints=hints, findings=findings)
+            return expected
+
+        def boom(*a, **k):
+            raise AssertionError("fallback must not run")
+
+        monkeypatch.setattr(nodes, "build_dotnet_functions", fake_build)
+        monkeypatch.setattr(nodes, "_extract_dotnet_source", boom)
+        monkeypatch.setattr(nodes, "run_ghidra", boom)
+        state = self._dotnet_state(tmp_path / "a.exe", ghidra_hints=[{"offset": "0x1", "rule": "r"}])
+
+        out = nodes.deep_inspection_node(state)
+
+        assert out == {"source_code": expected}
+        assert captured == {"path": state.file_path, "hints": state.ghidra_hints, "findings": state.findings}
+
+    def test_falls_back_to_whole_assembly_source(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "deep")
+        monkeypatch.setattr(nodes, "build_dotnet_functions", lambda *a, **k: None)
+        monkeypatch.setattr(nodes, "_extract_dotnet_source", lambda path: "class Program { }\n")
+
+        def boom(*a, **k):
+            raise AssertionError("Ghidra must not run")
+
+        monkeypatch.setattr(nodes, "run_ghidra", boom)
+
+        [func] = nodes.deep_inspection_node(self._dotnet_state(tmp_path / "a.exe"))["source_code"]
+
+        assert (func.name, func.priority, func.c_code) == ("dotnet_source", 10, "class Program { }\n")
+        assert func.decompile_warnings == ["dotnet: per-method split unavailable; whole-assembly source"]
+
+    def test_falls_back_to_ghidra_as_native(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "deep")
+        monkeypatch.setattr(nodes, "build_dotnet_functions", lambda *a, **k: None)
+        monkeypatch.setattr(nodes, "_extract_dotnet_source", lambda path: "")
+        captured = {}
+
+        def fake_ghidra(path, hints, findings=None, decoded_hints=None):
+            captured.update(path=path, hints=hints, findings=findings, decoded_hints=decoded_hints)
+            return [DecompiledFunction(offset="0x1", c_code="x")]
+
+        monkeypatch.setattr(nodes, "run_ghidra", fake_ghidra)
+        state = self._dotnet_state(
+            tmp_path / "a.exe",
+            ghidra_hints=[{"offset": "0x1", "rule": "r"}],
+            floss_hints=[{"value": "decoded"}],
+        )
+
+        out = nodes.deep_inspection_node(state)
+
+        assert out["route_flag"] == "native"
+        assert [func.offset for func in out["source_code"]] == ["0x1"]
+        assert captured == {
+            "path": state.file_path,
+            "hints": state.ghidra_hints,
+            "findings": state.findings,
+            "decoded_hints": state.floss_hints,
+        }
+
+    def test_core_profile_runs_nothing(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "core")
+
+        def boom(*a, **k):
+            raise AssertionError("no tool may run in the core profile")
+
+        monkeypatch.setattr(nodes, "build_dotnet_functions", boom)
+        monkeypatch.setattr(nodes, "_extract_dotnet_source", boom)
+        monkeypatch.setattr(nodes, "run_ghidra", boom)
+
+        assert nodes.deep_inspection_node(self._dotnet_state(tmp_path / "a.exe")) == {}
+
+    def test_existing_source_code_is_not_overwritten(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("CROWBAR_TOOL_PROFILE", "deep")
+
+        def boom(*a, **k):
+            raise AssertionError("source already exists")
+
+        monkeypatch.setattr(nodes, "build_dotnet_functions", boom)
+        monkeypatch.setattr(nodes, "_extract_dotnet_source", boom)
+        monkeypatch.setattr(nodes, "run_ghidra", boom)
+        state = self._dotnet_state(
+            tmp_path / "a.exe",
+            source_code=[DecompiledFunction(offset="", c_code="print(1)")],
+        )
+
+        assert nodes.deep_inspection_node(state) == {}
 
 
 class TestNativeFallbackReachesGhidra:
-    @pytest.mark.parametrize("route, node", [("python", unpack_python_node), ("dotnet", unpack_dotnet_node)])
-    def test_failed_unpack_lets_ghidra_run(self, tmp_path, monkeypatch, route, node) -> None:
+    def test_failed_python_unpack_lets_ghidra_run(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(nodes.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("x")))
-        state = _state(tmp_path / "a.exe", route)
-        state = state.model_copy(update={"route_flag": route, **node(state)})
+        state = _state(tmp_path / "a.exe", "python")
+        state = state.model_copy(update={"route_flag": "python", **unpack_python_node(state)})
         assert state.route_flag == "native"
 
         called = []

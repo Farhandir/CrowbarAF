@@ -2,10 +2,16 @@
 
 Four states (never "clean"):
   malicious     : suspicious function(s) or a high-authority (YARA) finding
-  needs_review  : medium-authority evidence (capa/import combo/IoC), C2-like
-                  string, or a conflict
+  needs_review  : medium-authority evidence (capa/import combo/IoC), a C2-like
+                  URL/IP token, or a conflict
   unknown       : coverage too low, packed, tool failure, no functions
   no_evidence   : covered surface analyzed, no malicious evidence found
+
+C2-like detection is token based: a finding is only critical when it contains a
+URL/IP that is not a known schema/signature host or a version-like dotted number.
+The LLM-only high-confidence tier (Policy C v2) additionally requires a large
+enough analyzed surface, several suspicious functions, and at least three
+canonical behavior classes. Free-text behavior strings do not count as classes.
 
 Integrity: a critical finding with ``verified=False`` (a statically extracted text IoC
 that is not present in the file bytes) is never evidence for "malicious"; it only
@@ -14,8 +20,10 @@ escalates the verdict to needs_review (and still overrides a benign LLM verdict)
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 import re
+from urllib.parse import urlsplit
 
 from .types import Finding, FunctionInfo, FunctionSummary
 
@@ -24,7 +32,30 @@ NEEDS_REVIEW = "needs_review"
 UNKNOWN = "unknown"
 NO_EVIDENCE = "no_evidence"
 
-_URL_RE = re.compile(r"https?://|(?:\d{1,3}\.){3}\d{1,3}")
+# URL schemes that can carry a C2 endpoint. Trailing punctuation is stripped.
+_URL_TOKEN_RE = re.compile(r"\b(?:https?|ftp|tcp)://[^\s'\"<>]+", re.IGNORECASE)
+# Strict dotted-quad: four 0-255 octets that are not part of a longer dotted or
+# numeric sequence (so "1.2.3.4.5" and "311.2.3.4" are not addresses).
+_IPV4_RE = re.compile(
+    r"(?<![\d.])(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)"
+    r"(?:\.(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}(?![\d]|\.\d)"
+)
+_VERSION_CONTEXT_RE = re.compile(
+    r"(?:version|ver|fileversion|productversion|assemblyversion)\s*[=:]?\s*[\"']?$",
+    re.IGNORECASE,
+)
+_VERSION_V_CONTEXT_RE = re.compile(r"\bv$", re.IGNORECASE)
+_DER_TAIL_RE = re.compile(r"(?<=[a-z])0[0-9a-z]{0,2}$")
+
+# XML namespaces / signature infrastructure that regularly appears in PE
+# manifests and version resources; a URL on one of these hosts is not C2.
+BENIGN_URL_HOSTS = (
+    "schemas.microsoft.com", "schemas.xmlsoap.org", "schemas.openxmlformats.org",
+    "w3.org", "nsis.sf.net", "ns.adobe.com", "purl.org", "crl.microsoft.com",
+    "digicert.com", "verisign.com", "symcb.com", "symcd.com", "globalsign.com",
+    "globalsign.net", "sectigo.com", "usertrust.com", "comodoca.com",
+)
+
 _BENIGN_CLAIM = ("benign", "clean", "not malicious", "no malicious", "signed",
                  "harmless", "no threat", "0/70", "safe")
 
@@ -34,11 +65,14 @@ HIGH_AUTHORITY = {"yara"}
 MEDIUM_AUTHORITY = {"capa", "import_combo", "ioc"}
 CONFIDENCE_FLOOR = 0.7
 LLM_MIN_SUSPICIOUS = int(os.getenv("CROWBAR_LLM_MIN_SUSPICIOUS", "3"))
-LLM_MIN_BEHAVIORS = int(os.getenv("CROWBAR_LLM_MIN_BEHAVIORS", "2"))
+LLM_MIN_BEHAVIORS = int(os.getenv("CROWBAR_LLM_MIN_BEHAVIORS", "3"))
 LLM_MIN_COVERAGE = float(os.getenv("CROWBAR_LLM_MIN_COVERAGE", "0.6"))
+# A handful of functions is too small a surface for an LLM-only malicious call.
+LLM_MIN_ANALYZED = int(os.getenv("CROWBAR_LLM_MIN_ANALYZED", "20"))
 
 # LLM summaries are one signal; multiple distinct behavior classes are required
-# before a single-source LLM verdict may be promoted to malicious.
+# before a single-source LLM verdict may be promoted to malicious. Only these
+# canonical labels count (not free-text behavior strings).
 BEHAVIOR_KEYWORDS = {
     "persistence": ("persist", "cron", "systemd", "rc.local", "watchdog", "init"),
     "execution": ("exec", "system(", "shell", "spawn", "fork", "subprocess"),
@@ -56,6 +90,93 @@ def finding_id(f: Finding) -> str:
     return "f_" + hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()[:12]
 
 
+def _ip_token_is_benign(token: str, before: str) -> bool:
+    """True for infrastructure/version-like addresses, not routable C2 endpoints."""
+    try:
+        ip = ipaddress.ip_address(token)
+    except ValueError:
+        return False
+    if not isinstance(ip, ipaddress.IPv4Address):
+        return False
+    if (ip.is_multicast or ip.is_loopback or ip.is_unspecified
+            or ip.is_reserved or ip.is_link_local):
+        return True
+    octets = token.split(".")
+    # Last octet 0/255: network/broadcast, and what 4-part versions look like.
+    if octets[-1] in ("0", "255"):
+        return True
+    # All single-digit octets ("7.4.1.3", "1.1.2.1"): versions/OIDs. This also drops public
+    # resolvers such as 1.1.1.1 / 8.8.8.8, which are not C2 endpoints either.
+    if all(len(o) == 1 for o in octets):
+        return True
+    # Version context: "FileVersion 6.1.7601.17514", "v2.4.1.3".
+    if _VERSION_CONTEXT_RE.search(before) or _VERSION_V_CONTEXT_RE.search(before):
+        return True
+    return False
+
+
+def _url_token_is_benign(token: str) -> bool:
+    try:
+        host = (urlsplit(token).hostname or "").lower()
+    except ValueError:
+        return False  # malformed: keep fail-closed
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if isinstance(ip, ipaddress.IPv4Address):
+        return _ip_token_is_benign(host, "")
+    if ip is not None:
+        return False  # IPv6 literal: keep fail-closed
+    # No dot: not a resolvable public host ("http://Mozilla/5.0", "https://H"); typically Go
+    # string-table fragments glued to a scheme.
+    if "." not in host:
+        return True
+    # Certificate (DER) data glues the next ASN.1 byte to the URL: "ocsp.digicert.com0A".
+    # Only used for the allowlist check.
+    candidates = {host, _DER_TAIL_RE.sub("", host)}
+    return any(h == benign or h.endswith("." + benign)
+               for h in candidates for benign in BENIGN_URL_HOSTS)
+
+
+def c2_like_tokens(value: str) -> list[str]:
+    """Non-benign URL/IPv4 tokens in ``value``, deduplicated and in source order.
+
+    Manifest namespaces, schema/signature URLs and version-like dotted numbers
+    are excluded so they do not become critical "c2" findings.
+    """
+    text = value or ""
+    found: list[tuple[int, str]] = []
+    url_spans: list[tuple[int, int]] = []
+    for match in _URL_TOKEN_RE.finditer(text):
+        token = match.group(0).rstrip(".,;)]}")
+        if not token:
+            continue
+        url_spans.append((match.start(), match.end()))
+        if _url_token_is_benign(token):
+            continue
+        found.append((match.start(), token))
+    for match in _IPV4_RE.finditer(text):
+        # An IP that is part of a URL was already handled (or excluded) above.
+        if any(start <= match.start() < end for start, end in url_spans):
+            continue
+        token = match.group(0)
+        if _ip_token_is_benign(token, text[:match.start()]):
+            continue
+        found.append((match.start(), token))
+
+    found.sort(key=lambda item: item[0])
+    out: list[str] = []
+    seen: set[str] = set()
+    for _, token in found:
+        if token not in seen:
+            seen.add(token)
+            out.append(token)
+    return out
+
+
 def is_critical_finding(f: Finding) -> bool:
     """Findings that force must-include / fail-closed (YARA, high IOC, C2-like)."""
     src = (f.source or "").lower()
@@ -63,8 +184,8 @@ def is_critical_finding(f: Finding) -> bool:
         return True
     if src == "ioc" and (f.confidence or 0) >= CONFIDENCE_FLOOR:
         return True
-    # C2-like strings are critical even from FLOSS: a URL/IP in a finding value.
-    if src in ("floss", "ioc") and _URL_RE.search(f.value or ""):
+    # C2-like tokens are critical even from FLOSS; benign schema/version strings are not.
+    if src in ("floss", "ioc") and c2_like_tokens(f.value or ""):
         return True
     return False
 
@@ -94,6 +215,19 @@ def _unique_findings(findings: list[Finding]) -> list[Finding]:
         seen.add(key)
         out.append(f)
     return out
+
+
+# Short/ambiguous keywords that must match as a whole word ("init" != "initialize").
+_EXACT_KEYWORDS = frozenset({"init", "pid", "bot", "c2", "dns", "file", "copy", "drop"})
+
+
+def _keyword_matches(word: str, text: str) -> bool:
+    """Prefix match at a word start ("persist" -> "persistence", not "profile" -> "file");
+    whole-word match for ``_EXACT_KEYWORDS``; plain substring for non-alphanumeric keywords."""
+    if word.isalnum():
+        tail = r"\b" if word in _EXACT_KEYWORDS else ""
+        return re.search(r"\b" + re.escape(word) + tail, text) is not None
+    return word in text
 
 
 def apply_fail_closed(summary: FunctionSummary, fn: FunctionInfo,
@@ -178,24 +312,30 @@ def compute_verdict(
     strong = signals & {"llm", "yara", "c2"}
     two_signal = len(signals) >= 2 and bool(strong)
 
-    # LLM-only high-confidence tier: several suspicious functions and multiple
-    # distinct behavior classes, with enough coverage. This is still one source;
-    # it is deliberately gated and configurable, not a replacement for C.
+    # LLM-only high-confidence tier (Policy C v2): several suspicious functions,
+    # at least three canonical behavior classes, enough coverage and a large
+    # enough analyzed surface. Free-text behavior strings are not classes.
+    # This is still one source; it is deliberately gated, not a replacement for C.
     behavior_classes: set[str] = set()
     for fn in susp:
         summary = summaries[fn.offset]
-        for behavior in (summary.behaviors or []):
-            norm = re.sub(r"\s+", " ", str(behavior).strip().lower())
-            if norm:
-                behavior_classes.add(norm)
-        text = (summary.summary or "").lower()
+        text = " ".join(
+            [summary.summary or ""] + [str(b) for b in (summary.behaviors or [])]
+        ).lower()
         for label, words in BEHAVIOR_KEYWORDS.items():
-            if any(word in text for word in words):
+            if any(_keyword_matches(word, text) for word in words):
                 behavior_classes.add(label)
     llm_high = (require_two_signals and bool(susp)
                 and len(susp) >= LLM_MIN_SUSPICIOUS
                 and len(behavior_classes) >= LLM_MIN_BEHAVIORS
-                and coverage >= LLM_MIN_COVERAGE)
+                and coverage >= LLM_MIN_COVERAGE
+                and len(analyzed) >= LLM_MIN_ANALYZED)
+    llm_small_surface = (not llm_high and bool(susp)
+                         and strong == {"llm"}
+                         and len(susp) >= LLM_MIN_SUSPICIOUS
+                         and len(behavior_classes) >= LLM_MIN_BEHAVIORS
+                         and coverage >= LLM_MIN_COVERAGE
+                         and len(analyzed) < LLM_MIN_ANALYZED)
 
     conflicts = []
     if high or susp:
@@ -219,6 +359,11 @@ def compute_verdict(
         verdict = NEEDS_REVIEW
         reasons.append("single strong signal (" + ", ".join(sorted(strong))
                        + "); corroboration required")
+        if llm_small_surface:
+            reasons.append(
+                f"LLM-only signal on small surface ({len(analyzed)} analyzed function(s) "
+                f"< {LLM_MIN_ANALYZED}); manual review"
+            )
     elif not require_two_signals and susp:
         verdict = MALICIOUS
         reasons.append(f"{len(susp)} suspicious function(s)")

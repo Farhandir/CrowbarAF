@@ -3,6 +3,9 @@ langchain>=0.3
 langchain-ollama>=0.2
 pydantic>=2.0
 pefile>=2023.2.7
+# .NET metadata/IL (method list + call graph for the dotnet route)
+dnfile>=0.18
+dncil>=1.0.2
 # TLSH is optional: see requirements-tools.txt (no TLSH finding is produced if it is missing)
 
 # Web UI / API

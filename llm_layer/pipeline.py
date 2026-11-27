@@ -152,7 +152,7 @@ def analyze(
                         "fail_closed": summary.fail_closed,
                     }
                     tracer.analyzed(
-                        fn, per_fn_stats, res, summary, duration,
+                        fn, {**per_fn_stats, "fail_closed": summary.fail_closed}, res, summary, duration,
                         children=[],
                         n_findings=len(findings_for(fn, findings)),
                     )

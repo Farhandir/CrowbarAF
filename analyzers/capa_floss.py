@@ -270,18 +270,25 @@ def _parse_capa_address(raw: Any) -> int | None:
       * ``["absolute", 4198400]`` (intermediate versions)
       * ``4198400`` / ``"4198400"`` / ``"0x401000"`` (older versions)
 
+      * ``{"type": "dn token", "value": 100663314}`` / ``{"type": "dn token offset",
+        "value": [100663314, 12]}`` (.NET): the MethodDef token, which is the ``offset`` of the
+        .NET method records (``hex(token)``), so hints map to methods like native addresses.
+
     Returns ``None`` for entries that have no specific memory address (``file``,
-    ``no address``, ``relative``, ``token``, etc. types).
+    ``no address``, ``relative``, etc. types).
     """
     value: Any = raw
+    if isinstance(raw, (list, tuple)) and len(raw) == 2 and isinstance(raw[0], str):
+        raw = {"type": raw[0], "value": raw[1]}
     if isinstance(raw, dict):
-        if raw.get("type") != "absolute":
-            return None
+        kind = raw.get("type")
         value = raw.get("value")
-    elif isinstance(raw, (list, tuple)):
-        if len(raw) != 2 or raw[0] != "absolute":
+        if kind == "dn token offset":
+            value = value[0] if isinstance(value, (list, tuple)) and value else None
+        elif kind not in ("absolute", "dn token"):
             return None
-        value = raw[1]
+    elif isinstance(raw, (list, tuple)):
+        return None
 
     if isinstance(value, bool):
         return None
