@@ -62,7 +62,13 @@ _BENIGN_CLAIM = ("benign", "clean", "not malicious", "no malicious", "signed",
 # YARA is the only source that can stand alone as "malicious".
 HIGH_AUTHORITY = {"yara"}
 # Dual-use / supporting signals: they can require review, not a malicious verdict.
-MEDIUM_AUTHORITY = {"capa", "import_combo", "ioc"}
+MEDIUM_AUTHORITY = {"capa", "import_combo", "ioc", "script"}
+# Sources whose URL/IPv4 values are checked for C2-like tokens.
+C2_SOURCES = ("floss", "ioc", "script")
+# Static script analysis: only a dangerous API chain is a behavior signal of its own;
+# script url/ip findings feed the C2 check, so one string never counts twice.
+SCRIPT_SIGNAL_KINDS = {"combo"}
+SCRIPT_UNSUPPORTED_REASON = "script format: static script analysis not yet supported"
 CONFIDENCE_FLOOR = 0.7
 LLM_MIN_SUSPICIOUS = int(os.getenv("CROWBAR_LLM_MIN_SUSPICIOUS", "3"))
 LLM_MIN_BEHAVIORS = int(os.getenv("CROWBAR_LLM_MIN_BEHAVIORS", "3"))
@@ -185,7 +191,7 @@ def is_critical_finding(f: Finding) -> bool:
     if src == "ioc" and (f.confidence or 0) >= CONFIDENCE_FLOOR:
         return True
     # C2-like tokens are critical even from FLOSS; benign schema/version strings are not.
-    if src in ("floss", "ioc") and c2_like_tokens(f.value or ""):
+    if src in C2_SOURCES and c2_like_tokens(f.value or ""):
         return True
     return False
 
@@ -309,6 +315,9 @@ def compute_verdict(
         signals.add("import_combo")
     if any((f.source or "").lower() == "ioc" for f in medium):
         signals.add("ioc")
+    if any((f.source or "").lower() == "script"
+           and (f.kind or "").lower() in SCRIPT_SIGNAL_KINDS for f in medium):
+        signals.add("script")
     strong = signals & {"llm", "yara", "c2"}
     two_signal = len(signals) >= 2 and bool(strong)
 
@@ -379,7 +388,7 @@ def compute_verdict(
                        "file bytes); cannot support a malicious verdict")
     elif medium:
         verdict = NEEDS_REVIEW
-        reasons.append(f"{len(medium)} medium-authority finding(s) (capa/import/IoC)")
+        reasons.append(f"{len(medium)} medium-authority finding(s) (capa/import/IoC/script)")
     elif low:
         verdict = NEEDS_REVIEW
         reasons.append(f"{len(low)} C2-like string(s) without corroborating code evidence")

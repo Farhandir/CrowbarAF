@@ -62,7 +62,7 @@ def collect_c2_candidates(
 ) -> list[dict]:
     """Deterministic candidate list: one entry per distinct C2-like token.
 
-    Sources are ``floss``/``ioc`` findings only. Order: verified first, then tokens a
+    Sources are ``floss``/``ioc``/``script`` findings only. Order: verified first, then tokens a
     function references, then first appearance. Capped at ``MAX_CANDIDATES``.
     """
     entries: dict[str, dict] = {}
@@ -70,7 +70,7 @@ def collect_c2_candidates(
     first_seen: dict[str, int] = {}
 
     for idx, f in enumerate(findings):
-        if (f.source or "").strip().lower() not in ("floss", "ioc"):
+        if (f.source or "").strip().lower() not in ("floss", "ioc", "script"):
             continue
         value = f.value or ""
         for token in c2_like_tokens(value):

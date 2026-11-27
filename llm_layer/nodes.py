@@ -12,7 +12,7 @@ from .c2_triage import (collect_c2_candidates, deterministic_review, sort_review
 from .factory import from_env
 from .pipeline import analyze
 from .types import Finding, FunctionInfo
-from .verdict import compute_verdict
+from .verdict import SCRIPT_UNSUPPORTED_REASON, compute_verdict
 
 
 def _c2_triage_enabled() -> bool:
@@ -68,6 +68,9 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     findings = _to_findings(state)
     if not functions:
         verdict = compute_verdict(all_functions, findings, {})
+        route = (getattr(getattr(state, "sample", None), "route", "") or "").lower()
+        if route == "script" and SCRIPT_UNSUPPORTED_REASON not in verdict["unknown_reasons"]:
+            verdict["unknown_reasons"].append(SCRIPT_UNSUPPORTED_REASON)
         verdict["c2_review"] = deterministic_review(
             collect_c2_candidates(findings, all_functions))
         return {"intent_analysis": "No functions to analyze (empty Ghidra output).",
