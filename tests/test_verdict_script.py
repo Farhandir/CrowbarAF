@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from llm_layer.c2_triage import collect_c2_candidates
 from llm_layer.nodes import run_reverser
 from llm_layer.types import Finding
-from llm_layer.verdict import SCRIPT_UNSUPPORTED_REASON, compute_verdict, is_critical_finding
+from llm_layer.verdict import GHIDRA_FIRST_ACTION, SCRIPT_INCONCLUSIVE_REASON, compute_verdict, is_critical_finding
 
 COMBO = Finding(source="script", kind="combo", value="Download-Write-Execute", confidence=0.8)
 URL = Finding(source="script", kind="url", value="http://203.0.113.9/p.js", confidence=0.7)
@@ -89,18 +89,25 @@ def _state(route, findings):
 def test_script_route_without_functions_adds_unknown_reason():
     out = run_reverser(_state("script", []))
     assert out["verdict"]["verdict"] == "unknown"
-    assert SCRIPT_UNSUPPORTED_REASON in out["verdict"]["unknown_reasons"]
+    assert SCRIPT_INCONCLUSIVE_REASON in out["verdict"]["unknown_reasons"]
+
+
+def test_script_route_drops_ghidra_hint():
+    out = run_reverser(_state("script", []))
+    assert GHIDRA_FIRST_ACTION not in out["verdict"]["next_actions"]
+    assert "run dynamic analysis" in out["verdict"]["next_actions"]
 
 
 def test_other_route_has_no_script_reason():
     out = run_reverser(_state("native", []))
-    assert SCRIPT_UNSUPPORTED_REASON not in out["verdict"]["unknown_reasons"]
+    assert SCRIPT_INCONCLUSIVE_REASON not in out["verdict"]["unknown_reasons"]
+    assert GHIDRA_FIRST_ACTION in out["verdict"]["next_actions"]
 
 
 def test_script_reason_not_added_to_non_unknown_verdict():
     out = run_reverser(_state("script", [COMBO]))
     assert out["verdict"]["verdict"] == "needs_review"
-    assert SCRIPT_UNSUPPORTED_REASON not in out["verdict"]["unknown_reasons"]
+    assert SCRIPT_INCONCLUSIVE_REASON not in out["verdict"]["unknown_reasons"]
 
 
 class _FakeClient:
