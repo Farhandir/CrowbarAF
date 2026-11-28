@@ -13,7 +13,7 @@ from .c2_triage import (collect_c2_candidates, deterministic_review, sort_review
 from .factory import from_env
 from .pipeline import analyze
 from .types import Finding, FunctionInfo
-from .verdict import SCRIPT_UNSUPPORTED_REASON, compute_verdict
+from .verdict import GHIDRA_FIRST_ACTION, SCRIPT_INCONCLUSIVE_REASON, compute_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +100,14 @@ def run_reverser(state, client=None, budget_tokens: int = 6000) -> dict:
     if not functions:
         verdict = compute_verdict(all_functions, findings, {})
         route = (getattr(getattr(state, "sample", None), "route", "") or "").lower()
-        # Only an unknown verdict is explained by the unsupported format; a review or
-        # malicious verdict already rests on the static script findings.
-        if (route == "script" and verdict["verdict"] == "unknown"
-                and SCRIPT_UNSUPPORTED_REASON not in verdict["unknown_reasons"]):
-            verdict["unknown_reasons"].append(SCRIPT_UNSUPPORTED_REASON)
+        if route == "script":
+            # Scripts are never decompiled: the Ghidra hint does not apply.
+            verdict["next_actions"] = [a for a in verdict["next_actions"] if a != GHIDRA_FIRST_ACTION]
+            # Only an unknown verdict needs this explanation; a review or malicious verdict
+            # already rests on the static script findings.
+            if (verdict["verdict"] == "unknown"
+                    and SCRIPT_INCONCLUSIVE_REASON not in verdict["unknown_reasons"]):
+                verdict["unknown_reasons"].append(SCRIPT_INCONCLUSIVE_REASON)
         # Scripts (and empty decompiles) still get the advisory C2 triage; the client is
         # created only when there is something to triage.
         verdict["c2_review"] = _c2_review(findings, all_functions, client, lazy_client=True)

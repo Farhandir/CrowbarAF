@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import random
+
 import pytest
 
 from analyzers.script import (
@@ -334,3 +337,171 @@ def test_analyze_script_file_js(tmp_path):
 
 def test_analyze_script_file_missing_path_returns_empty(tmp_path):
     assert analyze_script_file(str(tmp_path / "missing.js"), "js") == []
+
+
+# --------------------------------------------------------------------------- #
+# Deobfuscation integration
+# --------------------------------------------------------------------------- #
+def _b64(data: str | bytes) -> str:
+    if isinstance(data, str):
+        data = data.encode()
+    return base64.b64encode(data).decode("ascii")
+
+
+def _fake_pe() -> bytes:
+    return b"MZ" + b"\x90" * 200 + b"This program cannot be run in DOS mode"
+
+
+def test_deobf_does_not_duplicate_raw_url(tmp_path):
+    hidden = _b64("Harmless note. " * 20 + "http://example.com/x")
+    text = f'var u = "http://example.com/x";\nvar b = "{hidden}";\n'
+    path = _write(tmp_path, "sample.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    assert any(f.kind == "url" and f.value == "http://example.com/x" for f in findings)
+    assert not any(f.kind == "deobf_url" and f.value == "http://example.com/x" for f in findings)
+
+
+def test_deobf_combo_hidden_behind_charcodes_and_concat(tmp_path):
+    text = (
+        'Set sh = CreateObject(Chr(87) & Chr(83) & "cript.Shell")\n'
+        'sh.Run("cmd /c calc")\n'
+    )
+    path = _write(tmp_path, "hidden.vbs", text.encode())
+
+    findings = analyze_script_file(path, "vbs")
+
+    combos = [f for f in findings if f.kind == "deobf_combo"]
+    assert combos
+    assert combos[0].value == "Script Host Spawn"
+    assert combos[0].confidence == 0.8
+    assert combos[0].source == "script"
+    assert combos[0].address == ""
+
+
+def test_deobf_embedded_pe_becomes_finding(tmp_path):
+    text = f'var payload = "{_b64(_fake_pe())}";\n'
+    path = _write(tmp_path, "dropper.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    embedded = [f for f in findings if f.kind == "embedded_pe"]
+    assert len(embedded) == 1
+    assert embedded[0].value.startswith("sha256=")
+    assert " size=" in embedded[0].value
+    assert embedded[0].address == ""
+    assert " via=base64" in embedded[0].value
+    assert embedded[0].confidence == 0.9
+
+
+def test_deobf_kill_switch_disables_deobf_findings(tmp_path, monkeypatch):
+    monkeypatch.setenv("CROWBAR_SCRIPT_DEOBF", "0")
+    text = (
+        'var u = "http://example.com/x";\n'
+        f'var payload = "{_b64(_fake_pe())}";\n'
+        'Set sh = CreateObject(Chr(87) & Chr(83) & "cript.Shell")\n'
+    )
+    path = _write(tmp_path, "disabled.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    assert any(f.kind == "url" for f in findings)  # raw analysis still runs
+    assert not any(f.kind.startswith("deobf_") or f.kind.startswith("embedded_") for f in findings)
+
+
+# --------------------------------------------------------------------------- #
+# Binary / legacy-encoding type detection
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("name", ["payload.ps1", "payload.bat", "payload.js"])
+def test_detect_script_type_binary_nul_bytes_is_not_a_script(tmp_path, name):
+    data = b"\x00" + random.Random(0).randbytes(256)
+    assert detect_script_type(_write(tmp_path, name, data)) is None
+
+
+def test_detect_script_type_legacy_code_page_vbs_is_still_vbs(tmp_path):
+    text = 'MsgBox "caf\xe9 d\xe9j\xe0 \xfc\xf6\xe7"\n'
+    data = text.encode("cp1252") * 20
+    assert detect_script_type(_write(tmp_path, "legacy.vbs", data)) == "vbs"
+
+
+def test_detect_script_type_utf16le_bom_ps1(tmp_path):
+    data = b"\xff\xfe" + 'Write-Host "hello"\r\n'.encode("utf-16-le")
+    assert detect_script_type(_write(tmp_path, "legacy.ps1", data)) == "ps1"
+
+
+# --------------------------------------------------------------------------- #
+# Encrypted payload findings
+# --------------------------------------------------------------------------- #
+# 45 bytes of input encode to exactly 60 base64 chars, so a multiple of 45 KiB
+# also has no "=" padding and keeps every line chunk at the intended width.
+_ENCRYPTED_BLOB_SIZE = 45 * 1500  # ~66 KiB, above MIN_ENCRYPTED_PAYLOAD_BYTES
+
+
+def _random_bytes(size: int, seed: int = 0) -> bytes:
+    return random.Random(seed).randbytes(size)
+
+
+def test_analyze_script_file_encrypted_payload_finding(tmp_path):
+    raw = _random_bytes(_ENCRYPTED_BLOB_SIZE)
+    path = _write(tmp_path, "stage.js", f'var payload = "{_b64(raw)}";\n'.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    encrypted = [f for f in findings if f.kind == "encrypted_payload"]
+    assert len(encrypted) == 1
+    finding = encrypted[0]
+    assert finding.source == "script"
+    assert finding.confidence == 0.3
+    assert finding.address == ""
+    assert finding.value.startswith("sha256=")
+    assert " size=" in finding.value
+    assert " via=base64" in finding.value
+
+
+def test_analyze_script_file_small_blob_is_not_encrypted_payload(tmp_path):
+    raw = _random_bytes(4096, seed=1)
+    path = _write(tmp_path, "small.js", f'var payload = "{_b64(raw)}";\n'.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    assert not any(f.kind == "encrypted_payload" for f in findings)
+
+
+def test_analyze_script_file_kill_switch_disables_encrypted_payload(tmp_path, monkeypatch):
+    monkeypatch.setenv("CROWBAR_SCRIPT_DEOBF", "0")
+    raw = _random_bytes(_ENCRYPTED_BLOB_SIZE)
+    path = _write(tmp_path, "disabled.js", f'var payload = "{_b64(raw)}";\n'.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    assert not any(f.kind == "encrypted_payload" for f in findings)
+
+
+def test_deobf_findings_have_no_address(tmp_path):
+    hidden_text = (
+        "Harmless note. " * 20 + "http://example.com/x 192.0.2.9 evil-domain.top"
+    )
+    text = "\n".join(
+        [
+            f'var t = "{_b64(hidden_text)}";',
+            'WScript.Echo "sep";',
+            f'var p = "{_b64(_fake_pe())}";',
+            'WScript.Echo "sep";',
+            f'var e = "{_b64(_random_bytes(_ENCRYPTED_BLOB_SIZE))}";',
+            'WScript.Echo "sep";',
+            'Set sh = CreateObject(Chr(87) & Chr(83) & "cript.Shell")',
+            'sh.Run("cmd /c calc")',
+        ]
+    )
+    path = _write(tmp_path, "mixed.js", text.encode())
+
+    findings = analyze_script_file(path, "js")
+
+    deobf_kinds = {
+        "deobf_combo", "deobf_url", "deobf_ip", "deobf_domain",
+        "embedded_pe", "encrypted_payload",
+    }
+    deobf_findings = [f for f in findings if f.kind in deobf_kinds]
+    assert {f.kind for f in deobf_findings} == deobf_kinds
+    assert all(f.address == "" for f in deobf_findings)

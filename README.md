@@ -383,6 +383,7 @@ export CROWBAR_GHIDRA_MAXMEM=5g           # Ghidra JVM heap (-Xmx); empty = JVM 
 export CROWBAR_CAPA_TIMEOUT=600
 export CROWBAR_FLOSS_TIMEOUT=600
 export CROWBAR_READELF_TIMEOUT=60
+export CROWBAR_SCRIPT_DEOBF=1           # static script deobfuscation (0 = off; nothing is executed)
 ```
 
 Measured on the local real-malware check (same deterministic state, same

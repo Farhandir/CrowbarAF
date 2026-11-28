@@ -1,4 +1,4 @@
-"""Standalone static analysis helpers for script-type samples (not wired into the pipeline yet)."""
+"""Static analysis of script-type samples (JS/VBS/PS1/HTA/WSF/BAT/LNK); nothing is executed."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from analyzers.capa_floss import _IPV4_RE, _URL_RE
+from analyzers.script_deobf import DeobfResult, deobfuscate
 from state import Finding
 
 logger = logging.getLogger(__name__)
@@ -196,12 +197,17 @@ def detect_script_type(file_path: str, die_info: dict[str, Any] | None = None) -
     if hint:
         return hint
 
+    # A binary blob renamed to .ps1/.bat must not skip the binary tools. The extension only
+    # needs NUL-free text (a legacy code page script may decode with replacement chars);
+    # content sniffing needs clean text.
+    # A .lnk file only counts as LNK when the header magic also matched above.
+    text = _decode_script_bytes(head)
+    if "\x00" in text:
+        return None
+
     extension = os.path.splitext(file_path)[1].lower()
     if extension in _EXTENSION_TYPES:
         return _EXTENSION_TYPES[extension]
-    # A .lnk file only counts as LNK when the header magic also matched above.
-
-    text = _decode_script_bytes(head)
     if not _looks_like_text(text):
         return None
     return _sniff_script_type(text)
@@ -376,7 +382,7 @@ def _finding(kind: str, value: str, confidence: float) -> Finding:
         source=SCRIPT_SOURCE,
         kind=kind,
         value=value,
-        address="",
+        address="",  # script findings are global: "address" is a function offset
         confidence=confidence,
         finding_id="",
         verified=True,
@@ -401,13 +407,87 @@ def script_findings(text: str, script_type: str) -> list[Finding]:
     return findings
 
 
+_DEOBF_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
+_DEOBF_IOC_FINDINGS: tuple[tuple[str, str, float], ...] = (
+    ("url", "deobf_url", 0.7),
+    ("ip", "deobf_ip", 0.7),
+    ("domain", "deobf_domain", 0.5),
+)
+_EMBEDDED_BINARY_KINDS = {"pe": "embedded_pe", "zip": "embedded_zip"}
+DEOBF_COMBO_KIND = "deobf_combo"
+ENCRYPTED_PAYLOAD_KIND = "encrypted_payload"
+# Opaque blobs below this size are usually icons/resources, not a hidden stage.
+MIN_ENCRYPTED_PAYLOAD_BYTES = 64 * 1024
+# Below the verdict's medium-authority floor: an encrypted blob explains an "unknown",
+# it is never evidence of maliciousness on its own.
+_ENCRYPTED_PAYLOAD_CONFIDENCE = 0.3
+
+
+def _deobf_enabled() -> bool:
+    """Reads the kill switch at call time (default: enabled)."""
+    return os.environ.get("CROWBAR_SCRIPT_DEOBF", "1").strip().lower() not in _DEOBF_DISABLED_VALUES
+
+
+def _deobf_findings(result: DeobfResult, raw_findings: Iterable[Finding]) -> list[Finding]:
+    """Converts deobfuscation artefacts into findings, avoiding raw duplicates."""
+    raw_list = list(raw_findings)
+    seen_combos = {finding.value for finding in raw_list if finding.kind == "combo"}
+    seen_iocs: dict[str, set[str]] = {
+        raw_kind: {finding.value for finding in raw_list if finding.kind == raw_kind}
+        for raw_kind, _kind, _confidence in _DEOBF_IOC_FINDINGS
+    }
+
+    findings: list[Finding] = []
+    for layer in result.layers:
+        for rule in match_script_combos(layer.text):
+            if rule in seen_combos:
+                continue
+            seen_combos.add(rule)
+            logger.debug("[script] deobf combo %s via %s", rule, layer.transform)
+            findings.append(_finding(DEOBF_COMBO_KIND, rule, 0.8))
+        iocs = extract_script_iocs(layer.text)
+        for raw_kind, kind, confidence in _DEOBF_IOC_FINDINGS:
+            for value in iocs[raw_kind]:
+                if value in seen_iocs[raw_kind]:
+                    continue
+                seen_iocs[raw_kind].add(value)
+                findings.append(_finding(kind, value, confidence))
+
+    for binary in result.binaries:
+        kind = _EMBEDDED_BINARY_KINDS.get(binary.kind)
+        if kind is None:
+            continue
+        findings.append(
+            _finding(kind, f"sha256={binary.sha256} size={binary.size} via={binary.transform}", 0.9)
+        )
+
+    for blob in result.opaque:
+        if blob.size < MIN_ENCRYPTED_PAYLOAD_BYTES:
+            continue
+        findings.append(
+            _finding(
+                ENCRYPTED_PAYLOAD_KIND,
+                f"sha256={blob.sha256} size={blob.size} via={blob.transform}",
+                _ENCRYPTED_PAYLOAD_CONFIDENCE,
+            )
+        )
+    return findings
+
+
 def analyze_script_file(file_path: str, script_type: str) -> list[Finding]:
     """Analyzes a script file; returns ``[]`` for LNK or on any error."""
     if script_type == "lnk":
         logger.info("[script] lnk parsing not yet supported: %s", file_path)
         return []
     try:
-        return script_findings(read_script_text(file_path), script_type)
+        text = read_script_text(file_path)
+        findings = script_findings(text, script_type)
+        if _deobf_enabled():
+            result = deobfuscate(text)
+            for note in result.notes:
+                logger.info("[script] deobf note for %s: %s", file_path, note)
+            findings.extend(_deobf_findings(result, findings))
+        return findings
     except Exception as exc:  # noqa: BLE001 - standalone analysis must never crash the caller
         logger.warning("[script] analysis failed for %s: %s", file_path, exc)
         return []

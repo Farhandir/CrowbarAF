@@ -67,8 +67,14 @@ MEDIUM_AUTHORITY = {"capa", "import_combo", "ioc", "script"}
 C2_SOURCES = ("floss", "ioc", "script")
 # Static script analysis: only a dangerous API chain is a behavior signal of its own;
 # script url/ip findings feed the C2 check, so one string never counts twice.
-SCRIPT_SIGNAL_KINDS = {"combo"}
-SCRIPT_UNSUPPORTED_REASON = "script format: static script analysis not yet supported"
+# A dangerous chain found after static deobfuscation and an embedded PE are behavior signals too.
+SCRIPT_SIGNAL_KINDS = {"combo", "deobf_combo", "embedded_pe"}
+# Encrypted blob the script carries: explains an "unknown", never counts as evidence.
+ENCRYPTED_PAYLOAD_KIND = "encrypted_payload"
+# Script samples have no decompiled functions; an "unknown" means the static script findings
+# were inconclusive (for example obfuscation that static deobfuscation could not open).
+SCRIPT_INCONCLUSIVE_REASON = "script sample: static script findings inconclusive (no decompilable code)"
+GHIDRA_FIRST_ACTION = "run Ghidra decompilation first"
 CONFIDENCE_FLOOR = 0.7
 LLM_MIN_SUSPICIOUS = int(os.getenv("CROWBAR_LLM_MIN_SUSPICIOUS", "3"))
 LLM_MIN_BEHAVIORS = int(os.getenv("CROWBAR_LLM_MIN_BEHAVIORS", "3"))
@@ -464,6 +470,15 @@ def compute_verdict(
         reasons.append(f"{len(fail_closed)} function(s) fail-closed over a benign LLM verdict")
     if unknown_fns:
         unknown_reasons.append(f"{len(unknown_fns)} function(s) returned unknown")
+    encrypted = [f for f in _unique_findings(findings)
+                 if (f.source or "").lower() == "script"
+                 and (f.kind or "").lower() == ENCRYPTED_PAYLOAD_KIND]
+    if encrypted:
+        note = (f"{len(encrypted)} encrypted payload(s) in the script could not be decoded "
+                "statically (not counted as evidence)")
+        (unknown_reasons if verdict == UNKNOWN else reasons).append(note)
+        next_actions.append("recover the payload key from the script or analyze the payload "
+                            "dynamically in a sandbox")
 
     if verdict == UNKNOWN:
         if packed:
@@ -473,7 +488,7 @@ def compute_verdict(
         if tool_failures or analysis_failures:
             next_actions.append("inspect/re-run failed tools or functions")
         if not total:
-            next_actions.append("run Ghidra decompilation first")
+            next_actions.append(GHIDRA_FIRST_ACTION)
         if not any("dynamic" in a for a in next_actions):
             next_actions.append("run dynamic analysis")
 
