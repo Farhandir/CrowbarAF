@@ -12,6 +12,7 @@ from nodes import (
     deep_inspection_node,
     entry_node,
     ioc_extractor_node,
+    script_analysis_node,
     static_feature_node,
     unpack_dotnet_node,
     unpack_native_node,
@@ -25,6 +26,7 @@ ROUTES: dict[str, str] = {
     "python": "unpack_python_node",
     "dotnet": "unpack_dotnet_node",
     "native": "unpack_native_node",
+    "script": "script_analysis_node",
 }
 
 
@@ -43,6 +45,7 @@ def build_graph() -> CompiledStateGraph:
     graph.add_node("unpack_native_node", unpack_native_node)
     graph.add_node("static_feature_node", static_feature_node)
     graph.add_node("deep_inspection_node", deep_inspection_node)
+    graph.add_node("script_analysis_node", script_analysis_node)
     graph.add_node("ioc_extractor_node", ioc_extractor_node)
     graph.add_node("ai_reverser_agent", ai_reverser_agent)
     graph.add_node("ai_supervisor_agent", ai_supervisor_agent)
@@ -57,6 +60,8 @@ def build_graph() -> CompiledStateGraph:
 
     graph.add_edge("static_feature_node", "deep_inspection_node")
     graph.add_edge("deep_inspection_node", "ioc_extractor_node")
+    # Script samples skip the binary tools (capa/FLOSS/pefile/Ghidra) entirely.
+    graph.add_edge("script_analysis_node", "ioc_extractor_node")
     graph.add_edge("ioc_extractor_node", "ai_reverser_agent")
     graph.add_edge("ai_reverser_agent", "ai_supervisor_agent")
     # fast_track also goes to ai_supervisor_agent, so it reaches db_writer_node the same way
