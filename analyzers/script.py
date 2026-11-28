@@ -1,4 +1,4 @@
-"""Standalone static analysis helpers for script-type samples (not wired into the pipeline yet)."""
+"""Static analysis of script-type samples (JS/VBS/PS1/HTA/WSF/BAT/LNK); nothing is executed."""
 
 from __future__ import annotations
 
@@ -197,12 +197,17 @@ def detect_script_type(file_path: str, die_info: dict[str, Any] | None = None) -
     if hint:
         return hint
 
+    # A binary blob renamed to .ps1/.bat must not skip the binary tools. The extension only
+    # needs NUL-free text (a legacy code page script may decode with replacement chars);
+    # content sniffing needs clean text.
+    # A .lnk file only counts as LNK when the header magic also matched above.
+    text = _decode_script_bytes(head)
+    if "\x00" in text:
+        return None
+
     extension = os.path.splitext(file_path)[1].lower()
     if extension in _EXTENSION_TYPES:
         return _EXTENSION_TYPES[extension]
-    # A .lnk file only counts as LNK when the header magic also matched above.
-
-    text = _decode_script_bytes(head)
     if not _looks_like_text(text):
         return None
     return _sniff_script_type(text)
@@ -371,13 +376,13 @@ def extract_script_iocs(text: str) -> dict[str, list[str]]:
 # --------------------------------------------------------------------------- #
 # Findings
 # --------------------------------------------------------------------------- #
-def _finding(kind: str, value: str, confidence: float, address: str = "") -> Finding:
+def _finding(kind: str, value: str, confidence: float) -> Finding:
     """Builds a script finding without a precomputed deterministic ID."""
     return Finding(
         source=SCRIPT_SOURCE,
         kind=kind,
         value=value,
-        address=address,
+        address="",  # script findings are global: "address" is a function offset
         confidence=confidence,
         finding_id="",
         verified=True,
@@ -409,6 +414,13 @@ _DEOBF_IOC_FINDINGS: tuple[tuple[str, str, float], ...] = (
     ("domain", "deobf_domain", 0.5),
 )
 _EMBEDDED_BINARY_KINDS = {"pe": "embedded_pe", "zip": "embedded_zip"}
+DEOBF_COMBO_KIND = "deobf_combo"
+ENCRYPTED_PAYLOAD_KIND = "encrypted_payload"
+# Opaque blobs below this size are usually icons/resources, not a hidden stage.
+MIN_ENCRYPTED_PAYLOAD_BYTES = 64 * 1024
+# Below the verdict's medium-authority floor: an encrypted blob explains an "unknown",
+# it is never evidence of maliciousness on its own.
+_ENCRYPTED_PAYLOAD_CONFIDENCE = 0.3
 
 
 def _deobf_enabled() -> bool:
@@ -427,30 +439,36 @@ def _deobf_findings(result: DeobfResult, raw_findings: Iterable[Finding]) -> lis
 
     findings: list[Finding] = []
     for layer in result.layers:
-        address = f"deobf:{layer.transform}"
         for rule in match_script_combos(layer.text):
             if rule in seen_combos:
                 continue
             seen_combos.add(rule)
-            findings.append(_finding("combo", rule, 0.8, address=address))
+            logger.debug("[script] deobf combo %s via %s", rule, layer.transform)
+            findings.append(_finding(DEOBF_COMBO_KIND, rule, 0.8))
         iocs = extract_script_iocs(layer.text)
         for raw_kind, kind, confidence in _DEOBF_IOC_FINDINGS:
             for value in iocs[raw_kind]:
                 if value in seen_iocs[raw_kind]:
                     continue
                 seen_iocs[raw_kind].add(value)
-                findings.append(_finding(kind, value, confidence, address=address))
+                findings.append(_finding(kind, value, confidence))
 
     for binary in result.binaries:
         kind = _EMBEDDED_BINARY_KINDS.get(binary.kind)
         if kind is None:
             continue
         findings.append(
+            _finding(kind, f"sha256={binary.sha256} size={binary.size} via={binary.transform}", 0.9)
+        )
+
+    for blob in result.opaque:
+        if blob.size < MIN_ENCRYPTED_PAYLOAD_BYTES:
+            continue
+        findings.append(
             _finding(
-                kind,
-                f"sha256={binary.sha256} size={binary.size}",
-                0.9,
-                address=f"deobf:{binary.transform}",
+                ENCRYPTED_PAYLOAD_KIND,
+                f"sha256={blob.sha256} size={blob.size} via={blob.transform}",
+                _ENCRYPTED_PAYLOAD_CONFIDENCE,
             )
         )
     return findings

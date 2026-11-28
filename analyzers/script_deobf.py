@@ -59,12 +59,22 @@ class EmbeddedBinary:
     transform: str
 
 
+@dataclass(frozen=True)
+class OpaqueBlob:
+    """A base64 blob that decoded to bytes no transform could open (likely encrypted)."""
+
+    sha256: str
+    size: int
+    transform: str
+
+
 @dataclass
 class DeobfResult:
     """All deterministic deobfuscation artefacts for one script."""
 
     layers: list[DecodedLayer] = field(default_factory=list)
     binaries: list[EmbeddedBinary] = field(default_factory=list)
+    opaque: list[OpaqueBlob] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
 
@@ -649,6 +659,7 @@ class _Context:
         self.budget = _Budget(MAX_TOTAL_DECODED_BYTES, result.notes)
         self._seen_layers: set[str] = set()
         self._seen_binaries: set[tuple[str, str, str]] = set()
+        self._seen_opaque: set[str] = set()
 
     def add_layer(self, text: str, transform: str, depth: int) -> bool:
         if not text or not 1 <= depth <= MAX_LAYERS:
@@ -670,6 +681,15 @@ class _Context:
         self.result.binaries.append(
             EmbeddedBinary(kind=kind, sha256=digest, size=len(payload), transform=transform)
         )
+
+    def add_opaque(self, payload: bytes, transform: str) -> None:
+        # The same blob is often found twice (as a plain run and as a line-chunk join).
+        digest = hashlib.sha256(payload).hexdigest()
+        if digest in self._seen_opaque:
+            return
+        self._seen_opaque.add(digest)
+        self.result.opaque.append(OpaqueBlob(sha256=digest, size=len(payload), transform=transform))
+        self.result.notes.append(f"undecodable/possibly encrypted binary ({len(payload)} bytes)")
 
     def consume_base64(self, payload: str, depth: int) -> None:
         core = "".join(payload.split()).rstrip("=")
@@ -706,9 +726,7 @@ class _Context:
         elif classified.kind == "text":
             self.add_layer(classified.text, transform, depth)
         else:
-            self.result.notes.append(
-                f"undecodable/possibly encrypted binary ({len(raw)} bytes)"
-            )
+            self.add_opaque(raw, transform)
 
 
 def deobfuscate(text: str) -> DeobfResult:

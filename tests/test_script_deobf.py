@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 import gzip
+import hashlib
+import random
 import time
 
 import analyzers.script_deobf as deobf
@@ -334,3 +336,37 @@ def test_deobfuscate_never_raises_on_garbage():
     result = deobfuscate("\x00\x01%zz\\q" * 1000)
     assert result.layers == []
     assert result.binaries == []
+
+
+# --------------------------------------------------------------------------- #
+# Opaque (likely encrypted) payloads
+# --------------------------------------------------------------------------- #
+def test_large_random_blob_is_one_opaque_entry_with_one_note():
+    # A multiple of 45 bytes encodes to full 60-char lines without "=" padding.
+    raw = random.Random(0).randbytes(45 * 1500)
+    blob = _b64(raw)
+    chunks = _line_chunks(raw)
+    assert len(chunks) == 1500 and all(len(chunk) == 60 for chunk in chunks)
+    # The same payload appears once as one long literal and once as split chunks.
+    lines = [f'var b = "{blob}";', 'WScript.Echo "sep";', f"$s = '{chunks[0]}'"]
+    lines += [f"$s += '{chunk}'" for chunk in chunks[1:]]
+
+    result = deobfuscate("\n".join(lines))
+
+    assert len(result.opaque) == 1
+    opaque = result.opaque[0]
+    assert opaque.sha256 == hashlib.sha256(raw).hexdigest()
+    assert opaque.size == len(raw)
+    assert opaque.transform.startswith("base64")
+    notes = [note for note in result.notes if "undecodable/possibly encrypted binary" in note]
+    assert len(notes) == 1
+
+
+def test_pe_and_text_payloads_are_not_opaque():
+    pe_result = deobfuscate(f'var p = "{_b64(_fake_pe())}";')
+    assert pe_result.opaque == []
+    assert pe_result.binaries
+
+    text_result = deobfuscate(f'var t = "{_b64(FILLER * 10 + URL)}";')
+    assert text_result.opaque == []
+    assert text_result.layers
