@@ -10,6 +10,21 @@ from llm_layer.verdict import SCRIPT_UNSUPPORTED_REASON, compute_verdict, is_cri
 COMBO = Finding(source="script", kind="combo", value="Download-Write-Execute", confidence=0.8)
 URL = Finding(source="script", kind="url", value="http://203.0.113.9/p.js", confidence=0.7)
 DOMAIN = Finding(source="script", kind="domain", value="example.net", confidence=0.5)
+ENCRYPTED = Finding(
+    source="script",
+    kind="encrypted_payload",
+    value="sha256=" + "0" * 64 + " size=67500 via=base64",
+    confidence=0.3,
+)
+DEOBF_COMBO = Finding(
+    source="script", kind="deobf_combo", value="Script Host Spawn", confidence=0.8
+)
+EMBEDDED_PE = Finding(
+    source="script",
+    kind="embedded_pe",
+    value="sha256=" + "1" * 64 + " size=239 via=base64",
+    confidence=0.9,
+)
 
 
 def test_script_url_is_critical_c2_but_combo_and_domain_are_not():
@@ -135,3 +150,48 @@ def test_triage_disabled_creates_no_client(monkeypatch):
     monkeypatch.setenv("CROWBAR_LLM_C2_TRIAGE", "0")
     monkeypatch.setattr(ln, "from_env", lambda: (_ for _ in ()).throw(AssertionError("no client")))
     run_reverser(_state("script", [COMBO, URL]))
+
+
+# --------------------------------------------------------------------------- #
+# Deobfuscation / encrypted payload verdicts
+# --------------------------------------------------------------------------- #
+def test_encrypted_payload_alone_explains_unknown():
+    v = compute_verdict([], [ENCRYPTED], {})
+    assert v["verdict"] == "unknown"
+    assert v["counts"]["signals"] == []
+    assert v["counts"]["medium_findings"] == 0
+    assert sum("encrypted payload" in reason for reason in v["unknown_reasons"]) == 1
+    assert any("payload key" in action for action in v["next_actions"])
+
+
+def test_encrypted_payload_with_combo_needs_review_and_notes_reason():
+    v = compute_verdict([], [ENCRYPTED, COMBO], {})
+    assert v["verdict"] == "needs_review"
+    assert any("encrypted payload" in reason for reason in v["reasons"])
+    assert not any("encrypted payload" in reason for reason in v["unknown_reasons"])
+
+
+def test_deobf_combo_alone_needs_review_with_script_signal():
+    v = compute_verdict([], [DEOBF_COMBO], {})
+    assert v["verdict"] == "needs_review"
+    assert "script" in v["counts"]["signals"]
+
+
+def test_embedded_pe_alone_needs_review_with_script_signal():
+    v = compute_verdict([], [EMBEDDED_PE], {})
+    assert v["verdict"] == "needs_review"
+    assert "script" in v["counts"]["signals"]
+
+
+def test_deobf_combo_plus_script_url_is_capped_at_review():
+    deobf_url = Finding(source="script", kind="deobf_url", value="http://203.0.113.9/p.js",
+                        confidence=0.7)
+    v = compute_verdict([], [DEOBF_COMBO, deobf_url], {})
+    assert v["verdict"] == "needs_review"
+    assert set(v["counts"]["signals"]) == {"c2", "script"}
+
+
+def test_deobf_combo_plus_independent_yara_is_malicious():
+    yara = Finding(source="yara", kind="rule", value="Some_Family", confidence=1.0)
+    v = compute_verdict([], [DEOBF_COMBO, yara], {})
+    assert v["verdict"] == "malicious"
